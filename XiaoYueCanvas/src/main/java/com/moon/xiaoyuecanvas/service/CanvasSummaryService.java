@@ -8,7 +8,8 @@ public interface CanvasSummaryService {
 
     ProjectSummary project(String projectId);
 
-    record CanvasSummary(String canvasId, int nodeCount, int edgeCount, int assetCount) {
+    /** coverAssetId：该画布内最早放入的图片资产，用于项目页画布列表封面。 */
+    record CanvasSummary(String canvasId, int nodeCount, int edgeCount, int assetCount, String coverAssetId) {
     }
 
     record ProjectSummary(int canvasCount, int nodeCount, int edgeCount, int assetCount) {

@@ -1,9 +1,17 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
 test('switches between compact nodes, full nodes, and individual expansion', async ({ page }) => {
   const projectId = 'node-display-project';
   const canvasId = 'node-display-canvas';
 
+  // 画布启动依赖 /api/auth/refresh 换 token；这里自闭环，避免依赖本机 ApiGateway。
+  await page.route('**/api/auth/refresh', (route) =>
+    route.fulfill({ json: { data: { accessToken: 'test-token', userId: 'test-user' } } }));
+  await page.route('**/api/auth/stream-ticket', (route) =>
+    route.fulfill({ json: { data: { ticket: 'test-ticket' } } }));
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api/canvas', '');

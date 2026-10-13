@@ -9,6 +9,7 @@ import { createVideoAsset, getVideoNodeSize } from '../utils/mediaPipeline';
 import { persistExistingCanvasAsset } from '../services/canvasMedia';
 import { processVideoRequest, probeVideoRequest } from '../services/videoProcessingService';
 import { createId } from '../utils/id';
+import { NodeFloatPanel, NodeSurface, NodeSurfaceEmpty } from './nodes/nodePanel';
 
 const formatDuration = (seconds?: number) =>
   typeof seconds === 'number' && Number.isFinite(seconds)
@@ -60,6 +61,11 @@ export function VideoMergeNode({ node }: { node: CanvasNode }) {
     [ids[index], ids[target]] = [ids[target], ids[index]];
     reorderOrderedInputs(node.id, 'clips', ids);
   };
+
+  const totalSeconds = clips.reduce(
+    (sum, { source }) => sum + (source.data.assetId ? metadata[source.data.assetId]?.durationSeconds ?? 0 : 0),
+    0,
+  );
 
   const mergeVideos = async () => {
     if (processing) return;
@@ -129,45 +135,60 @@ export function VideoMergeNode({ node }: { node: CanvasNode }) {
 
   return (
     <div className="video-merge-node">
-      <div className="video-merge-heading">
-        <div><Merge size={16} /><strong>片段顺序</strong></div>
-        <span>{clips.length}/12</span>
-      </div>
-      {clips.length ? (
-        <ol className="video-merge-list">
-          {clips.map(({ edge, source }, index) => (
-            <li key={edge.id}>
-              <span className="video-merge-order">{index + 1}</span>
-              <MergeClipThumbnail assetId={source.data.assetId} />
-              <span className="video-merge-name" title={source.data.label}>{source.data.label}</span>
-              <span className="video-merge-duration">{formatDuration(
-                source.data.assetId ? metadata[source.data.assetId]?.durationSeconds : undefined,
-              )}</span>
-              <div className="video-merge-actions nodrag">
-                <button aria-label={`上移 ${source.data.label}`} disabled={index === 0 || processing} onClick={() => move(index, -1)}><ChevronUp size={14} /></button>
-                <button aria-label={`下移 ${source.data.label}`} disabled={index === clips.length - 1 || processing} onClick={() => move(index, 1)}><ChevronDown size={14} /></button>
-                <button aria-label={`移除 ${source.data.label}`} disabled={processing} onClick={() => deleteEdge(edge.id)}><Trash2 size={13} /></button>
-              </div>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <div className="video-merge-empty"><Film size={22} /><span>连接至少两个视频节点</span></div>
-      )}
-      <div className="video-merge-footer">
-        <div>
-          {processing && <LoaderCircle className="video-tool-spinner" size={14} />}
-          <span>{processing ? `合并中 ${Math.round(progress * 100)}%` : feedback ?? '按当前顺序硬切拼接'}</span>
+      <NodeSurface state={clips.length >= 2 ? 'ready' : 'empty'} className="video-merge-surface">
+        {clips.length ? (
+          <div className="video-merge-summary">
+            <Film size={26} />
+            <strong>{clips.length} 个片段{totalSeconds ? ` · ${formatDuration(totalSeconds)}` : ''}</strong>
+            <span>{clips.length >= 2 ? '按片段顺序硬切拼接' : '再连接一个视频即可合并'}</span>
+          </div>
+        ) : (
+          <NodeSurfaceEmpty icon={<Film size={30} />} label="连接至少两个视频节点" hint="连接后在这里调整片段顺序并合并" />
+        )}
+      </NodeSurface>
+      <NodeFloatPanel nodeId={node.id} className="video-merge-panel">
+        <div className="video-merge-heading">
+          <div><Merge size={16} /><strong>片段顺序</strong></div>
+          <span>{clips.length}/12</span>
         </div>
-        {processing && <button className="video-merge-cancel nodrag" onClick={() => abortRef.current?.abort()}>取消</button>}
-        <button
-          className="node-upload node-upload--generate nodrag"
-          disabled={processing || clips.length < 2 || clips.some(({ source }) => !source.data.assetId)}
-          onClick={() => void mergeVideos()}
-        >
-          <Merge size={15} /> 合并视频
-        </button>
-      </div>
+        {clips.length ? (
+          <ol className="video-merge-list">
+            {clips.map(({ edge, source }, index) => (
+              <li key={edge.id}>
+                <span className="video-merge-order">{index + 1}</span>
+                <MergeClipThumbnail assetId={source.data.assetId} />
+                <span className="video-merge-name" title={source.data.label}>{source.data.label}</span>
+                <span className="video-merge-duration">{formatDuration(
+                  source.data.assetId ? metadata[source.data.assetId]?.durationSeconds : undefined,
+                )}</span>
+                <div className="video-merge-actions nodrag">
+                  <button aria-label={`上移 ${source.data.label}`} disabled={index === 0 || processing} onClick={() => move(index, -1)}><ChevronUp size={14} /></button>
+                  <button aria-label={`下移 ${source.data.label}`} disabled={index === clips.length - 1 || processing} onClick={() => move(index, 1)}><ChevronDown size={14} /></button>
+                  <button aria-label={`移除 ${source.data.label}`} disabled={processing} onClick={() => deleteEdge(edge.id)}><Trash2 size={13} /></button>
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="video-merge-empty"><Film size={22} /><span>连接至少两个视频节点</span></div>
+        )}
+        <div className="video-merge-footer">
+          <div className="video-merge-footer__status">
+            {processing && <LoaderCircle className="video-tool-spinner" size={14} />}
+            <span>{processing ? `合并中 ${Math.round(progress * 100)}%` : feedback ?? '按当前顺序硬切拼接'}</span>
+            {processing && <button className="video-merge-cancel nodrag" onClick={() => abortRef.current?.abort()}>取消</button>}
+          </div>
+          <div className="video-merge-footer__action">
+            <button
+              className="node-upload node-upload--generate nodrag"
+              disabled={processing || clips.length < 2 || clips.some(({ source }) => !source.data.assetId)}
+              onClick={() => void mergeVideos()}
+            >
+              <Merge size={15} /> 合并视频
+            </button>
+          </div>
+        </div>
+      </NodeFloatPanel>
       {feedback && <span className="sr-only" role="status">{feedback}</span>}
     </div>
   );

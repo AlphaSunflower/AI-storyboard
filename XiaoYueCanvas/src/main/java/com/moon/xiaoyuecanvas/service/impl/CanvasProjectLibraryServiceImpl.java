@@ -2,6 +2,7 @@ package com.moon.xiaoyuecanvas.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.entity.MorrowCanvas;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.service.MorrowCanvasService;
 import com.moon.xiaoyuecanvas.dto.response.CanvasProjectLibraryResponse;
 import com.moon.xiaoyuecanvas.entity.CanvasAsset;
@@ -32,15 +33,24 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
     private final AssetClient assetClient;
     private final MorrowCanvasService canvasService;
     private final CanvasAssetMapper canvasAssetMapper;
+    private final FileUrlSigner fileUrlSigner;
 
     public CanvasProjectLibraryServiceImpl(
             AssetClient assetClient,
             MorrowCanvasService canvasService,
-            CanvasAssetMapper canvasAssetMapper
+            CanvasAssetMapper canvasAssetMapper,
+            FileUrlSigner fileUrlSigner
     ) {
         this.assetClient = assetClient;
         this.canvasService = canvasService;
         this.canvasAssetMapper = canvasAssetMapper;
+        this.fileUrlSigner = fileUrlSigner;
+    }
+
+    /** 读取边界重签：库内 URL 的签名会过期（导入的素材还没有签名），返回前刷新 token。 */
+    private CanvasAsset signed(CanvasAsset asset) {
+        if (asset != null) asset.setObjectUrl(fileUrlSigner.signIfLocal(asset.getObjectUrl()));
+        return asset;
     }
 
     @Override
@@ -81,7 +91,7 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
                 .eq(CanvasAsset::getCanvasId, canvasId)
                 .eq(CanvasAsset::getLibraryAssetId, libraryAssetId)
                 .last("LIMIT 1"));
-        if (existing != null) return existing;
+        if (existing != null) return signed(existing);
 
         var detail = assetClient.getAssetInternal(libraryAssetId, userId);
         if (detail == null || detail.asset() == null || detail.media() == null || detail.media().isEmpty()) {
@@ -94,7 +104,7 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
                 .eq(CanvasAsset::getCanvasId, canvasId)
                 .eq(CanvasAsset::getObjectUrl, objectUrl)
                 .last("LIMIT 1"));
-        if (objectExisting != null) return objectExisting;
+        if (objectExisting != null) return signed(objectExisting);
 
         CanvasAsset asset = new CanvasAsset();
         asset.setId(UUID.randomUUID().toString());
@@ -116,10 +126,10 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
                     .eq(CanvasAsset::getCanvasId, canvasId)
                     .eq(CanvasAsset::getObjectUrl, objectUrl)
                     .last("LIMIT 1"));
-            if (concurrent != null) return concurrent;
+            if (concurrent != null) return signed(concurrent);
             throw duplicate;
         }
-        return asset;
+        return signed(asset);
     }
 
     @Override
@@ -131,7 +141,7 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
                 .eq(CanvasAsset::getCanvasId, canvasId)
                 .eq(CanvasAsset::getObjectKey, media.objectKey())
                 .last("LIMIT 1"));
-        if (existing != null) return existing;
+        if (existing != null) return signed(existing);
 
         CanvasAsset asset = new CanvasAsset();
         asset.setId(UUID.randomUUID().toString());
@@ -147,7 +157,7 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
         asset.setLibrarySyncState("ready");
         asset.setStatus("ready");
         canvasAssetMapper.insert(asset);
-        return asset;
+        return signed(asset);
     }
 
     @Override
@@ -198,7 +208,7 @@ public class CanvasProjectLibraryServiceImpl implements CanvasProjectLibraryServ
         if (imported.isEmpty()) {
             throw new BusinessException(40401, "资产集不存在可导入的媒体文件");
         }
-        return imported;
+        return imported.stream().map(this::signed).toList();
     }
 
     private void append(

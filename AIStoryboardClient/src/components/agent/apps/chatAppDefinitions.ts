@@ -43,14 +43,18 @@ export function canvasSiteBase(): string {
 export interface CanvasSiteLocation {
   projectId?: string;
   canvasId?: string;
+  /** 新窗口进入画布时随 URL 携带的媒体（画布子站再透传给内嵌 Moon 对话） */
+  media?: string[];
 }
 
 /** 画布网站自身的地址：不带 embedded / canvasMode，只保留项目与画布定位。 */
-export function buildCanvasSiteUrl({ projectId, canvasId }: CanvasSiteLocation = {}): string {
-  const hash = projectId
-    ? `#project=${encodeURIComponent(projectId)}${canvasId ? `&canvas=${encodeURIComponent(canvasId)}` : ''}`
+export function buildCanvasSiteUrl({ projectId, canvasId, media }: CanvasSiteLocation = {}): string {
+  if (!projectId) return canvasSiteBase();
+  const mediaParam = media?.length
+    ? `&media=${encodeURIComponent(JSON.stringify(media))}`
     : '';
-  return `${canvasSiteBase()}${hash}`;
+  return `${canvasSiteBase()}#project=${encodeURIComponent(projectId)}${
+    canvasId ? `&canvas=${encodeURIComponent(canvasId)}` : ''}${mediaParam}`;
 }
 
 /**

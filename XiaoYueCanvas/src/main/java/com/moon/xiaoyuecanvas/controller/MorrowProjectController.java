@@ -110,6 +110,7 @@ public class MorrowProjectController {
         out.put("nodeCount", summary == null ? 0 : summary.nodeCount());
         out.put("edgeCount", summary == null ? 0 : summary.edgeCount());
         out.put("assetCount", summary == null ? 0 : summary.assetCount());
+        out.put("coverAssetId", summary == null ? null : summary.coverAssetId());
         return out;
     }
 }

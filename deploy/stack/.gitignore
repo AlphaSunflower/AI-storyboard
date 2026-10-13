@@ -1,0 +1,8 @@
+# 统一部署栈本地产物（不入库）
+build/
+offline/
+.env
+db/*.dump
+db/admin-scrypt.txt
+db/03-post-migrate.sql
+*.log

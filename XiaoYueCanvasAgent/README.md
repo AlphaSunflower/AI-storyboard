@@ -19,49 +19,19 @@ npm run test:e2e
 - `verify`：TypeScript、Vitest、生产构建。
 - `test:e2e`：使用本机 Edge 执行真实浏览器闭环。
 
-## CLI 与 Bridge（本地命令入口）
+## 画布命令信箱（服务端投递 → 浏览器执行）
 
-浏览器画布通过一个常驻 Node Bridge 进程向 CLI/MCP 暴露统一命令层（`src/canvas/`）。外部进程不直接访问 Zustand、React 或 IndexedDB，所有读写都经过 Bridge 转发到浏览器执行。Bridge 同时在 `/mcp` 提供 Streamable HTTP MCP Server；服务端和管理接口必须携带 `X-Bridge-Token`。
+外部进程不直接访问 Zustand、React 或 IndexedDB：命令先投递到 canvas 服务的信箱端点，浏览器打开画布后每 1s 轮询领取，在页面内执行并回传结果。信箱在 canvas 服务里（`/api/canvas/bridge/**`），不再有独立的 Bridge 进程、8787 端口或 `X-Bridge-Token`。
 
-```bash
-npm run bridge   # 启动 Bridge + MCP（127.0.0.1:8787）
-npm run dev      # 启动 Vite，打开项目后浏览器自动注册到 Bridge
-```
-
-首次使用时，将 `.env.example` 复制为 `.env.development.local` 并确保两个令牌值相同。Bridge 和 Vite 都会自动读取本地环境文件。
-
-也可在当前终端临时设置令牌：
-
-```powershell
-$env:MORROW_BRIDGE_TOKEN="随机长令牌"
-$env:VITE_BRIDGE_TOKEN=$env:MORROW_BRIDGE_TOKEN
-npm run bridge   # 启动 Bridge + MCP（127.0.0.1:8787）
-npm run dev      # 启动 Vite，打开项目后浏览器自动注册到 Bridge
-```
-
-CLI 示例：
+- 端点：`POST /register`、`GET /poll`、`POST /result`、`POST /unregister`、`GET /health`，同源调用，身份走正常登录态（网关验签后注入 `X-User-Id`）。
+- 归属：标签按「用户 + 项目 + 画布」登记，同画布多标签时以最近注册的为活跃标签，活跃标签注销后自动回退。
+- 命令侧：Vue/React 之外的服务端 MCP 工具 `canvas_execute_node` / `canvas_execute_graph` / `canvas_get_execution` / `canvas_cancel_execution` 由 canvas 服务 `/api/canvas/mcp` 提供，MoonAgent 通过 `spring.ai.mcp.client.streamable-http.connections.canvas-server` 连接。
+- 时限：命令超时 11 分钟；浏览器心跳 30 秒（超过即视为未响应）；标签 15 分钟未轮询即失活。
+- 安全：删除类与执行类命令由服务端强制预览，调用方无法用 `dryRun=false` 绕过；未打开项目返回 `PROJECT_NOT_OPEN`，目标画布未打开返回 `CANVAS_NOT_OPEN`。
 
 ```bash
-node cli/morrow.ts canvas projects                        # 列出已打开的项目
-node cli/morrow.ts canvas summary --project <id>          # 画布摘要
-node cli/morrow.ts canvas nodes list --json               # 列出节点
-node cli/morrow.ts canvas node create_text --label 设计说明 --position 640,240
-node cli/morrow.ts canvas layout dag --dry-run            # 预览依赖层级布局
-node cli/morrow.ts canvas node delete --node <id>         # 删除节点
+npm run dev      # 启动 Vite，打开项目后浏览器自动注册到画布服务
 ```
-
-也可用 `npm run canvas -- ...`，或 `npm link` 后用 `morrow canvas ...`。
-
-环境变量：
-
-- `MORROW_BRIDGE_URL`：Bridge 地址（默认 `http://127.0.0.1:8787`）
-- `MORROW_BRIDGE_PORT`：Bridge 监听端口（默认 `8787`）
-- `MORROW_BRIDGE_TOKEN`：Bridge 访问令牌，服务端与 CLI 必填
-- `VITE_BRIDGE_TOKEN`：浏览器访问 Bridge 的同一令牌，开发时必须与 `MORROW_BRIDGE_TOKEN` 一致
-
-协议（`src/canvas/bridgeProtocol.ts`）：浏览器打开画布后 `POST /register` 注册 `projectId + projectTitle + canvasId + canvasTitle`、`GET /poll` 拉取命令；CLI `POST /command` 提交并阻塞等待结果。未打开的项目返回 `PROJECT_NOT_OPEN`；存在多个活动画布时 `canvas_get_context` 返回 `HUMAN_INPUT_REQUIRED`，MoonAgent 使用 `moon_request_human_input` 让用户按项目名和画布名点击选择，原始 ID 只作为隐藏参数传递。
-
-MCP 工具使用 `canvas_*` 命名，覆盖节点读取、创建、更新、删除、连线、布局、单节点执行、DAG 批跑和执行状态查询。MoonAgent 通过 `spring.ai.mcp.client.streamable-http.connections.canvas` 连接该端点；Bridge 未启动时 MoonAgent 可正常启动，并在后台重试连接。
 
 模型参数通过 `canvas_get_node_model_config` 与 `canvas_set_node_model_config` 管理：读取当前模型、网关兼容模型和递归参数 Schema；写入时严格校验枚举、范围和嵌套对象。模型及模型参数禁止通过 `canvas_update_node` 绕过校验。
 

@@ -13,6 +13,7 @@ export interface ModelParamSpecField {
   key: string;
   label?: string;
   type?: 'string' | 'number' | 'range' | 'bool' | 'boolean' | string;
+  options?: unknown[];
   min?: number;
   max?: number;
   default?: unknown;

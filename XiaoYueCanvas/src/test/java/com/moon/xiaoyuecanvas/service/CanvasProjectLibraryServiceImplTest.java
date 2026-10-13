@@ -1,6 +1,7 @@
 package com.moon.xiaoyuecanvas.service;
 
 import com.moon.moonagent.entity.MorrowCanvas;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.service.MorrowCanvasService;
 import com.moon.xiaoyuecanvas.entity.CanvasAsset;
 import com.moon.xiaoyuecanvas.mapper.CanvasAssetMapper;
@@ -23,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -31,6 +33,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CanvasProjectLibraryServiceImplTest {
+
+    private static final FileUrlSigner SIGNER = new FileUrlSigner("test-secret", 3600);
+
+    /** 去掉签名 query，便于断言 objectUrl 的路径部分。 */
+    private static String unsigned(String url) {
+        int query = url.indexOf('?');
+        return query >= 0 ? url.substring(0, query) : url;
+    }
 
     @Test
     void importGroupCreatesOneCanvasAssetForEveryGroupMedia() {
@@ -56,14 +66,16 @@ class CanvasProjectLibraryServiceImplTest {
         when(canvasAssetMapper.selectOne(any())).thenReturn(null);
 
         CanvasProjectLibraryService service = new CanvasProjectLibraryServiceImpl(
-                assetClient, canvasService, canvasAssetMapper);
+                assetClient, canvasService, canvasAssetMapper, SIGNER);
         List<CanvasAsset> imported = service.importGroup("user-1", "canvas-1", "group-1", "node-1");
 
         assertEquals(List.of("image", "video"), imported.stream().map(CanvasAsset::getType).toList());
         assertEquals(List.of("asset-image", "asset-video"),
                 imported.stream().map(CanvasAsset::getLibraryAssetId).toList());
         assertEquals(List.of("/api/files/images/reference.png", "/api/files/videos/reference.mp4"),
-                imported.stream().map(CanvasAsset::getObjectUrl).toList());
+                imported.stream().map(CanvasAsset::getObjectUrl).map(
+                        CanvasProjectLibraryServiceImplTest::unsigned).toList());
+        assertTrue(imported.stream().allMatch(asset -> asset.getObjectUrl().contains("?token=")));
         ArgumentCaptor<CanvasAsset> inserted = ArgumentCaptor.forClass(CanvasAsset.class);
         verify(canvasAssetMapper, times(2)).insert(inserted.capture());
         assertEquals("node-1", inserted.getAllValues().getFirst().getProducerNodeId());
@@ -90,10 +102,11 @@ class CanvasProjectLibraryServiceImplTest {
         when(canvasAssetMapper.selectOne(any())).thenReturn(null, existing);
 
         CanvasProjectLibraryService service = new CanvasProjectLibraryServiceImpl(
-                assetClient, canvasService, canvasAssetMapper);
+                assetClient, canvasService, canvasAssetMapper, SIGNER);
         CanvasAsset imported = service.importAsset("user-1", "canvas-1", "library-alias-2", "node-1");
 
         assertEquals(existing, imported);
+        assertTrue(imported.getObjectUrl().contains("?token="));
         verify(canvasAssetMapper, never()).insert(any(CanvasAsset.class));
     }
 
@@ -112,10 +125,11 @@ class CanvasProjectLibraryServiceImplTest {
         when(canvasAssetMapper.selectOne(any())).thenReturn(null);
 
         CanvasProjectLibraryService service = new CanvasProjectLibraryServiceImpl(
-                assetClient, canvasService, canvasAssetMapper);
+                assetClient, canvasService, canvasAssetMapper, SIGNER);
         CanvasAsset imported = service.importMedia("user-1", "canvas-1", "media-1", "node-1");
 
-        assertEquals("/api/files/images/library-1.png", imported.getObjectUrl());
+        assertEquals("/api/files/images/library-1.png", unsigned(imported.getObjectUrl()));
+        assertTrue(imported.getObjectUrl().contains("?token="));
         assertEquals("images/library-1.png", imported.getObjectKey());
         assertEquals("media-1", imported.getLibraryAssetId());
         assertEquals("node-1", imported.getProducerNodeId());

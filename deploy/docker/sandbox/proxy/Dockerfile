@@ -14,7 +14,9 @@ RUN apt-get update \
 
 COPY squid.conf.template /etc/moon-sandbox/squid.conf.template
 COPY entrypoint.sh /usr/local/bin/moon-sandbox-egress-proxy
-RUN chmod 0755 /usr/local/bin/moon-sandbox-egress-proxy
+# Windows 检出可能带 CRLF；去掉 \r，否则 shebang 变成 "#!/bin/sh\r" 导致 exec 失败
+RUN sed -i 's/\r$//' /usr/local/bin/moon-sandbox-egress-proxy \
+    && chmod 0755 /usr/local/bin/moon-sandbox-egress-proxy
 
 USER proxy
 EXPOSE 3128

@@ -93,7 +93,7 @@ describe('result slots', () => {
       expect.objectContaining({
         producerNodeId: 'producer',
         consumerNodeId: 'consumer',
-        inputPortId: 'source',
+        inputPortId: 'reference',
         kind: 'image',
       }),
     ]);

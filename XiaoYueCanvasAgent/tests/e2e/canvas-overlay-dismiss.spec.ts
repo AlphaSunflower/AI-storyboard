@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
 test('dismisses canvas overlays outside and toggles the execution panel', async ({ page }) => {
   const projectId = 'overlay-project';
@@ -10,9 +13,6 @@ test('dismisses canvas overlays outside and toggles the execution panel', async 
 
   await page.route('**/api/auth/refresh', (route) => {
     return route.fulfill({ json: { data: { accessToken, userId: 'test-user' } } });
-  });
-  await page.route('http://127.0.0.1:8787/**', (route) => {
-    return route.fulfill({ json: { ok: true } });
   });
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
@@ -35,6 +35,13 @@ test('dismisses canvas overlays outside and toggles the execution panel', async 
       return json({ ok: true });
     }
     return route.fulfill({ status: 404, json: { message: `unmocked ${request.method()} ${path}` } });
+  });
+  // 画布命令信箱已并入 canvas 服务，走同源 /api/canvas/bridge/**
+  await page.route('**/api/canvas/bridge/**', (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/api/canvas/bridge', '');
+    if (path === '/health') return route.fulfill({ json: { ok: true, version: 1, projects: [] } });
+    if (path === '/poll') return route.fulfill({ json: {} });
+    return route.fulfill({ json: { ok: true } });
   });
 
   await page.goto(`/#project=${projectId}&canvas=${canvasId}`);

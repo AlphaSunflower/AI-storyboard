@@ -93,6 +93,16 @@ export interface AgentTurnMetrics {
   durationMs: number;
   modelCalls: number;
   complete: boolean;
+  /** 所有模型调用的推理耗时合计（毫秒，不含工具执行）；旧后端缺失。 */
+  modelDurationMs?: number;
+  /** 所有工具执行的耗时合计（毫秒）；旧后端缺失。 */
+  toolDurationMs?: number;
+  /** 当前上下文组成估算：系统提示词 token（描述组成，非累加值）。 */
+  systemPromptTokens?: number;
+  /** 当前上下文组成估算：工具定义 token（描述组成，非累加值）。 */
+  toolDefinitionTokens?: number;
+  /** 当前上下文组成估算：对话消息 token（= contextTokens − 系统 − 工具）。 */
+  messageTokens?: number;
 }
 
 /** 智能体交接轨迹事件（agent_trace / message_end 下发） */

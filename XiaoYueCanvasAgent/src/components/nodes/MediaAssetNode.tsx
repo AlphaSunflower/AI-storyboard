@@ -1,5 +1,4 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { useStore } from '@xyflow/react';
 import { Image as ImageIcon, Upload } from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useMediaStore } from '../../store/mediaStore';
@@ -10,16 +9,16 @@ import type { CanvasNode } from '../../types';
 import { getMediaNodeSize } from '../../utils/mediaPipeline';
 import { ImageNodeTools } from '../ImageNodeTools';
 import { createPersistedCanvasAsset } from '../../services/canvasMedia';
+import { NodeFloatPanel, NodeSurface, NodeSurfaceEmpty } from './nodePanel';
 
-// media（image 媒体承载）节点 body：懒加载管线(visibility/objectUrl/lazy 变体) + 媒体帧/空态显示 + 上传与图片编辑工具。
-// 媒体渲染与编辑工具整体自持（不再依赖 MediaNode 顶层 state），MediaNode 只负责 chrome。
+// media（image 媒体承载）节点 body：懒加载管线(visibility/objectUrl/lazy 变体) + 媒体帧/空态显示 + 图片编辑工具。
+// 节点框内只放预览面；上传入口挂到框下的浮动面板（NodeFloatPanel），媒体渲染仍由本组件自持。
 function MediaAssetNodeComponent({ id, data, selected, node }: {
   id: string;
   data: CanvasNode['data'];
   selected: boolean;
   node: CanvasNode;
 }) {
-  const zoom = useStore((state) => state.transform[2]);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const upsertMetadata = useMediaStore((state) => state.upsertMetadata);
@@ -62,10 +61,14 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
     if (!visibility.visible) setLazyVariant(null);
   }, [visibility.visible]);
 
+  const uploadInput = (
+    <input ref={fileInput} className="canvas-file-input nodrag" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setUploadError(null); void createPersistedCanvasAsset(file, id).then((nextAsset) => { upsertAsset(nextAsset); attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getMediaNodeSize(nextAsset.width, nextAsset.height) }); }).catch((error) => setUploadError(error instanceof Error ? error.message : '图片导入失败')); }} />
+  );
+
   const content = !data.assetId
-    ? <div className="empty-image-node"><ImageIcon size={28} /><strong>空图片节点</strong><span>上传本地图片，或连接生成节点获取结果</span></div>
+    ? <NodeSurfaceEmpty icon={<ImageIcon size={30} />} label="空图片节点" hint="上传本地图片，或连接生成节点获取结果" />
     : assetError
-      ? <div className="empty-image-node"><ImageIcon size={28} /><strong>资产文件缺失</strong><span>{assetError}</span></div>
+      ? <NodeSurfaceEmpty icon={<ImageIcon size={30} />} label="资产文件缺失" hint={assetError} />
       : !metadata
         ? <div className="media-placeholder"><span>图片加载中…</span></div>
         : !mediaUrl
@@ -74,13 +77,20 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
 
   return (
     <div ref={visibility.ref} className="media-node-view">
-      {content}
-      {selected && !metadata && <>
-        <input ref={fileInput} className="canvas-file-input nodrag" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; setUploadError(null); void createPersistedCanvasAsset(file, id).then((nextAsset) => { upsertAsset(nextAsset); attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getMediaNodeSize(nextAsset.width, nextAsset.height) }); }).catch((error) => setUploadError(error instanceof Error ? error.message : '图片导入失败')); }} />
-        <button className="node-upload nodrag" onClick={() => fileInput.current?.click()}><Upload size={16} /> 上传图片</button>
+      <NodeSurface state={data.assetId && mediaUrl ? 'ready' : 'empty'}>
+        {content}
+      </NodeSurface>
+      <NodeFloatPanel nodeId={id} className="media-node-panel">
+        {uploadInput}
+        <button className="node-upload node-upload--panel nodrag" onClick={() => fileInput.current?.click()}>
+          <Upload size={15} /> {data.assetId ? '替换图片' : '上传图片'}
+        </button>
         {uploadError && <div className="node-upload-error nodrag">{uploadError}</div>}
-      </>}
-      {selected && asset && (data.kind === 'image' && data.assetId ? <ImageNodeTools node={node} /> : <div className="empty-node-note nodrag nowheel" style={{ '--inverse-zoom': 1 / zoom } as React.CSSProperties}>上传真实图片后可使用本地编辑工具</div>)}
+        {Boolean(data.assetId) && !selected && (
+          <p className="node-panel-status">选中节点后可使用本地编辑工具</p>
+        )}
+      </NodeFloatPanel>
+      {selected && asset && (data.kind === 'image' && data.assetId ? <ImageNodeTools node={node} /> : null)}
     </div>
   );
 }

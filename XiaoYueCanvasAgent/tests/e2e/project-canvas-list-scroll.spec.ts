@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
 test('keeps project, canvas, and project-library lists scrollable without page scrolling', async ({ page }) => {
   const projectId = 'scroll-project';
@@ -57,12 +60,13 @@ test('keeps project, canvas, and project-library lists scrollable without page s
   await page.route('**/api/auth/refresh', (route) => route.fulfill({
     json: { data: { accessToken: 'scroll-token', userId: 'scroll-user' } },
   }));
-  await page.route('http://127.0.0.1:8787/health', (route) => route.fulfill({
-    json: { ok: true, version: 1, projects: [] },
-  }));
-  await page.route('http://127.0.0.1:8787/register', (route) => route.fulfill({ json: { ok: true } }));
-  await page.route('http://127.0.0.1:8787/poll**', (route) => route.fulfill({ json: {} }));
-  await page.route('http://127.0.0.1:8787/unregister', (route) => route.fulfill({ json: { ok: true } }));
+  // 画布命令信箱已并入 canvas 服务，走同源 /api/canvas/bridge/**
+  await page.route('**/api/canvas/bridge/**', (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/api/canvas/bridge', '');
+    if (path === '/health') return route.fulfill({ json: { ok: true, version: 1, projects: [] } });
+    if (path === '/poll') return route.fulfill({ json: {} });
+    return route.fulfill({ json: { ok: true } });
+  });
 
   await page.goto('/');
 

@@ -1,0 +1,177 @@
+/* /chat 底部状态栏：替代免责声明，三组可点开的运行 / 用量 / 上下文入口。 */
+
+.chat-status-bar {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  /* 宽度贴合可见内容：浮层按本元素的 rect 定位，整列宽会把卡片甩到屏幕边缘 */
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  min-height: 18px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-muted-soft);
+}
+
+.chat-status-bar.is-empty {
+  text-align: center;
+}
+
+.chat-status-bar__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  max-width: 100%;
+  color: var(--color-muted-soft);
+}
+
+.chat-status-bar.is-compact .chat-status-bar__row {
+  font-size: 10.5px;
+}
+
+.chat-status-bar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.chat-status-bar__group:hover,
+.chat-status-bar__group:focus-visible {
+  background: var(--color-hover, rgba(0, 0, 0, 0.04));
+  color: var(--color-muted);
+  outline: none;
+}
+
+.chat-status-bar__group.is-open {
+  background: var(--color-hover, rgba(0, 0, 0, 0.04));
+  color: var(--color-muted);
+}
+
+.chat-status-bar__strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-status-bar__sep,
+.chat-status-bar__mid {
+  opacity: 0.55;
+}
+
+.chat-status-bar__speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 深色上浮卡片：运行统计 / Token 用量 / 上下文组成（挂到 body，向上展开） */
+.chat-status-card {
+  z-index: 1200;
+  box-sizing: border-box;
+  width: 236px;
+  min-width: 208px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(15, 17, 21);
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  box-shadow: 0 12px 30px rgba(15, 17, 21, 0.34);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  color: rgb(250, 249, 245);
+  animation: chat-status-card-in 160ms ease both;
+}
+
+.chat-status-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  font-weight: 600;
+}
+
+.chat-status-card__heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-status-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.chat-status-card__label {
+  color: rgb(160, 157, 150);
+}
+
+.chat-status-card__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-status-card__legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(160, 157, 150);
+}
+
+.chat-status-card__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.chat-status-card__empty {
+  color: rgb(160, 157, 150);
+}
+
+/* 上下文组成堆叠条：宽度 = 已用占比，三段按估算值比例铺满已用段 */
+.chat-context-detail__track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+
+.chat-context-detail__fill {
+  height: 100%;
+  display: flex;
+}
+
+@keyframes chat-status-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (max-width: 560px) {
+  .chat-status-bar__speed {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-status-card {
+    animation: none;
+  }
+}

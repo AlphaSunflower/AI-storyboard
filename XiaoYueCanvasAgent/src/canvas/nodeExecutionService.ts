@@ -17,6 +17,7 @@ import { jobAdapter } from '../services/capabilities';
 import { resolveResultSlots, validateResultSlotOwnership } from './resultSlots';
 import { useMediaStore } from '../store/mediaStore';
 import { getAsset } from '../services/projectStorage';
+import { resolveActionId } from './generationModes';
 
 export interface NodeExecutionHandle {
   jobId: string;
@@ -65,7 +66,10 @@ const executionParams = (node: CanvasNode, actionId: string): Record<string, unk
     ...(typeof data.resolution === 'string' ? { resolution: data.resolution } : {}),
     ...(typeof data.duration === 'number' ? { duration: data.duration } : {}),
     ...(typeof data.durationSeconds === 'number' ? { duration: data.durationSeconds } : {}),
-    ...(typeof data.videoMode === 'string' ? { videoMode: data.videoMode } : {}),
+    // 合并后的生成节点把模式存在 data.mode；旧字段 data.videoMode 继续兼容，对外仍发 videoMode
+    ...(typeof data.mode === 'string'
+      ? { videoMode: data.mode }
+      : typeof data.videoMode === 'string' ? { videoMode: data.videoMode } : {}),
     ...(typeof data.negativePrompt === 'string' ? { negativePrompt: data.negativePrompt } : {}),
   };
 };
@@ -110,9 +114,11 @@ export async function executeNodeAction(
   const definition = getNodeDefinition(node.data.kind);
   if (!definition) throw new Error(`节点类型 ${node.data.kind} 不支持执行`);
   const startable = definition.actions.filter((action) => action.automation.startable);
+  // 合并后的图片节点有两个动作（generate / redraw），默认动作由当前模式决定
+  const preferredActionId = resolveActionId(node.data.kind, node.data);
   const action = requestedActionId
     ? startable.find((candidate) => candidate.id === requestedActionId)
-    : startable[0];
+    : startable.find((candidate) => candidate.id === preferredActionId) ?? startable[0];
   if (!action) throw new Error(requestedActionId ? `节点动作 ${requestedActionId} 不可执行` : '节点没有可执行动作');
   const runnable = validateRunnable(graphOf(), nodeId, action.id);
   if (!runnable.ok) throw new Error(runnable.message ?? '节点输入不完整，暂时不能运行');

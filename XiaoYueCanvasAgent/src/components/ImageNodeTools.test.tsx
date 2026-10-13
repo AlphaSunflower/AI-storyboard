@@ -102,7 +102,9 @@ describe('ImageNodeTools multi-angle', () => {
     await waitFor(() => expect(useCanvasStore.getState().nodes).toHaveLength(2));
     const target = useCanvasStore.getState().nodes[1];
     expect(target.data).toMatchObject({
-      kind: 'imageToImage',
+      // 多角度并入合并后的「图片生成」节点，落在图生图模式
+      kind: 'imageGeneration',
+      mode: 'image2image',
       label: '角色图 · 多角度',
       multiAngle: {
         multiAngleMode: 'grid',

@@ -167,7 +167,7 @@ describe('canvas transactions', () => {
     const sourceId = useCanvasStore.getState().nodes[0].id;
     const batchId = useCanvasStore.getState().createConnectedNode(
       sourceId,
-      'batchImageRefine',
+      'imageGeneration',
       { x: 600, y: 0 },
       'image',
     );
@@ -176,7 +176,7 @@ describe('canvas transactions', () => {
     expect(useCanvasStore.getState().edges).toHaveLength(1);
     expect(useCanvasStore.getState().edges[0]).toMatchObject({
       target: batchId,
-      targetHandle: 'images',
+      targetHandle: 'reference',
       data: { portOrder: 0 },
     });
 
@@ -184,7 +184,7 @@ describe('canvas transactions', () => {
       batchId!,
       'image',
       { x: 300, y: 0 },
-      'images',
+      'reference',
     );
 
     expect(secondImageId).not.toBeNull();
@@ -192,7 +192,7 @@ describe('canvas transactions', () => {
     expect(useCanvasStore.getState().edges[1]).toMatchObject({
       source: secondImageId,
       target: batchId,
-      targetHandle: 'images',
+      targetHandle: 'reference',
       data: { portOrder: 1 },
     });
   });

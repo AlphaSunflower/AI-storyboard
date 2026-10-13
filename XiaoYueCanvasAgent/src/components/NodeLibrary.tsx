@@ -24,6 +24,8 @@ const icons = {
   imageToVideo: Video,
   firstLastFrameToVideo: Video,
   referenceToVideo: Video,
+  imageGeneration: Sparkles,
+  videoGeneration: Video,
   videoMerge: ListVideo,
 } satisfies Record<CanvasNodeKind, typeof Type>;
 

@@ -74,6 +74,86 @@ class CanvasRunToolAdapterTest {
     }
 
     @Test
+    void injectsRunScopeIntoBrowserExecuteTools() throws Exception {
+        ToolCallback callback = mock(ToolCallback.class);
+        ToolDefinition definition = mock(ToolDefinition.class);
+        when(definition.name()).thenReturn("canvas_execute_node");
+        when(definition.description()).thenReturn("execute node");
+        when(definition.inputSchema()).thenReturn("{\"type\":\"object\",\"properties\":{}}");
+        when(callback.getToolDefinition()).thenReturn(definition);
+        when(callback.call(any())).thenReturn("{\"ok\":true,\"jobId\":\"job-1\"}");
+        AgentCanvasRunService runs = mock(AgentCanvasRunService.class);
+        when(runs.findOperationResult("run-1", "run-1:call-1")).thenReturn(null);
+        when(runs.recordGraphResult(eq("run-1"), eq("run-1:call-1"), any()))
+                .thenAnswer(invocation -> invocation.getArgument(2));
+        AgentScopeTurnState turnState = new AgentScopeTurnState();
+        turnState.setActiveCanvasRun("run-1", "canvas-1");
+        RuntimeContext runtime = RuntimeContext.builder()
+                .userId("user-1")
+                .sessionId("conversation-1")
+                .put(AgentScopeRunContext.class, new AgentScopeRunContext(
+                        conversation(), null, null, turnState))
+                .build();
+        ToolCallParam param = ToolCallParam.builder()
+                .toolUseBlock(ToolUseBlock.builder()
+                        .id("call-1")
+                        .name("canvas_execute_node")
+                        .input(Map.of("nodeId", "node-1", "actionId", "generate"))
+                        .build())
+                .input(Map.of("nodeId", "node-1", "actionId", "generate"))
+                .runtimeContext(runtime)
+                .build();
+        CanvasRunToolAdapter adapter = new CanvasRunToolAdapter(callback, runs);
+
+        adapter.callAsync(param).block();
+
+        var inputCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(callback).call(inputCaptor.capture());
+        Map<String, Object> injected = JSON.readValue(
+                inputCaptor.getValue(), new TypeReference<>() {});
+        assertThat(injected)
+                .containsEntry("userId", "user-1")
+                .containsEntry("projectId", "project-1")
+                .containsEntry("canvasId", "canvas-1")
+                .containsEntry("runId", "run-1")
+                .containsEntry("operationKey", "run-1:call-1")
+                .containsEntry("nodeId", "node-1")
+                .containsEntry("actionId", "generate");
+        verify(runs).recordGraphResult(eq("run-1"), eq("run-1:call-1"), any());
+    }
+
+    @Test
+    void requiresCanvasRunBeforeExecutingInBrowser() {
+        ToolCallback callback = mock(ToolCallback.class);
+        ToolDefinition definition = mock(ToolDefinition.class);
+        when(definition.name()).thenReturn("canvas_execute_graph");
+        when(definition.description()).thenReturn("execute graph");
+        when(definition.inputSchema()).thenReturn("{\"type\":\"object\",\"properties\":{}}");
+        when(callback.getToolDefinition()).thenReturn(definition);
+        AgentCanvasRunService runs = mock(AgentCanvasRunService.class);
+        AgentScopeTurnState turnState = new AgentScopeTurnState();
+        RuntimeContext runtime = RuntimeContext.builder()
+                .userId("user-1")
+                .sessionId("conversation-1")
+                .put(AgentScopeRunContext.class, new AgentScopeRunContext(
+                        conversation(), null, null, turnState))
+                .build();
+        ToolCallParam param = ToolCallParam.builder()
+                .toolUseBlock(ToolUseBlock.builder()
+                        .id("call-1")
+                        .name("canvas_execute_graph")
+                        .input(Map.of())
+                        .build())
+                .runtimeContext(runtime)
+                .build();
+        CanvasRunToolAdapter adapter = new CanvasRunToolAdapter(callback, runs);
+
+        adapter.callAsync(param).block();
+
+        verify(callback, org.mockito.Mockito.never()).call(any());
+    }
+
+    @Test
     void recoversActiveRunFromTurnAfterHitlResume() throws Exception {
         ToolCallback callback = mock(ToolCallback.class);
         ToolDefinition definition = mock(ToolDefinition.class);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Boxes, ChevronLeft, FileText, Folder, Globe2, Image as ImageIcon, Layers, LoaderCircle, X } from 'lucide-react';
+import { Boxes, Check, ChevronLeft, FileText, Folder, Globe2, Image as ImageIcon, Layers, LoaderCircle, X } from 'lucide-react';
 import {
   libraryFolderChildren,
   loadCanvasProjectLibrary,
@@ -15,6 +15,10 @@ interface AssetDrawerProps {
   projectId: string;
   canvasId: string;
   onClose: () => void;
+  /** 多选上传模式：点选图片 / 视频，底部「上传到画布」把选中项落成节点。 */
+  selecting?: boolean;
+  onConfirmUpload?: (libraryAssetIds: string[]) => void;
+  uploading?: boolean;
 }
 
 interface FolderLocation {
@@ -25,13 +29,24 @@ interface FolderLocation {
 
 type LibraryFilter = 'all' | 'canvas' | 'groups';
 
-export function AssetDrawer({ projectId, canvasId, onClose }: AssetDrawerProps) {
+export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, onConfirmUpload, uploading = false }: AssetDrawerProps) {
   const [library, setLibrary] = useState<CanvasProjectLibraryResponse | null>(null);
   const [path, setPath] = useState<FolderLocation[]>([]);
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const currentFolder = path.at(-1) ?? null;
+
+  useEffect(() => {
+    if (!selecting) setSelectedIds([]);
+  }, [selecting]);
+
+  const toggleSelected = useCallback((assetId: string) => {
+    setSelectedIds((current) => current.includes(assetId)
+      ? current.filter((id) => id !== assetId)
+      : [...current, assetId]);
+  }, []);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -74,10 +89,14 @@ export function AssetDrawer({ projectId, canvasId, onClose }: AssetDrawerProps) 
       <header style={header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Layers size={16} />
-          <strong style={{ fontSize: 14 }}>项目库</strong>
+          <strong style={{ fontSize: 14 }}>{selecting ? '项目库 · 选择素材' : '项目库'}</strong>
         </div>
         <button onClick={onClose} aria-label="关闭项目库" style={iconButton}><X size={16} /></button>
       </header>
+
+      {selecting && (
+        <div style={selectHint}>勾选图片 / 视频，底部「上传到画布」按类型落成图片、视频节点</div>
+      )}
 
       <div style={filterRow}>
         <FilterButton active={filter === 'all'} label="全部" onClick={() => setFilter('all')} />
@@ -137,7 +156,13 @@ export function AssetDrawer({ projectId, canvasId, onClose }: AssetDrawerProps) 
                 <div style={sectionTitle}>项目画布素材 · {assets.length} 项</div>
                 {assets.length > 0 ? (
                   <div style={assetGrid}>
-                    {assets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} />)}
+                    {assets.map((asset) => <LibraryAssetCard
+                      key={asset.id}
+                      asset={asset}
+                      selecting={selecting}
+                      selected={selectedIds.includes(asset.id)}
+                      onToggle={toggleSelected}
+                    />)}
                   </div>
                 ) : (
                   <div style={empty}>当前目录暂无画布素材</div>
@@ -185,18 +210,46 @@ export function AssetDrawer({ projectId, canvasId, onClose }: AssetDrawerProps) 
           </>
         )}
       </div>
+      {selecting && (
+        <footer style={selectFooter}>
+          <span style={{ fontSize: 11, opacity: 0.72 }}>已选 {selectedIds.length} 项</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" style={selectCancel} onClick={() => setSelectedIds([])} disabled={!selectedIds.length}>清空</button>
+            <button
+              type="button"
+              style={{ ...selectConfirm, opacity: selectedIds.length && !uploading ? 1 : 0.45, cursor: selectedIds.length && !uploading ? 'pointer' : 'not-allowed' }}
+              disabled={!selectedIds.length || uploading}
+              onClick={() => onConfirmUpload?.(selectedIds)}
+            >
+              {uploading ? '上传中…' : '上传到画布'}
+            </button>
+          </div>
+        </footer>
+      )}
       <input type="hidden" value={canvasId} readOnly />
     </aside>
   );
 }
 
-function LibraryAssetCard({ asset }: { asset: CanvasLibraryAsset }) {
+function LibraryAssetCard({ asset, selecting, selected, onToggle }: {
+  asset: CanvasLibraryAsset;
+  selecting: boolean;
+  selected: boolean;
+  onToggle: (assetId: string) => void;
+}) {
   const [failed, setFailed] = useState(false);
   const canDrag = asset.type === 'IMAGE' || asset.type === 'VIDEO';
   const isDocument = asset.type === 'DOCUMENT' || asset.type === 'OTHER';
+  const selectable = canDrag;
+  const interactive = selecting ? selectable : canDrag;
   return (
     <div
-      draggable={canDrag}
+      role={selecting ? 'checkbox' : undefined}
+      aria-checked={selecting ? selected : undefined}
+      aria-label={selecting ? `选择素材 ${asset.name}` : undefined}
+      aria-disabled={selecting && !selectable ? true : undefined}
+      tabIndex={selecting && selectable ? 0 : undefined}
+      draggable={canDrag && !selecting}
       onDragStart={(event) => {
         if (!canDrag) return;
         event.dataTransfer.setData(LIBRARY_ASSET_DRAG_MIME, JSON.stringify({
@@ -206,10 +259,33 @@ function LibraryAssetCard({ asset }: { asset: CanvasLibraryAsset }) {
         }));
         event.dataTransfer.effectAllowed = 'copy';
       }}
-      style={assetCard}
-      title={canDrag ? '拖到画布上导入' : asset.name}
+      onClick={selecting && selectable ? () => onToggle(asset.id) : undefined}
+      onKeyDown={selecting && selectable
+        ? (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          onToggle(asset.id);
+        }
+        : undefined}
+      style={{
+        ...assetCard,
+        ...(selecting
+          ? {
+            cursor: selectable ? 'pointer' : 'not-allowed',
+            opacity: selectable ? 1 : 0.42,
+            borderColor: selected ? 'rgba(215,255,84,0.75)' : assetCard.borderColor,
+            background: selected ? 'rgba(215,255,84,0.10)' : assetCard.background,
+          }
+          : {}),
+      }}
+      title={selecting
+        ? (selectable ? (selected ? '点击取消选择' : '点击选择') : '仅支持图片 / 视频')
+        : (canDrag ? '拖到画布上导入' : asset.name)}
     >
       <div style={thumb}>
+        {selecting && selectable && (
+          <span style={{ ...selectBadge, opacity: selected ? 1 : 0.42 }} aria-hidden="true">{selected ? <Check size={12} /> : null}</span>
+        )}
         {isDocument ? (
           <FileText size={19} style={{ opacity: 0.55 }} />
         ) : asset.coverUrl && !failed ? (
@@ -238,9 +314,9 @@ function FilterButton({ active, label, onClick }: { active: boolean; label: stri
       onClick={onClick}
       style={{
         ...filterButton,
-        borderColor: active ? 'rgba(215,255,84,0.55)' : 'rgba(255,255,255,0.12)',
-        background: active ? 'rgba(215,255,84,0.12)' : 'transparent',
-        color: active ? '#d7ff54' : 'inherit',
+        borderColor: active ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.12)',
+        background: active ? 'rgba(255,255,255,0.12)' : 'transparent',
+        color: active ? '#f4f4f5' : 'inherit',
       }}
     >
       {label}
@@ -249,7 +325,8 @@ function FilterButton({ active, label, onClick }: { active: boolean; label: stri
 }
 
 const drawer: React.CSSProperties = {
-  position: 'absolute', left: 16, top: 16, bottom: 16, width: 300,
+  // 左侧工具岛（x 16~68）与项目栏（top 16~64）要留出来，否则抽屉会压住工具岛按钮
+  position: 'absolute', left: 80, top: 92, bottom: 16, width: 300,
   display: 'flex', flexDirection: 'column', boxSizing: 'border-box', zIndex: 40,
   background: 'rgba(24, 26, 30, 0.97)', borderRadius: 14,
   border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 12px 40px rgba(0,0,0,0.4)',
@@ -290,8 +367,29 @@ const assetCard: React.CSSProperties = {
   background: 'rgba(255,255,255,0.03)', cursor: 'grab',
 };
 const thumb: React.CSSProperties = {
+  position: 'relative',
   height: 66, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.05)',
   display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 5,
+};
+const selectBadge: React.CSSProperties = {
+  position: 'absolute', right: 4, top: 4, width: 16, height: 16, display: 'grid', placeItems: 'center',
+  borderRadius: 5, border: '1px solid rgba(215,255,84,0.75)', background: 'rgba(10,14,8,0.72)', color: '#d7ff54',
+};
+const selectHint: React.CSSProperties = {
+  padding: '8px 12px', fontSize: 10.5, lineHeight: 1.5, color: 'rgba(244,244,245,0.6)',
+  borderBottom: '1px solid rgba(255,255,255,0.07)',
+};
+const selectFooter: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.09)', background: 'rgba(255,255,255,0.02)',
+};
+const selectCancel: React.CSSProperties = {
+  padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)',
+  background: 'transparent', color: 'inherit', fontSize: 11, cursor: 'pointer',
+};
+const selectConfirm: React.CSSProperties = {
+  padding: '6px 12px', borderRadius: 8, border: 'none',
+  background: '#d7ff54', color: '#111311', fontSize: 11, fontWeight: 600,
 };
 const image: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover' };
 const ellipsis: React.CSSProperties = {
@@ -305,7 +403,7 @@ const groupCard: React.CSSProperties = {
 };
 const groupIcon: React.CSSProperties = {
   width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 8,
-  background: 'rgba(215,255,84,0.09)', color: '#d7ff54', flexShrink: 0,
+  background: 'rgba(255,255,255,0.09)', color: '#f4f4f5', flexShrink: 0,
 };
 const groupMeta: React.CSSProperties = { display: 'block', marginTop: 2, opacity: 0.48, fontSize: 9 };
 const empty: React.CSSProperties = {

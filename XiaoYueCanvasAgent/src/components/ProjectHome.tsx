@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, FileOutput, FolderOpen, Layers, Pencil, Plus, Trash2 } from 'lucide-react';
 import { AssetLibrary } from './AssetLibrary';
+import { useCanvasCoverUrl } from '../hooks/useCanvasCoverUrl';
 import type { CanvasSummary, ProjectDocumentV2 } from '../types';
 
 interface ProjectHomeProps {
@@ -85,7 +86,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
                 {canvases.map((canvas) => (
                   <article key={canvas.id} style={card}>
                     <button onClick={() => onOpenCanvas(canvas.id)} style={{ ...cardOpen, textAlign: 'left' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 96, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 12 }}><Layers size={26} style={{ opacity: 0.5 }} /></span>
+                      <CanvasCover canvasId={canvas.id} coverAssetId={canvas.coverAssetId} />
                       {renamingCanvasId === canvas.id ? (
                         <input autoFocus defaultValue={canvas.title} style={{ fontSize: 16, fontWeight: 600, background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.3)', color: 'inherit', width: '100%' }} onClick={(event) => event.stopPropagation()} onBlur={(event) => { onRenameCanvas(canvas.id, event.target.value.trim() || canvas.title); setRenamingCanvasId(null); }} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} />
                       ) : (
@@ -124,14 +125,26 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
   );
 }
 
+// 画布缩略图：有封面图时铺满卡片，缺图时回落到图标占位。
+function CanvasCover({ canvasId, coverAssetId }: { canvasId: string; coverAssetId?: string | null }) {
+  const coverUrl = useCanvasCoverUrl(canvasId, coverAssetId);
+  return (
+    <span className="project-home__cover" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 96, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 12, overflow: 'hidden' }}>
+      {coverUrl
+        ? <img className="project-home__cover-image" src={coverUrl} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <Layers size={26} style={{ opacity: 0.5 }} />}
+    </span>
+  );
+}
+
 const iconButton: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
 const ghostButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13 };
 const dangerButton: React.CSSProperties = { ...ghostButton, background: '#e5484d', borderColor: '#e5484d', color: '#fff' };
 const dangerGhostButton: React.CSSProperties = { ...iconButton, color: '#ff8a8e', width: 40, height: 40 };
-const primaryButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 9, border: 'none', background: '#d7ff54', color: '#1c1e22', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
+const primaryButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 9, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
 const card: React.CSSProperties = { padding: 16, borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)' };
 const cardOpen: React.CSSProperties = { display: 'block', width: '100%', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 };
 const miniButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 5, borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
 const miniDanger: React.CSSProperties = { ...miniButton, color: '#ff8a8e', borderColor: 'rgba(255,138,142,0.4)' };
-const tabActive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: 'none', background: '#d7ff54', color: '#1c1e22', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
+const tabActive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
 const tabInactive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13 };

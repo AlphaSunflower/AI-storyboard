@@ -103,6 +103,7 @@ public class AgentScopeEventMapper {
                 usage.put("outputTokens", value.getUsage().getOutputTokens());
                 usage.put("cachedTokens", value.getUsage().getCachedTokens());
                 usage.put("contextTokens", value.getUsage().getInputTokens());
+                usage.put("modelMs", Math.round(Math.max(0.0, value.getUsage().getTime()) * 1000.0));
                 if (contextWindowTokens > 0) {
                     usage.put("contextWindowTokens", contextWindowTokens);
                 }

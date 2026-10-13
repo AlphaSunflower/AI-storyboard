@@ -21,6 +21,7 @@ import { ChatDockShell, type ChatDockPresentation } from '../components/agent/Ch
 import {
   resolveChatDockMode,
   resolveChatSidebarCollapseWidth,
+  resolveChatSidebarDrag,
   resolveChatSplitMaxWidth,
   resolveChatColumnWidth,
   resolveViewportSidebarAction,
@@ -44,7 +45,7 @@ import { ConversationSearchModal } from '../components/agent/ConversationSearchM
 import { shouldShowFirstRunHero } from '../components/agent/sideChatFrame';
 import { agentApi } from '../api/agent';
 import { Moon } from 'lucide-react';
-import { X, FolderKanban, PanelLeftClose, ChevronDown, Info, User, LogOut, ArrowDown, Library, Search } from 'lucide-react';
+import { X, FolderKanban, PanelLeftClose, ChevronDown, ChevronsDown, Info, User, LogOut, Library, Search } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePresence } from '../hooks/usePresence';
@@ -55,12 +56,17 @@ import { useDocumentPreviewStore } from '../stores/documentPreviewStore';
 import { useSideChatSelectionStore } from '../stores/sideChatSelectionStore';
 import {
   buildCanvasRequestContext,
+  CANVAS_MEDIA_PARAM,
   loadCanvasEditContext,
   parseCanvasEditContext,
+  parseCanvasEditLock,
+  parseCanvasMediaParam,
   rebindCanvasEditContext,
   resolveCanvasModePhase,
 } from '../lib/canvasEditMode';
+import { chatScrollSnapshot, distanceToBottom } from '../lib/chatScrollState';
 import {
+  canvasBindingStatusText,
   isSideChatContextMessage,
   type CanvasModeReadyMessage,
   type CanvasModeStatusMessage,
@@ -146,6 +152,10 @@ export function ChatPage() {
   const [generationCenterOpen, setGenerationCenterOpen] = useState(false);
   const [generationCenterTab, setGenerationCenterTab] = useState<GenerationCenterTab>('active');
   const [showScrollDown, setShowScrollDown] = useState(false);
+  /** 消息区离开底部时输入卡收缩为单行（聚焦输入框或滚回底部即还原） */
+  const [compactComposer, setCompactComposer] = useState(false);
+  /** 输入卡当前是否收缩（含聚焦还原）：用于「回到底部」对齐卡片右边缘 */
+  const [composerCollapsed, setComposerCollapsed] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const openedCanvasSessionRef = useRef<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
@@ -167,6 +177,8 @@ export function ChatPage() {
   const sideProjectId = new URLSearchParams(window.location.search).get('projectId');
   const sideChatMode = !!embed && !!sideChatId;
   const [embedConvOpen, setEmbedConvOpen] = useState(false); // 紧凑模式会话列表 overlay
+  /** 画布子站里用户主动退出画布模式：默认开启，但允许经 / 菜单显式退出 */
+  const [canvasModeDetached, setCanvasModeDetached] = useState(false);
   const mobileScrollRef = useRef<HTMLDivElement>(null);
   const desktopScrollRef = useRef<HTMLDivElement>(null);
   /** 手机/桌面两套布局同时挂载（display 切换），滚动容器必须按当前可见分支取——
@@ -185,6 +197,8 @@ export function ChatPage() {
   const railProjectBtnRef = useRef<HTMLButtonElement>(null);
   const desktopProjectBtnRef = useRef<HTMLButtonElement>(null);
   const requestedCanvasContextRef = useRef(parseCanvasEditContext(window.location.search));
+  /** 画布网站内的 Moon 子站：画布模式恒定开启，本页不提供退出入口 */
+  const canvasEditLocked = useRef(parseCanvasEditLock(window.location.search)).current;
   const sideChat = useAgentStore((state) => state.sideChat);
   const closeSideChat = useAgentStore((state) => state.closeSideChat);
   const sideChatRef = useRef(sideChat);
@@ -201,29 +215,27 @@ export function ChatPage() {
     return () => window.removeEventListener('resize', updateViewportWidth);
   }, []);
 
-  // 回到最新消息（对话上翻较多时，消息中间出现向下按钮）
+  // 回到最新消息（对话上翻较多时，输入卡右侧出现「回到底部」）
   const scrollToBottom = () => {
     const el = activeScrollEl();
     setShowScrollDown(false);
+    setCompactComposer(false);
     nearBottomRef.current = true;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
 
-  const handleThreadWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowScrollDown((current) => {
-      if (e.deltaY > 1) return distanceToBottom >= 220;
-      if (e.deltaY < -1) return false;
-      return current;
-    });
-  };
-
+  /**
+   * 滚动（滚轮 / 拖动滑块 / 触屏滑动 / 键盘）统一按位置推导：
+   * 一离开底部就收起输入卡并露出「回到底部」；贴底则还原成完整输入卡。
+   * 输入卡常驻覆盖层 + 消息列固定底部内边距，缩放它不会反过来推动滚动位置，所以阈值可以贴着底部取。
+   */
   const handleThreadScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    nearBottomRef.current = distanceToBottom < 80;
-    if (distanceToBottom < 220) setShowScrollDown(false);
+    const distance = distanceToBottom(el);
+    const snapshot = chatScrollSnapshot(distance);
+    nearBottomRef.current = snapshot.nearBottom;
+    setShowScrollDown(snapshot.awayFromBottom);
+    setCompactComposer(snapshot.awayFromBottom);
     syncActiveRail();
   };
 
@@ -239,9 +251,7 @@ export function ChatPage() {
   const canvasTechActive = canvasPhase !== 'natural';
   const handleCanvasModeStatus = useCallback((message: CanvasModeStatusMessage) => {
     if (message.conversationId !== useAgentStore.getState().activeConversationId) return;
-    if (message.state === 'bridge-connecting') setCanvasBindingStatus('正在连接画布服务…');
-    else if (message.state === 'bridge-error') setCanvasBindingStatus(message.message || '画布服务未就绪，正在重试…');
-    else setCanvasBindingStatus('请选择要编辑的画布');
+    setCanvasBindingStatus(canvasBindingStatusText(message));
   }, [setCanvasBindingStatus]);
   const handleCanvasModeReady = useCallback((message: CanvasModeReadyMessage) => {
     const session = useAgentStore.getState().canvasSession;
@@ -320,13 +330,16 @@ export function ChatPage() {
   useEffect(() => {
     if (!canvasEditContext || canvasBinding) return;
     const existing = chatAppTabs.find((tab) => tab.key === 'canvas');
-    const matches = existing?.canvasMode?.conversationId === activeConversationId
+    // 未选中会话时 tab 里存的是空串，这里按同一口径比较，避免每次渲染都重开 tab
+    const expectedConversationId = activeConversationId ?? '';
+    const matches = !!existing?.canvasMode
+      && existing.canvasMode.conversationId === expectedConversationId
       && existing.canvasMode.projectId === canvasEditContext.projectId
       && existing.canvasMode.canvasId === canvasEditContext.canvasId;
     if (matches) return;
     openChatApp('canvas', {
       canvasMode: {
-        conversationId: activeConversationId ?? '',
+        conversationId: expectedConversationId,
         projectId: canvasEditContext.projectId,
         canvasId: canvasEditContext.canvasId,
         parentOrigin: window.location.origin,
@@ -335,10 +348,44 @@ export function ChatPage() {
   }, [activeConversationId, canvasBinding, canvasEditContext, openChatApp, chatAppTabs]);
 
   useEffect(() => {
+    if (canvasEditLocked && !canvasModeDetached) return;
     if (!canvasExitPending || streaming || waitingHumanInput || waitingVideoPlan) return;
     exitCanvasModeNow();
     releaseCanvasMode();
-  }, [canvasExitPending, releaseCanvasMode, exitCanvasModeNow, streaming, waitingHumanInput, waitingVideoPlan]);
+  }, [canvasEditLocked, canvasModeDetached, canvasExitPending, releaseCanvasMode, exitCanvasModeNow, streaming, waitingHumanInput, waitingVideoPlan]);
+
+  // 子站默认画布模式：上下文若被清空（且用户没有主动退出）就按 URL 目标恢复。
+  useEffect(() => {
+    if (!canvasEditLocked || canvasModeDetached || canvasEditContext) return;
+    const requested = requestedCanvasContextRef.current;
+    if (requested) useAgentStore.getState().setCanvasEditContext(requested);
+  }, [canvasEditLocked, canvasModeDetached, canvasEditContext]);
+
+  /** / 菜单：退出画布模式（回到普通 Moon 对话） */
+  const exitCanvasEditMode = useCallback(() => {
+    setCanvasModeDetached(true);
+    leaveCanvasEditMode();
+    releaseCanvasMode();
+  }, [leaveCanvasEditMode, releaseCanvasMode]);
+
+  /** / 菜单：重新进入当前画布的编辑模式 */
+  const enterCanvasEditMode = useCallback(() => {
+    setCanvasModeDetached(false);
+    const requested = requestedCanvasContextRef.current;
+    if (requested) useAgentStore.getState().setCanvasEditContext(requested);
+  }, []);
+
+  const canvasModeCommand = useMemo(
+    () => (canvasEditLocked && requestedCanvasContextRef.current
+      ? {
+        active: !!canvasEditContext,
+        restorable: true,
+        onExit: exitCanvasEditMode,
+        onEnter: enterCanvasEditMode,
+      }
+      : undefined),
+    [canvasEditContext, canvasEditLocked, enterCanvasEditMode, exitCanvasEditMode],
+  );
 
   useEffect(() => {
     if (canvasPhase !== 'natural' && projectOpen) setProjectOpen(false);
@@ -363,6 +410,24 @@ export function ChatPage() {
     } else if (window.self !== window.top) {
       const persisted = loadCanvasEditContext();
       if (persisted) useAgentStore.getState().setCanvasEditContext(persisted);
+    }
+    // 「去画布编辑」带过来的媒体：画布编辑会话挂成画布媒体；普通 /chat 退化为输入框参考素材
+    const incomingMedia = parseCanvasMediaParam(params.get(CANVAS_MEDIA_PARAM));
+    if (incomingMedia.length > 0) {
+      const state = useAgentStore.getState();
+      if (state.canvasEditContext) {
+        state.addCanvasMediaRefs(incomingMedia);
+      } else {
+        const images = incomingMedia.filter((ref) => ref.kind === 'image' && ref.url).map((ref) => ref.url!);
+        const videos = incomingMedia.filter((ref) => ref.kind === 'video' && ref.url).map((ref) => ref.url!);
+        if (images.length > 0) state.addRefImageUrls(images);
+        if (videos.length > 0) {
+          state.setPickedReferenceMedia(
+            [...new Set([...state.pickedReferenceVideos, ...videos])],
+            state.pickedReferenceAudios,
+          );
+        }
+      }
     }
     void useAuthStore.getState().checkAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -489,8 +554,10 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!embed || !activeConversationId || canvasEditContext) return;
+    // 子站画布模式以 URL 为准，不再按会话里的历史画布态回补/清空（否则会和 URL 目标来回打架）
+    if (canvasEditLocked) return;
     void useAgentStore.getState().restoreCanvasMode(activeConversationId);
-  }, [embed, activeConversationId, canvasEditContext]);
+  }, [canvasEditLocked, embed, activeConversationId, canvasEditContext]);
 
   useEffect(() => {
     if (!sideChatMode || !sideChatId) return;
@@ -656,12 +723,6 @@ export function ChatPage() {
     setCollapsed(false);
   }, []);
 
-  const handleManualCollapseSidebar = useCallback(() => {
-    autoCollapsedSidebarRef.current = false;
-    manualSidebarExpandRef.current = false;
-    setCollapsed(true);
-  }, []);
-
   const openGenerationCenter = useCallback((tab: GenerationCenterTab = 'active') => {
     setGenerationCenterTab(tab);
     setGenerationCenterOpen(true);
@@ -746,6 +807,16 @@ export function ChatPage() {
   }, []);
 
   const desktopRightReserve = dockMode === 'docked' ? 0 : contentRightReserve;
+  /** 底部输入卡留白：与 .chat-composer-dock 实际 padding 一致，「回到底部」据此右对齐到卡片边缘 */
+  const dockPadLeft = 16;
+  const dockPadRight = !embed ? desktopRightReserve + 16 : 16;
+  /** 输入卡宽度：收缩态横向收窄，「回到底部」跟着卡片右边缘走 */
+  const composerCardMax = composerCollapsed ? DS.maxContentCompact : DS.maxContent;
+  /** 消息列底部留白：输入卡 + 底部状态栏是覆盖层，留够高度让最后一条能完整滚出来；小窗收紧一些 */
+  const stageBottomPad = embed ? 182 : 216;
+  const mobileStageBottomPad = 200;
+  const scrollToBottomRight = (padLeft: number, padRight: number, cardMax: number = DS.maxContent) =>
+    `calc(${padRight}px + max(0px, (100% - ${padLeft}px - ${padRight}px - ${cardMax}px) / 2))`;
 
   // 手机端：选择会话后自动关闭侧栏
   const handleMobileSelectConversation = (id: string) => {
@@ -766,16 +837,43 @@ export function ChatPage() {
     setConvResizing(true);
     const startX = e.clientX;
     const startW = convWidth;
-    const onMouseMove = (ev: MouseEvent) => {
-      setConvWidth(Math.min(360, Math.max(180, startW + ev.clientX - startX)));
-    };
     const onMouseUp = () => {
       setConvResizing(false);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
+    const onMouseMove = (ev: MouseEvent) => {
+      const outcome = resolveChatSidebarDrag({ startWidth: startW, deltaX: ev.clientX - startX });
+      if (outcome.action === 'collapse') {
+        // 拖到最窄即收起成图标 rail：顶部的「收起侧边栏」按钮已移除
+        autoCollapsedSidebarRef.current = false;
+        manualSidebarExpandRef.current = false;
+        setCollapsed(true);
+        onMouseUp();
+        return;
+      }
+      setConvWidth(outcome.width);
+    };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+  }, [convWidth]);
+
+  /** 键盘等价操作：←/→ 调整宽度，拖到最窄（←到底）即收起 */
+  const handleConvResizeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const step = e.shiftKey ? 32 : 8;
+    const outcome = resolveChatSidebarDrag({
+      startWidth: convWidth,
+      deltaX: e.key === 'ArrowLeft' ? -step : step,
+    });
+    if (outcome.action === 'collapse') {
+      autoCollapsedSidebarRef.current = false;
+      manualSidebarExpandRef.current = false;
+      setCollapsed(true);
+      return;
+    }
+    setConvWidth(outcome.width);
   }, [convWidth]);
 
   // 全局阻止浏览器默认打开文件；实际上传仅由 ChatComposer 接收。
@@ -854,7 +952,7 @@ export function ChatPage() {
               <div style={{ fontSize: 13, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
             <div style={{ width: '100%', maxWidth: 480 }}>
-              <ChatComposer enableSideChat={false} />
+              <ChatComposer enableSideChat={false} canvasModeCommand={canvasModeCommand} />
             </div>
             {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips（手机端） */}
@@ -875,18 +973,29 @@ export function ChatPage() {
           </div>
         ) : (
           <>
+            {/* 消息区 + 输入卡：收缩态输入卡浮在消息之上，半透明底才看得出来 */}
+            <div
+              className="chat-thread-region"
+              style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+            >
             {/* 消息列 */}
             <div
               ref={mobileScrollRef}
               onScroll={handleThreadScroll}
-              onWheel={handleThreadWheel}
               className="chat-thread-scroll"
               style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
             >
               <div
                 key={activeConversationId ?? 'new-conversation'}
                 className="chat-thread-stage"
-                style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '16px 12px', display: 'flex', flexDirection: 'column' }}
+                style={{
+                  maxWidth: DS.maxContent,
+                  margin: '0 auto',
+                  // 固定底部留白：输入卡常驻覆盖层，滚动几何不随它缩放而变
+                  padding: `16px 12px ${mobileStageBottomPad}px`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
               >
                 {messageHasMore && (
                   <button
@@ -969,8 +1078,63 @@ export function ChatPage() {
             </div>
 
             {/* 底部输入卡 */}
-            <div className="chat-composer-dock" style={{ padding: '8px 12px 12px 12px', background: 'white' }}>
-              <ChatComposer enableSideChat={false} />
+            <div
+              className="chat-composer-anchor"
+              style={{
+                // 常驻覆盖层：输入卡浮在消息之上（收缩半透明才看得出来），消息列用固定底部留白避让
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 45,
+              }}
+            >
+              {scrollDownPresence.mounted && !isEmpty && !(dockMode === 'docked' && dockPresentation === 'open') && (
+                <button
+                  onClick={scrollToBottom}
+                  type="button"
+                  className={`chat-scroll-down${scrollDownPresence.visible ? ' is-open' : ''}${scrollDownPresence.closing ? ' is-closing' : ''}`}
+                  aria-label="回到底部"
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    right: scrollToBottomRight(12, 12, composerCardMax),
+                    zIndex: 60,
+                    height: 32,
+                    padding: '0 12px',
+                    borderRadius: 999,
+                    border: '1px solid var(--color-hairline)',
+                    background: 'white',
+                    color: 'var(--color-muted)',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <span>回到底部</span>
+                  <ChevronsDown size={14} strokeWidth={2} />
+                </button>
+              )}
+              <div
+                className="chat-composer-dock"
+                style={{
+                  padding: '8px 12px 12px 12px',
+                  background: 'transparent',
+                }}
+              >
+                <ChatComposer
+                  enableSideChat={false}
+                  canvasModeCommand={canvasModeCommand}
+                  compact={compactComposer}
+                  onCollapsedChange={setComposerCollapsed}
+                />
+              </div>
+            </div>
             </div>
           </>
         )}
@@ -1090,25 +1254,6 @@ export function ChatPage() {
                         </span>
                       </button>
                       </Tooltip>
-                      <Tooltip side="bottom" label="收起侧边栏">
-                      <button
-                        onClick={handleManualCollapseSidebar}
-                        aria-label="收起侧边栏"
-                        aria-expanded={!collapsed}
-                        className="chat-icon-button"
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
-                          color: 'var(--color-muted)', borderRadius: 8,
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
-                      >
-                        <span className="chat-icon-motion chat-icon-motion--collapse">
-                          <PanelLeftClose size={15} strokeWidth={1.8} />
-                        </span>
-                      </button>
-                      </Tooltip>
                     </div>
                     </TooltipGroup>
                   }
@@ -1186,10 +1331,16 @@ export function ChatPage() {
           {!collapsed && (
             <div
               onMouseDown={handleConvDrag}
+              onKeyDown={handleConvResizeKeyDown}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整侧边栏宽度，拖到最窄即收起"
+              title="拖动调整宽度，拖到最窄即收起"
+              tabIndex={0}
               style={{
                 width: 6, cursor: 'col-resize', background: 'transparent', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s',
+                transition: 'background 0.15s', outlineOffset: 2,
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = DS.brand; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -1288,7 +1439,7 @@ export function ChatPage() {
                 style={{ position: 'absolute', top: 8, left: 8, border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3 }}
               ><Moon size={12} strokeWidth={1.8} /> 会话</button>
             )}
-            {embed && canvasEditContext && (
+            {embed && canvasEditContext && !canvasEditLocked && (
               <div style={{ position: 'absolute', top: 8, right: 8 }}>
                 <CanvasModeExitButton />
               </div>
@@ -1306,7 +1457,14 @@ export function ChatPage() {
                 </div>
               </>
             )}
-            <ChatComposer enableSideChat={sideChatCommandEnabled} />
+            <ChatComposer
+              enableSideChat={sideChatCommandEnabled}
+              canvasModeCommand={canvasModeCommand}
+              docked={dockMode === 'docked'}
+              onViewConversation={dockMode === 'docked'
+                ? () => setDockPresentation('history')
+                : undefined}
+            />
             {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips */}
             {dockMode !== 'docked' && (
@@ -1383,7 +1541,7 @@ export function ChatPage() {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {embed && canvasEditContext && <CanvasModeExitButton />}
+                {embed && canvasEditContext && !canvasEditLocked && <CanvasModeExitButton />}
                 {!embed && dockMode !== 'docked' && (
                   <ChatAppActions
                     onOpen={handleChatAppOpen}
@@ -1396,10 +1554,14 @@ export function ChatPage() {
             </div>
 
             {/* 消息列：748px 居中 */}
+            {/* 消息区 + 输入卡：收缩态输入卡浮在消息之上，半透明底才看得出来 */}
+            <div
+              className="chat-thread-region"
+              style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+            >
             <div
               ref={desktopScrollRef}
               onScroll={handleThreadScroll}
-              onWheel={handleThreadWheel}
               className="chat-thread-scroll"
               style={{
                 flex: 1,
@@ -1415,7 +1577,14 @@ export function ChatPage() {
               <div
                 key={activeConversationId ?? 'new-conversation'}
                 className="chat-thread-stage"
-                style={{ maxWidth: DS.maxContent, margin: '0 auto', padding: '24px 16px 16px', display: 'flex', flexDirection: 'column' }}
+                style={{
+                  maxWidth: DS.maxContent,
+                  margin: '0 auto',
+                  // 固定底部留白：输入卡常驻覆盖层，滚动几何不随它缩放而变
+                  padding: `24px 16px ${stageBottomPad}px`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
               >
                 {messageHasMore && (
                   <button
@@ -1511,37 +1680,69 @@ export function ChatPage() {
               </div>
             </div>
 
-            {/* 底部输入卡 */}
-            <div className="chat-composer-dock" style={{
-              padding: '8px 16px 16px',
-              paddingRight: !embed ? desktopRightReserve + 16 : 16,
-              background: 'white',
-              transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }}>
-              <ChatComposer enableSideChat={sideChatCommandEnabled} />
+            {/* 底部输入卡 + 回到底部：同一个相对容器里定位，按钮右对齐到输入卡右边缘 */}
+            <div
+              className="chat-composer-anchor"
+              style={{
+                // 常驻覆盖层：输入卡浮在消息之上（收缩半透明才看得出来），消息列用固定底部留白避让
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 45,
+              }}
+            >
+              {scrollDownPresence.mounted && !isEmpty && !(dockMode === 'docked' && dockPresentation === 'open') && (
+                <button
+                  onClick={scrollToBottom}
+                  type="button"
+                  className={`chat-scroll-down${scrollDownPresence.visible ? ' is-open' : ''}${scrollDownPresence.closing ? ' is-closing' : ''}`}
+                  aria-label="回到底部"
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    right: scrollToBottomRight(dockPadLeft, dockPadRight, composerCardMax),
+                    zIndex: 60,
+                    height: 34,
+                    padding: '0 14px',
+                    borderRadius: 999,
+                    border: '1px solid var(--color-hairline)',
+                    background: 'white',
+                    color: 'var(--color-muted)',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    whiteSpace: 'nowrap',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
+                >
+                  <span>回到底部</span>
+                  <ChevronsDown size={15} strokeWidth={2} />
+                </button>
+              )}
+              <div className="chat-composer-dock" style={{
+                padding: '8px 16px 16px',
+                paddingRight: dockPadRight,
+                background: 'transparent',
+                transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}>
+                <ChatComposer
+                  enableSideChat={sideChatCommandEnabled}
+                  canvasModeCommand={canvasModeCommand}
+                  compact={compactComposer}
+                  onCollapsedChange={setComposerCollapsed}
+                  docked
+                  onViewConversation={() => setDockPresentation('history')}
+                />
+              </div>
+            </div>
             </div>
           </>
-        )}
-        {scrollDownPresence.mounted && !isEmpty && !(dockMode === 'docked' && dockPresentation === 'open') && (
-          <button
-            onClick={scrollToBottom}
-            title="跳到最后一个消息"
-            aria-label="跳到最后一个消息"
-            className={`chat-scroll-down${scrollDownPresence.visible ? ' is-open' : ''}${scrollDownPresence.closing ? ' is-closing' : ''}`}
-            style={{
-              position: 'absolute', bottom: 176,
-              left: !embed && desktopRightReserve
-                ? `calc(50% - ${desktopRightReserve / 2}px - 17px)`
-                : 'calc(50% - 17px)',
-              zIndex: 60,
-              width: 34, height: 34, borderRadius: '50%',
-              border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)',
-              cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
-          ><ArrowDown size={16} strokeWidth={2} /></button>
         )}
         </ChatDockShell>
       </div>

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { prepareCanvasApp } from './support/canvasAuth';
 
 const projectId = 'asset-library-project';
 const canvasId = 'asset-library-canvas';
@@ -239,10 +240,7 @@ const mockCanvasApi = async (page: Page) => {
 };
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
-    localStorage.setItem('morrow_job_token', `header.${payload}.signature`);
-  });
+  await prepareCanvasApp(page);
 });
 
 test('shows one project library containing folders, canvas assets, global assets, and asset sets', async ({ page }) => {

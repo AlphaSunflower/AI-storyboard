@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.document.AgentDocumentService;
 import com.moon.moonagent.ai.agent.document.DocumentSummaryView;
+import com.moon.moonagent.ai.agent.canvas.CanvasContextPromptBuilder;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
@@ -33,6 +34,8 @@ final class TurnContextMiddleware implements MiddlewareBase {
         if (runContext == null || runContext.request() == null) return Mono.just(prompt);
         OrchestrationRequest request = runContext.request();
         List<String> lines = new ArrayList<>();
+        String canvasMode = CanvasContextPromptBuilder.build(request.getCanvasContext());
+        if (!canvasMode.isBlank()) lines.add(canvasMode);
         AgentScopeTurnState turnState = runContext.turnState();
         if (turnState != null) {
             lines.add("Reference input mode: " + turnState.referenceInputMode().name());

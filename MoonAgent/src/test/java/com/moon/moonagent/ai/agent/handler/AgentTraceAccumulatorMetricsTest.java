@@ -105,4 +105,24 @@ class AgentTraceAccumulatorMetricsTest {
         assertThat(secondMetrics.modelCalls()).isEqualTo(1);
         assertThat(firstMetrics.durationMs()).isGreaterThanOrEqualTo(0L);
     }
+
+    @Test
+    void carriesModelTimeAndContextBreakdownIntoMetrics() {
+        OrchestrationRequest request = new OrchestrationRequest(
+                new AgentConversation(), "hello", List.of(), new SseEmitter());
+        AgentTraceAccumulator trace = new AgentTraceAccumulator(request);
+        trace.setContextBreakdown(1_500L, 5_600L);
+        trace.beginModelCall();
+        trace.recordUsage(50_000, 400, 40_000, 1_750L);
+        trace.beginToolCall("call-1");
+        trace.endToolCall("call-1");
+
+        AgentTurnMetrics metrics = trace.turnMetrics();
+
+        assertThat(metrics.modelDurationMs()).isEqualTo(1_750L);
+        assertThat(metrics.toolDurationMs()).isGreaterThanOrEqualTo(0L);
+        assertThat(metrics.systemPromptTokens()).isEqualTo(1_500L);
+        assertThat(metrics.toolDefinitionTokens()).isEqualTo(5_600L);
+        assertThat(metrics.messageTokens()).isEqualTo(50_000L - 1_500L - 5_600L);
+    }
 }

@@ -22,6 +22,8 @@ export type NodeKind =
   | 'imageToVideo'
   | 'firstLastFrameToVideo'
   | 'referenceToVideo'
+  | 'imageGeneration'
+  | 'videoGeneration'
   | 'videoMerge';
 export type MediaKind = NodeKind;
 export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error' | 'cancelled';
@@ -213,6 +215,8 @@ export interface MediaNodeData extends Record<string, unknown> {
   multiAngle?: MultiAngleRequest;
   videoPrompt?: string;
   videoMode?: string;
+  /** 合并后的生成节点模式（生图：text2image/fullReference/image2image/batchRefine；生视频：text2video/fullReference/firstLastFrame/videoReference）。 */
+  mode?: string;
   videoReferences?: string[];
   videoParams?: VideoGenerationParams;
   playlist?: VideoClip[];
@@ -393,6 +397,8 @@ export interface CanvasSummary {
   updatedAt: number;
   nodeCount: number;
   assetCount: number;
+  /** 画布封面：第一个放入画布的图片资产（后端 list 接口返回，缺失时前端回退本地缓存）。 */
+  coverAssetId?: string | null;
 }
 
 export interface ProjectSummary {

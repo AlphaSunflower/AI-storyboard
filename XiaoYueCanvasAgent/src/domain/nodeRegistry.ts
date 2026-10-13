@@ -89,7 +89,7 @@ export const NODE_DEFS: Record<string, NodeDef> = {
     capabilities: { hasImage: false, hasPrompt: false, hasExport: false, hasTools: false },
     // 批注是终端注释，不允许连出
     connectivity: { maxInputs: 0, maxOutputs: 0, acceptTypes: [] },
-    createDefaultData: () => ({ kind: 'note', label: '批注', richText: '', prompt: '', status: 'idle', accent: '#d7ff54' }),
+    createDefaultData: () => ({ kind: 'note', label: '批注', richText: '', prompt: '', status: 'idle', accent: '#e5e7eb' }),
   },
   prompt: {
     type: 'prompt', key: 'prompt', menuLabel: '提示词', menuIcon: 'prompt', category: '文本',

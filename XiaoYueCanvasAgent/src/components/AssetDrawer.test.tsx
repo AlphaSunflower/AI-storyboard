@@ -71,6 +71,46 @@ describe('AssetDrawer', () => {
     ));
   });
 
+  it('multi-selects library assets and hands the chosen ids to the upload callback', async () => {
+    vi.mocked(loadCanvasProjectLibrary).mockResolvedValue({
+      projectTree: { scope: 'PROJECT', ownerProjectId: 'p1', folders: [], unfiledAssetCount: 3 },
+      globalTree: { scope: 'GLOBAL', ownerProjectId: null, folders: [], unfiledAssetCount: 0 },
+      assets: [
+        asset('image-1', '参考图', 'upload', 'PROJECT'),
+        { ...asset('video-1', '参考视频', 'upload', 'PROJECT'), type: 'VIDEO' as const },
+        { ...asset('doc-1', '说明文档', 'upload', 'PROJECT'), type: 'DOCUMENT' as const },
+      ],
+      groups: [],
+    });
+    const onConfirmUpload = vi.fn();
+
+    render(
+      <AssetDrawer
+        projectId="p1"
+        canvasId="c1"
+        selecting
+        onConfirmUpload={onConfirmUpload}
+        onClose={() => undefined}
+      />,
+    );
+
+    // 非图片 / 视频素材在多选模式下不可选
+    const document = await screen.findByRole('checkbox', { name: '选择素材 说明文档' });
+    expect(document.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: '上传到画布' }).hasAttribute('disabled')).toBe(true);
+
+    const image = screen.getByRole('checkbox', { name: '选择素材 参考图' });
+    fireEvent.click(image);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择素材 参考视频' }));
+    fireEvent.click(document);
+
+    expect(image.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('已选 2 项')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '上传到画布' }));
+    expect(onConfirmUpload).toHaveBeenCalledWith(['image-1', 'video-1']);
+  });
+
   it('marks images, videos, and asset sets as draggable with their library type', async () => {
     vi.mocked(loadCanvasProjectLibrary).mockResolvedValue({
       projectTree: { scope: 'PROJECT', ownerProjectId: 'p1', folders: [], unfiledAssetCount: 3 },

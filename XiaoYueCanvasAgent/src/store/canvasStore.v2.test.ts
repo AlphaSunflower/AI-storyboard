@@ -20,11 +20,13 @@ describe('CanvasGraphV2 store bridge', () => {
     const node = useCanvasStore.getState().nodes.find((item) => item.id === id);
 
     expect(node).toMatchObject({
-      type: 'textToImage',
-      width: 520,
-      height: 420,
+      type: 'imageGeneration',
+      width: 480,
+      height: 560,
     });
-    expect(node?.data.kind).toBe('textToImage');
+    expect(node?.data.kind).toBe('imageGeneration');
+    // 旧 kind 别名进来也要落到合并后的节点与模式
+    expect(node?.data.mode).toBe('text2image');
   });
 
   it('keeps generation record updates out of undo history', () => {

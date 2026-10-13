@@ -61,6 +61,7 @@ class CanvasGraphCommandServiceImplTest {
                 assetMapper,
                 libraryService,
                 fileStorageService,
+                new com.moon.moonagent.security.FileUrlSigner("test-secret", 3600),
                 "http://localhost:8082");
     }
 

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { prepareCanvasApp } from './support/canvasAuth';
 
 const assertInsideViewport = async (page: Page, selector: string) => {
   const box = await page.locator(selector).last().boundingBox();
@@ -16,10 +17,7 @@ const assertNoHorizontalOverflow = async (page: Page) => {
 
 test('adapts every canvas page to a phone viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => {
-    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
-    localStorage.setItem('morrow_job_token', `header.${payload}.signature`);
-  });
+  await prepareCanvasApp(page);
   await page.route('**/api/canvas/**', async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -100,8 +98,12 @@ test('adapts every canvas page to a phone viewport', async ({ page }) => {
   await assertNoHorizontalOverflow(page);
   await assertInsideViewport(page, '.asset-drawer-panel');
   await page.getByRole('button', { name: '关闭项目库' }).click();
+  await expect(page.getByLabel('项目库抽屉')).toHaveCount(0);
 
-  await page.getByRole('button', { name: '生成记录' }).click();
+  // 430px 以下工具岛会隐藏“生成记录”按钮，移动端的入口在任务队列面板里
+  await page.getByRole('button', { name: '任务队列' }).click();
+  await page.getByRole('dialog', { name: '任务队列' })
+    .getByRole('button', { name: '生成记录' }).click();
   await expect(page.getByRole('heading', { name: '生成记录' })).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await assertInsideViewport(page, '.generation-records-panel');

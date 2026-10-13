@@ -9,6 +9,7 @@ import {
   type CanvasEdgeV2,
 } from './graphContracts';
 import { canConnectFromPort, canConnectToPort } from '../store/canvasStore';
+import { resolveActionId } from './generationModes';
 
 const node = (id: string, kind: CanvasNodeKind): CanvasNodeV2 => ({
   id,
@@ -122,6 +123,7 @@ describe('validateEdge', () => {
       sourceHandle: 'image',
       target: target.id,
       targetHandle: 'source',
+      data: { portOrder: 1 },
     }, 'pipeline')).toMatchObject({
       ok: false,
       code: 'CYCLE',
@@ -174,9 +176,18 @@ describe('validateRunnable', () => {
 });
 
 describe('node action registry', () => {
-  it('maps image-to-image and batch refinement to image.redraw', () => {
-    expect(getNodeDefinition('imageToImage')?.actions[0].capabilityId).toBe('image.redraw');
-    expect(getNodeDefinition('batchImageRefine')?.actions[0].capabilityId).toBe('image.redraw');
+  it('keeps both generation capabilities on the merged image node and picks by mode', () => {
+    expect(getNodeDefinition('imageToImage')?.actions.map((action) => action.capabilityId)).toEqual([
+      'image.generate',
+      'image.redraw',
+    ]);
+    expect(getNodeDefinition('batchImageRefine')?.kind).toBe('imageGeneration');
+    expect(getNodeDefinition('textToImage')?.kind).toBe('imageGeneration');
+    expect(getNodeDefinition('videoGeneration')?.actions.map((action) => action.id)).toEqual(['generate']);
+    expect(resolveActionId('imageToImage', {})).toBe('redraw');
+    expect(resolveActionId('batchImageRefine', {})).toBe('redraw');
+    expect(resolveActionId('textToImage', {})).toBe('generate');
+    expect(resolveActionId('videoGeneration', { mode: 'firstLastFrame' })).toBe('generate');
   });
 
   it('keeps both shot production actions in the registry', () => {
@@ -193,6 +204,11 @@ describe('port-specific connection menus', () => {
     expect(canConnectToPort('storyboardPlanner', 'script', 'image')).toBe(false);
     expect(canConnectToPort('storyboardPlanner', 'reference', 'image')).toBe(true);
     expect(canConnectToPort('storyboardPlanner', 'reference', 'script')).toBe(false);
+  });
+
+  it('lets a plain text node drive storyboard planning now that script is retired', () => {
+    expect(canConnectToPort('storyboardPlanner', 'script', 'text')).toBe(true);
+    expect(canConnectFromPort('text', 'text', 'storyboardPlanner')).toBe(true);
   });
 
   it('filters downstream targets from the exact dragged source handle', () => {

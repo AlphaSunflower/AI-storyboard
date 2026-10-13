@@ -6,6 +6,7 @@ import com.moon.moonagent.entity.MorrowCanvas;
 import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.moonagent.service.MorrowCanvasService;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.xiaoyuecanvas.entity.CanvasAsset;
 import com.moon.xiaoyuecanvas.mapper.CanvasAssetMapper;
 import com.moon.xiaoyuecanvas.service.CanvasAssetService;
@@ -39,6 +40,7 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
     private final AgentAssetMapper agentAssetMapper;
     private final FileStorageService fileStorageService;
     private final AssetClient assetClient;
+    private final FileUrlSigner fileUrlSigner;
 
     @Override
     public CanvasAsset upload(String userId, String canvasId, String producerNodeId,
@@ -50,7 +52,7 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
                 userId, canvas, producerNodeId, normalizedType, objectUrl, null);
         canvasAssetMapper.insert(asset);
         syncLibraryAsset(asset);
-        return asset;
+        return signed(asset);
     }
 
     @Override
@@ -99,7 +101,7 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
                 linked.add(findExisting(canvasId, generationRecordId, durableUrl));
             }
         }
-        return linked;
+        return linked.stream().map(this::signed).toList();
     }
 
     @Override
@@ -107,7 +109,10 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
         canvasService.get(userId, canvasId);
         return canvasAssetMapper.selectList(new LambdaQueryWrapper<CanvasAsset>()
                 .eq(CanvasAsset::getCanvasId, canvasId)
-                .orderByDesc(CanvasAsset::getCreatedAt));
+                .orderByDesc(CanvasAsset::getCreatedAt))
+                .stream()
+                .map(this::signed)
+                .toList();
     }
 
     @Override
@@ -115,6 +120,12 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
         CanvasAsset asset = canvasAssetMapper.selectById(assetId);
         if (asset == null) throw new BusinessException(40401, "画布资产不存在");
         canvasService.get(userId, asset.getCanvasId());
+        return signed(asset);
+    }
+
+    /** 读取边界重签：库内 URL 的签名会过期，返回前端/网关前刷新 token。 */
+    private CanvasAsset signed(CanvasAsset asset) {
+        if (asset != null) asset.setObjectUrl(fileUrlSigner.signIfLocal(asset.getObjectUrl()));
         return asset;
     }
 
@@ -229,14 +240,22 @@ public class CanvasAssetServiceImpl implements CanvasAssetService {
     }
 
     private static String objectKey(String objectUrl) {
-        if (objectUrl == null || !objectUrl.startsWith(FILE_URL_PREFIX)) {
+        String clean = unsigned(objectUrl);
+        if (!clean.startsWith(FILE_URL_PREFIX)) {
             throw new BusinessException(50201, "资产地址不在 MinIO 文件路径下: " + objectUrl);
         }
-        return objectUrl.substring(FILE_URL_PREFIX.length());
+        return clean.substring(FILE_URL_PREFIX.length());
+    }
+
+    /** 去掉 /api/files/** 上的 HMAC 签名 query：签名不参与 object key 与文件名。 */
+    private static String unsigned(String url) {
+        if (url == null) return "";
+        int query = url.indexOf('?');
+        return query >= 0 ? url.substring(0, query) : url;
     }
 
     private static String filename(String url) {
-        int slash = url.lastIndexOf('/');
-        return slash >= 0 ? url.substring(slash + 1) : url;
+        int slash = unsigned(url).lastIndexOf('/');
+        return slash >= 0 ? unsigned(url).substring(slash + 1) : unsigned(url);
     }
 }

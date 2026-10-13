@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { EmbeddedAppDescriptor } from './EmbeddedAppWindow';
+import type { CanvasModeOptions, EmbeddedAppDescriptor } from './EmbeddedAppWindow';
 import {
   buildChatAppDescriptor,
   type ChatAppKey,
@@ -12,6 +12,30 @@ export interface ChatAppLayout {
   height: number;
   fullscreen: boolean;
   minimized: boolean;
+}
+
+function sameCanvasMode(a?: CanvasModeOptions, b?: CanvasModeOptions): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.conversationId === b.conversationId
+    && a.projectId === b.projectId
+    && a.canvasId === b.canvasId
+    && a.parentOrigin === b.parentOrigin;
+}
+
+/**
+ * 同一个 key 的 tab 内容没变时保持原数组引用。
+ * open() 会被多个「确保 tab 已打开」的 effect 调用，若每次都产出新对象，
+ * 依赖 chatAppTabs 的 effect 会被反复触发，形成 setState 死循环。
+ */
+function isSameDescriptor(current: EmbeddedAppDescriptor, next: EmbeddedAppDescriptor): boolean {
+  return current.key === next.key
+    && current.url === next.url
+    && current.projectId === next.projectId
+    && current.title === next.title
+    && sameCanvasMode(current.canvasMode, next.canvasMode)
+    && JSON.stringify(current.documentAttachment ?? null)
+      === JSON.stringify(next.documentAttachment ?? null);
 }
 
 export function useChatApps(currentProject: ChatAppProject | null) {
@@ -30,10 +54,11 @@ export function useChatApps(currentProject: ChatAppProject | null) {
     setTabs((currentTabs) => {
       const existingIndex = currentTabs.findIndex((tab) => tab.key === key);
       if (existingIndex < 0) return [...currentTabs, nextTab];
+      if (isSameDescriptor(currentTabs[existingIndex], nextTab)) return currentTabs;
       return currentTabs.map((tab) => tab.key === key ? nextTab : tab);
     });
     setActiveKey(key);
-    setLayout((current) => ({ ...current, minimized: false }));
+    setLayout((current) => (current.minimized ? { ...current, minimized: false } : current));
   }, [currentProject]);
 
   useEffect(() => {

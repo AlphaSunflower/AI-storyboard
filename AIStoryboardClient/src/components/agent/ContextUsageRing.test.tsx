@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ContextUsageRing } from './ContextUsageRing';
 
 afterEach(cleanup);
@@ -49,5 +49,45 @@ describe('ContextUsageRing', () => {
 
     rerender(<ContextUsageRing usedTokens={124_000} limitTokens={128_000} />);
     expect(strokeOf()).toBe('rgb(217, 45, 32)');
+  });
+
+  it('calls onToggle when the clickable ring is activated', () => {
+    const onToggle = vi.fn();
+    render(
+      <ContextUsageRing
+        usedTokens={70_000}
+        limitTokens={1_000_000}
+        onToggle={onToggle}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('meter'));
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the ring expanded and suppresses the hover tip while the card is open', () => {
+    render(<ContextUsageRing usedTokens={70_000} limitTokens={1_000_000} open onToggle={() => {}} />);
+
+    expect(screen.getByRole('meter').getAttribute('aria-expanded')).toBe('true');
+    fireEvent.mouseEnter(anchor());
+    expect(document.querySelector('.chat-context-tip')).toBeNull();
+  });
+
+  it('is not interactive for a read-only conversation', () => {
+    const onToggle = vi.fn();
+    render(
+      <ContextUsageRing
+        usedTokens={70_000}
+        limitTokens={1_000_000}
+        disabled
+        onToggle={onToggle}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('meter'));
+
+    expect(onToggle).not.toHaveBeenCalled();
+    expect(screen.getByRole('meter').getAttribute('aria-expanded')).toBeNull();
   });
 });

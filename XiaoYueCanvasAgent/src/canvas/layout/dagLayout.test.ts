@@ -173,13 +173,13 @@ describe('ELK DAG layout', () => {
   });
 
   it('stacks fan-in inputs vertically to the left of their shared target', async () => {
-    const target = node('refine', 'batchImageRefine', { x: 800, y: 200 }, { width: 520, height: 420 });
+    const target = node('refine', 'imageGeneration', { x: 800, y: 200 }, { width: 520, height: 420 });
     const inputWidths = [250, 420, 340];
     const inputs = ['one', 'two', 'three'].map((id, index) =>
       node(`image-${id}`, 'image', { x: 100 + index * 320, y: 200 }, { width: inputWidths[index], height: 250 }));
     const nodes = [...inputs, target];
     const edges = inputs.map((input, index) =>
-      edge(`edge-${index}`, input.id, 'image', target.id, 'images'));
+      edge(`edge-${index}`, input.id, 'image', target.id, 'reference'));
 
     const positions = await computeDagLayout(nodes, edges, {
       anchor: { x: 80, y: 60 },
@@ -203,11 +203,11 @@ describe('ELK DAG layout', () => {
     const firstProducer = node('first-producer', 'textToImage', { x: 400, y: 0 }, { width: 360, height: 300 });
     const firstImage = node('first-image', 'image', { x: 800, y: 0 }, { width: 250, height: 250 });
     const secondScript = node('second-script', 'script', { x: 0, y: 500 }, { width: 300, height: 200 });
-    const secondProducer = node('second-producer', 'textToImage', { x: 400, y: 500 }, { width: 360, height: 300 });
+    const secondProducer = node('second-producer', 'imageGeneration', { x: 400, y: 500 }, { width: 360, height: 300 });
     const secondImage = node('second-image', 'image', { x: 800, y: 500 }, { width: 250, height: 250 });
-    const thirdProducer = node('third-producer', 'imageToImage', { x: 1_200, y: 500 }, { width: 360, height: 300 });
+    const thirdProducer = node('third-producer', 'imageGeneration', { x: 1_200, y: 500 }, { width: 360, height: 300 });
     const thirdImage = node('third-image', 'image', { x: 1_600, y: 500 }, { width: 250, height: 250 });
-    const target = node('target', 'batchImageRefine', { x: 2_100, y: 250 }, { width: 520, height: 420 });
+    const target = node('target', 'imageGeneration', { x: 2_100, y: 250 }, { width: 520, height: 420 });
     const nodes = [
       firstScript, firstProducer, firstImage,
       secondScript, secondProducer, secondImage,
@@ -218,10 +218,10 @@ describe('ELK DAG layout', () => {
       edge('fp-fi', firstProducer.id, 'image', firstImage.id, 'origin'),
       edge('ss-sp', secondScript.id, 'script', secondProducer.id, 'prompt'),
       edge('sp-si', secondProducer.id, 'image', secondImage.id, 'origin'),
-      edge('si-tp', secondImage.id, 'image', thirdProducer.id, 'source'),
+      edge('si-tp', secondImage.id, 'image', thirdProducer.id, 'reference'),
       edge('tp-ti', thirdProducer.id, 'image', thirdImage.id, 'origin'),
-      edge('fi-target', firstImage.id, 'image', target.id, 'images'),
-      edge('ti-target', thirdImage.id, 'image', target.id, 'images'),
+      edge('fi-target', firstImage.id, 'image', target.id, 'reference'),
+      edge('ti-target', thirdImage.id, 'image', target.id, 'reference'),
     ];
 
     const positions = await computeDagLayout(nodes, edges, { gapX: 180, gapY: 80 });

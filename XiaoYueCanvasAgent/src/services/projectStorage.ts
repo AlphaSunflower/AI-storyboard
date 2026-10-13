@@ -5,6 +5,7 @@ import type { Viewport } from '@xyflow/react';
 import { createId } from '../utils/id';
 import { apiJson } from './morrowApi';
 import { migrateCanvasGraphV1ToV2 } from '../canvas/graphMigration';
+import { mergedGenerationKind } from '../canvas/generationModes';
 import type { GenerationQueueItem } from '../canvas/generationQueue';
 
 // Use a new versioned namespace instead of attempting to migrate the former demo prototype.
@@ -329,6 +330,11 @@ export async function saveProject(project: ProjectDocumentV2) {
   await apiJson(`/projects/${encodeURIComponent(project.id)}`, { method: 'PATCH', body: JSON.stringify({ title: project.title }) });
 }
 
+/** 按 id 重命名项目（项目切换列表里的重命名，不需要先把项目加载成当前项目）。 */
+export async function renameProject(projectId: string, title: string) {
+  await apiJson(`/projects/${encodeURIComponent(projectId)}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+}
+
 export async function loadProject(projectId: string): Promise<ProjectDocumentV2 | undefined> {
   try {
     const p = await apiJson<{ id: string; title: string }>(`/projects/${encodeURIComponent(projectId)}`);
@@ -497,10 +503,19 @@ function applyGraph(canvas: CanvasDocumentV1, dto: CanvasGraphDto): CanvasDocume
 
 function normalizeCanvasGraph(canvas: CanvasDocumentV1): CanvasDocumentV1 {
   const legacyKinds = new Set(['prompt', 'sequence', 'imageGen', 'videoGen', 'storyboard', 'storyboardGen']);
+  const legacyGenerationPorts = new Set(['first', 'last', 'source', 'images']);
+  const generatorNodeIds = new Set(
+    canvas.nodes
+      .filter((node) => mergedGenerationKind(String(node.data.kind)) !== undefined)
+      .map((node) => node.id),
+  );
   const needsMigration = canvas.nodes.some((node) =>
     node.type !== node.data.kind
-    || legacyKinds.has(String(node.data.kind)))
-    || canvas.edges.some((edge) => !edge.sourceHandle || !edge.targetHandle || edge.sourceHandle === 'right' || edge.targetHandle === 'left');
+    || legacyKinds.has(String(node.data.kind))
+    || (mergedGenerationKind(String(node.data.kind)) !== undefined && mergedGenerationKind(String(node.data.kind)) !== node.data.kind))
+    || canvas.edges.some((edge) => !edge.sourceHandle || !edge.targetHandle || edge.sourceHandle === 'right' || edge.targetHandle === 'left'
+      // 合并前的生成节点端口（首帧/尾帧/源图/多图）要重写到 reference
+      || (legacyGenerationPorts.has(String(edge.targetHandle)) && generatorNodeIds.has(edge.target)));
   if (!needsMigration) return { ...canvas, generationRecords: canvas.generationRecords ?? [], executions: canvas.executions ?? [] };
   const migrated = migrateCanvasGraphV1ToV2({
     schemaVersion: canvas.schemaVersion,
@@ -569,6 +584,7 @@ function emptyCanvas(canvasId: string, projectId = ''): CanvasDocumentV1 {
 export async function listCanvases(projectId: string): Promise<CanvasSummary[]> {
   const metas = await apiJson<Array<{
     id: string; projectId: string; title: string; nodeCount?: number; assetCount?: number;
+    coverAssetId?: string | null;
   }>>(`/projects/${encodeURIComponent(projectId)}/canvases`);
   const now = nowMs();
   return metas.map((m) => ({
@@ -579,7 +595,17 @@ export async function listCanvases(projectId: string): Promise<CanvasSummary[]> 
     updatedAt: now,
     nodeCount: m.nodeCount ?? 0,
     assetCount: m.assetCount ?? 0,
+    coverAssetId: m.coverAssetId ?? null,
   } satisfies CanvasSummary));
+}
+
+/** 画布内最早放入的图片资产 id（本地缓存索引），供封面在图未上云时兜底。 */
+export async function firstCanvasImageAssetId(canvasId: string): Promise<string | undefined> {
+  const db = await database;
+  const metas = await db.getAllFromIndex('assetMeta', 'by-canvasId', canvasId) as AssetMetadata[];
+  return metas
+    .filter((meta) => meta.kind === 'image')
+    .sort((left, right) => left.createdAt - right.createdAt)[0]?.id;
 }
 
 export async function deleteCanvas(canvasId: string) {

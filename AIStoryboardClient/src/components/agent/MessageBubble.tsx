@@ -5,7 +5,7 @@ import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  ChevronRight, Download, FileAudio, FileText, FileVideo,
+  Download, FileAudio, FileText, FileVideo,
   Check, ImagePlus, Images, Library, LoaderCircle, MessageSquarePlus, PanelRightOpen, Pencil, Play, Trash2,
 } from 'lucide-react';
 import { assetUrl } from '../../config';
@@ -35,15 +35,17 @@ import { AgentTaskCard } from './AgentTaskCard';
 import { StoryboardResultActions } from './StoryboardResultActions';
 import { CanvasRunCard } from './CanvasRunCard';
 import { ContextMenu } from '../common/ContextMenu';
-import { DeferredExternalImage } from '../common/DeferredExternalImage';
 import { ChatBlockActions } from './ChatBlockActions';
+import { ChatMediaActions } from './ChatMediaActions';
+import { GenerationSlotStrip } from './GenerationSlotStrip';
+import { useMediaTaskIds } from '../../lib/mediaTaskSlots';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 import { isExternalImageSource } from '../../lib/externalImages';
+import { downloadMedia } from '../../lib/mediaDownload';
 import {
   blockOrdinal,
   codeBlockLanguage,
   codeBlockText,
-  copyImageToClipboard,
   copyPlainText,
   downloadTextFile,
   extensionForLanguage,
@@ -66,7 +68,6 @@ import { parseSideChatSelectionContext } from '../../lib/sideChatSelection';
 import './MessageBubble.css';
 
 type MessageMedia = { url: string; type: 'IMAGE' | 'VIDEO' };
-const IMAGE_BATCH_THRESHOLD = 4;
 
 function extractMessageMedia(content: string): MessageMedia[] {
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
@@ -330,9 +331,10 @@ function isStandaloneImageUrl(value: string): boolean {
 }
 
 /**
- * 批次卡片已经承载图片清单，正文只保留说明文字，避免同一批图片在消息里出现两次。
+ * 生成结果已经交给预置位条承载，正文只保留说明文字，避免同一批图片在消息里出现两次。
+ * 覆盖 markdown 图片、裸图片/视频 URL、已生成数量行与 async-task 包裹标记。
  */
-function stripBatchImageMarkdown(content: string): string {
+function stripTaskMediaMarkdown(content: string): string {
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
   return normalized
     .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
@@ -340,142 +342,13 @@ function stripBatchImageMarkdown(content: string): string {
     .filter((line) => {
       const trimmed = line.trim();
       return !isStandaloneImageUrl(trimmed)
+        && !/^(?:https?:\/\/|\/api\/files\/videos\/|\/\S+\.(?:mp4|webm))\S*\.(?:mp4|webm)(?:\?\S*)?$/i.test(trimmed)
         && !/^已生成\s*\d+\s*张图片$/u.test(trimmed)
         && !trimmed.includes('(async-task:');
     })
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-function BatchThumbnail({ url }: { url: string }) {
-  return (
-    <DeferredExternalImage
-      src={assetUrl(url)}
-      source={url}
-      alt=""
-    />
-  );
-}
-
-function GenerationImageBatch({
-  media,
-  streaming,
-  onOpen,
-}: {
-  media: MessageMedia[];
-  streaming?: boolean;
-  onOpen?: () => void;
-}) {
-  const covers = media.slice(0, IMAGE_BATCH_THRESHOLD);
-  const overflow = Math.max(0, media.length - covers.length);
-  const content = (
-    <>
-      <span className="chat-image-batch__covers" aria-hidden="true">
-        {covers.map((item, index) => (
-          <span key={`${item.url}-${index}`} className="chat-image-batch__cover">
-            <BatchThumbnail url={item.url} />
-            {index === covers.length - 1 && overflow > 0 && (
-              <span className="chat-image-batch__more">+{overflow}</span>
-            )}
-          </span>
-        ))}
-      </span>
-      <span className="chat-image-batch__copy">
-        <strong>{streaming ? '图片生成中' : '本批图片已生成'}</strong>
-        <small>
-          {streaming
-            ? `已生成 ${media.length} 张，任务仍在进行`
-            : `共 ${media.length} 张，集中到生成中心查看`}
-        </small>
-      </span>
-      {onOpen && (
-        <span className="chat-image-batch__action">
-          <span>查看全部</span>
-          <ChevronRight size={15} strokeWidth={1.9} />
-        </span>
-      )}
-    </>
-  );
-
-  if (!onOpen) {
-    return <div className="chat-image-batch is-static">{content}</div>;
-  }
-  return (
-    <button
-      type="button"
-      className="chat-image-batch"
-      onClick={onOpen}
-      aria-label={`查看全部 ${media.length} 张生成图片`}
-    >
-      {content}
-    </button>
-  );
-}
-
-function imageExtension(url: string, mime: string): string {
-  if (mime.includes('png')) return 'png';
-  if (mime.includes('webp')) return 'webp';
-  if (mime.includes('gif')) return 'gif';
-  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
-  if (mime.includes('webm')) return 'webm';
-  if (mime.includes('mp4')) return 'mp4';
-  const matched = url.match(/\.(png|jpe?g|gif|webp)(?:[?#]|$)/i)?.[1];
-  return matched?.toLowerCase().replace('jpeg', 'jpg') ?? 'png';
-}
-
-async function downloadImage(url: string, alt?: string) {
-  const filenameBase = (alt?.trim() || 'chat-image')
-    .replace(/[\\/:*?"<>|]+/g, '-')
-    .replace(/\s+/g, '-');
-  let filename = `${filenameBase || 'chat-image'}.${imageExtension(url, '')}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    filename = `${filenameBase || 'chat-image'}.${imageExtension(url, blob.type)}`;
-    triggerMediaDownload(objectUrl, filename);
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-  } catch {
-    triggerMediaDownload(url, filename, true);
-  }
-  notify({ title: '已开始下载', description: filename, variant: 'info' });
-}
-
-function triggerMediaDownload(href: string, filename: string, openInNewTab = false) {
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = filename;
-  link.rel = 'noreferrer';
-  if (openInNewTab) link.target = '_blank';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
-/** 图片悬浮操作：复制优先写 PNG 位图，剪贴板不支持时回退复制链接。 */
-function ImageBlockActions({ src, alt }: { src: string; alt?: string }) {
-  return (
-    <ChatBlockActions
-      kind="image"
-      label="图片"
-      onCopy={async () => (await copyImageToClipboard(src)) !== 'failed'}
-      onDownload={() => { void downloadImage(src, alt); }}
-    />
-  );
-}
-
-/** 视频悬浮操作：复制播放链接，下载沿用图片同一条下载链路。 */
-function VideoBlockActions({ src, source }: { src: string; source: string }) {
-  return (
-    <ChatBlockActions
-      kind="video"
-      label="视频"
-      onCopy={() => copyPlainText(source || src)}
-      onDownload={() => { void downloadImage(src, 'chat-video'); }}
-    />
-  );
 }
 
 /**
@@ -538,7 +411,7 @@ function ImgWithFallback({
         {
           label: '下载',
           icon: <Download size={13} strokeWidth={1.8} />,
-          onClick: () => { void downloadImage(src, alt); },
+          onClick: () => { void downloadMedia(src, alt); },
         },
         {
           label: '上传图片',
@@ -598,7 +471,7 @@ function VideoWithActions({
         {
           label: '下载',
           icon: <Download size={13} strokeWidth={1.8} />,
-          onClick: () => { void downloadImage(src, 'chat-video'); },
+          onClick: () => { void downloadMedia(src, 'chat-video'); },
         },
         {
           label: importing ? '正在导入素材库' : '导入素材库',
@@ -662,7 +535,7 @@ function renderContent(
           } : null}
             style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
             deferExternalLoad
-            actions={<ImageBlockActions src={assetUrl(imgMatch[2])} alt={imgMatch[1]} />}
+            actions={<ChatMediaActions kind="image" src={assetUrl(imgMatch[2])} source={imgMatch[2]} alt={imgMatch[1]} />}
           />
       );
     }
@@ -684,7 +557,7 @@ function renderContent(
             url: videoMatch[0],
             name: '对话视频',
           } : null}
-          actions={<VideoBlockActions src={assetUrl(videoMatch[0])} source={videoMatch[0]} />}
+          actions={<ChatMediaActions kind="video" src={assetUrl(videoMatch[0])} source={videoMatch[0]} />}
         />
       );
     }
@@ -711,7 +584,13 @@ function renderContent(
           } : null}
             style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
             deferExternalLoad
-            actions={<ImageBlockActions src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)} />}
+            actions={(
+              <ChatMediaActions
+                kind="image"
+                src={raw.startsWith('data:') || raw.startsWith('http') ? raw : assetUrl(raw)}
+                source={raw}
+              />
+            )}
           />
       );
     }
@@ -835,7 +714,9 @@ function MarkdownContent({
                   } : null}
                   style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, margin: '4px 0', display: 'block' }}
                   deferExternalLoad
-                  actions={streaming ? undefined : <ImageBlockActions src={assetUrl(raw)} alt={alt ?? ''} />}
+                  actions={streaming ? undefined : (
+                    <ChatMediaActions kind="image" src={assetUrl(raw)} source={raw} alt={alt ?? ''} />
+                  )}
                 />
               );
             },
@@ -864,7 +745,9 @@ function MarkdownContent({
             url: videoMatch[0],
             name: '对话视频',
           } : null}
-          actions={streaming ? undefined : <VideoBlockActions src={assetUrl(videoMatch[0])} source={videoMatch[0]} />}
+          actions={streaming ? undefined : (
+            <ChatMediaActions kind="video" src={assetUrl(videoMatch[0])} source={videoMatch[0]} />
+          )}
         />
       );
     } else {
@@ -1307,9 +1190,9 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         : legacyAttachment ? [legacyAttachment] : [])
     : [];
   const userTextContent = legacyAttachment ? '' : displayContent;
-  const generatedImages = messageMedia.filter((item) => item.type === 'IMAGE');
-  const imageBatch = !isUser && generatedImages.length >= IMAGE_BATCH_THRESHOLD ? generatedImages : null;
-  const renderedContent = imageBatch ? stripBatchImageMarkdown(displayContent) : displayContent;
+  // 承担生成结果的后台任务一旦挂上，结果统一走预置位条，正文不再重复内联图片
+  const mediaTaskIds = useMediaTaskIds(isUser ? undefined : metadata?.taskCards);
+  const renderedContent = mediaTaskIds.length > 0 ? stripTaskMediaMarkdown(displayContent) : displayContent;
   const importDisabled = !currentProject?.id || messageMedia.length === 0;
   const insideSideChat = !!currentSideChatId();
 
@@ -1860,13 +1743,11 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                       streaming={streaming}
                     />
                   )}
-                  {imageBatch && (
-                    <GenerationImageBatch
-                      media={imageBatch}
-                      streaming={streaming}
-                      onOpen={onOpenGenerationCenter}
-                    />
-                  )}
+                  <GenerationSlotStrip
+                    taskIds={mediaTaskIds}
+                    onOpen={onOpenGenerationCenter}
+                    onOpenMedia={(url) => openPreview(url, 'image')}
+                  />
                   <MessageAttachmentStrip
                     attachments={sandboxAttachments}
                     onPreview={openAttachmentPreview}

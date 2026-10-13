@@ -175,9 +175,9 @@ function FilterButton({ active, label, onClick }: { active: boolean; label: stri
   return (
     <button type="button" onClick={onClick} style={{
       padding: '6px 11px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
-      border: `1px solid ${active ? 'rgba(215,255,84,0.55)' : 'rgba(255,255,255,0.12)'}`,
-      background: active ? 'rgba(215,255,84,0.12)' : 'transparent',
-      color: active ? '#d7ff54' : 'inherit',
+      border: `1px solid ${active ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.12)'}`,
+      background: active ? 'rgba(255,255,255,0.12)' : 'transparent',
+      color: active ? '#f4f4f5' : 'inherit',
     }}>{label}</button>
   );
 }
@@ -224,7 +224,7 @@ const groupCard: React.CSSProperties = {
 };
 const groupIcon: React.CSSProperties = {
   width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 9,
-  background: 'rgba(215,255,84,0.09)', color: '#d7ff54',
+  background: 'rgba(255,255,255,0.09)', color: '#f4f4f5',
 };
 const ellipsis: React.CSSProperties = {
   display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13,

@@ -654,7 +654,8 @@ export const batchRefineOptions = (
   batchId,
   itemId: request.itemId,
   skipSlot: true,
-  params: { ...nodeParams, actionId: 'refineBatch' },
+  // 合并后的图片生成节点把「批量完善」归到 redraw 动作（旧 refineBatch 已不存在）
+  params: { ...nodeParams, actionId: 'redraw' },
 });
 
 // 提交分镜生成任务：把剧本交给设计助理（agent.request），编排器识别分镜意图后生成分镜，

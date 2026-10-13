@@ -19,39 +19,42 @@ spring:
         webmvc:
           # gateway-server-webmvc 变体：配置前缀与 WebFlux 版不同，predicates 为 name+args 对象结构
           routes:
-            # Agent 服务（lb:// 走 Nacos 服务发现）
+            # 上游地址默认直连（compose 里覆盖成服务名，本机开发用 localhost）。
+            # 要恢复 Nacos 服务发现：设 NACOS_DISCOVERY_ENABLED=true，
+            # 并把四个 *_URI 指回 lb://moon-agent / lb://asset-service / lb://xiaoyue-canvas / lb://ai-storyboard
+            # Agent 服务
             - id: moon-agent
-              uri: lb://moon-agent
+              uri: "${MOON_AGENT_URI:http://localhost:8084}"
               predicates:
                 - name: Path
                   args:
                     patterns: /api/agent/**
             # 独立资产服务
             - id: asset-service
-              uri: lb://asset-service
+              uri: "${ASSET_SERVICE_URI:http://localhost:8085}"
               predicates:
                 - name: Path
                   args:
                     patterns: /api/library/**
             # 画布服务
             - id: xiaoyue-canvas
-              uri: lb://xiaoyue-canvas
+              uri: "${CANVAS_URI:http://localhost:9090}"
               predicates:
                 - name: Path
                   args:
                     patterns: /api/canvas/**
             # 主后端
             - id: ai-storyboard
-              uri: lb://ai-storyboard
+              uri: "${BACKEND_URI:http://localhost:8082}"
               predicates:
                 - name: Path
                   args:
                     patterns: /api/auth/**,/api/projects/**,/api/scenes/**,/api/files/**,/api/assets/**,/api/ai/**,/api/user/**
-    # Nacos 服务发现
+    # Nacos 服务发现（默认关闭：不注册、不走发现，路由按上面的直连地址）
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: true
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
 
 # JWT 配置（与主后端共享 secret）
 jwt:

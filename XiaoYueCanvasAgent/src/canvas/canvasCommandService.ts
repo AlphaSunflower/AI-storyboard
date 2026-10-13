@@ -30,8 +30,11 @@ import type { AnnotationDocument, AnnotationShape } from '../types';
 
 export type LayoutMode = 'grid' | 'horizontal' | 'vertical' | 'dag';
 
-const moonChatBaseUrl = (import.meta.env.VITE_MOON_CHAT_URL as string | undefined)?.trim().replace(/\/$/, '')
-  || 'http://localhost:5173';
+// 未配置时：开发指向本地 Vite(5173)，生产返回空串由同源地址兜底
+const configuredMoonChatBaseUrl = (import.meta.env.VITE_MOON_CHAT_URL as string | undefined)?.trim();
+const moonChatBaseUrl = configuredMoonChatBaseUrl
+  ? configuredMoonChatBaseUrl.replace(/\/$/, '')
+  : (import.meta.env.DEV ? 'http://localhost:5173' : '');
 const configuredMediaBaseUrl = (import.meta.env.VITE_FILE_BASE_URL as string | undefined)?.trim().replace(/\/$/, '');
 
 const resolveMediaUrl = (url: string) => {

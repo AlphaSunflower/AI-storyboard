@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ShieldAlert, ShieldCheck, Zap } from 'lucide-react';
 import type { AgentApprovalMode } from '../../api/agent';
 import { FullAccessConfirmDialog } from './FullAccessConfirmDialog';
+import { useAbovePopoverPlacement } from './abovePopover';
 
 const OPTIONS: Array<{
   id: AgentApprovalMode;
@@ -44,6 +46,11 @@ export function ApprovalModeSelector({
   const [open, setOpen] = useState(false);
   const [confirmFullAccess, setConfirmFullAccess] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // 浮层挂到 body：停靠态浮窗 overflow: hidden 会把卡片内的上弹浮层裁掉
+  const placement = useAbovePopoverPlacement(open, buttonRef, { gap: 10, width: 286 });
+  const menuWidth = placement?.width ?? 286;
   const current = OPTIONS.find((option) => option.id === mode) ?? OPTIONS[2];
   const CurrentIcon = current.icon;
   const fullAccessActive = current.id === 'FULL_ACCESS';
@@ -51,7 +58,10 @@ export function ApprovalModeSelector({
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
@@ -85,6 +95,7 @@ export function ApprovalModeSelector({
     <>
       <div ref={rootRef} style={{ position: 'relative', minWidth: 0 }}>
         <button
+          ref={buttonRef}
           type="button"
           aria-haspopup="menu"
           aria-expanded={open}
@@ -128,16 +139,19 @@ export function ApprovalModeSelector({
           <ChevronDown size={14} strokeWidth={2} style={{ flexShrink: 0 }} />
         </button>
 
-        {open && (
+        {open && placement && createPortal(
           <div
+            ref={menuRef}
             role="menu"
             aria-label="选择审批模式"
             style={{
-              position: 'absolute',
-              left: 0,
-              bottom: 'calc(100% + 10px)',
-              width: 286,
+              position: 'fixed',
+              left: placement.left,
+              bottom: placement.bottom,
+              width: menuWidth,
               maxWidth: 'min(286px, calc(100vw - 32px))',
+              maxHeight: placement.maxHeight,
+              overflowY: 'auto',
               padding: 6,
               borderRadius: 14,
               border: '1px solid rgba(0,0,0,0.08)',
@@ -219,7 +233,8 @@ export function ApprovalModeSelector({
                 </button>
               );
             })}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
       <FullAccessConfirmDialog

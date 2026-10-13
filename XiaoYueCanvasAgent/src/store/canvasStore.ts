@@ -157,7 +157,6 @@ interface CanvasState {
   selectAll: () => number;
   undo: () => void;
   redo: () => void;
-  loadTemplate: (templateId: string) => void;
   clearCanvas: () => void;
   appendGenerationRecord: (record: GenerationRecord) => void;
   updateGenerationRecord: (record: GenerationRecord) => void;
@@ -716,16 +715,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     redo: () => {
       const state = get(); const next = state.future[0]; if (!next) return;
       set({ nodes: next.nodes, edges: next.edges, past: [...state.past, graphSnapshot(state.nodes, state.edges)].slice(-MAX_HISTORY), future: state.future.slice(1), selectedNodeId: null, revision: state.revision + 1, derivedAssetIdsBySource: indexDerivedAssets(next.nodes) });
-    },
-    loadTemplate: (templateId) => {
-      const x = 180 + get().nodes.length * 18;
-      const source = makeNode('image', { x, y: 180 }, { label: '上传源图片' });
-      const note = makeNode('text', { x: x + 360, y: 150 }, { label: '设计说明', prompt: '记录目标、约束和版本判断。' });
-      const nodes = templateId === 'variant-study'
-        ? [source, note, makeNode('image', { x: x + 360, y: 480 }, { label: '版本 A' }), makeNode('image', { x: x + 700, y: 480 }, { label: '版本 B' })]
-        : [source, note, makeNode('image', { x: x + 720, y: 180 }, { label: '修改版本' })];
-      const edges: CanvasEdge[] = nodes.slice(1).map((node) => ({ id: `edge-${createId()}`, source: source.id, sourceHandle: 'right', target: node.id, targetHandle: 'left', type: 'canvas' }));
-      commit((state) => ({ nodes: [...state.nodes, ...nodes], edges: [...state.edges, ...edges] }));
     },
     clearCanvas: () => commit(() => ({ nodes: [], edges: [] })),
     appendGenerationRecord: (record) => set((state) => ({

@@ -21,7 +21,11 @@ public class CanvasSummaryServiceImpl implements CanvasSummaryService {
                            COALESCE(g.graph_json::jsonb -> 'nodes', '[]'::jsonb)), 0) AS node_count,
                        COALESCE(jsonb_array_length(
                            COALESCE(g.graph_json::jsonb -> 'edges', '[]'::jsonb)), 0) AS edge_count,
-                       (SELECT COUNT(*) FROM public.canvas_assets a WHERE a.canvas_id = c.id) AS asset_count
+                       (SELECT COUNT(*) FROM public.canvas_assets a WHERE a.canvas_id = c.id) AS asset_count,
+                       (SELECT a.id FROM public.canvas_assets a
+                         WHERE a.canvas_id = c.id AND a.type = 'image' AND a.status = 'ready'
+                         ORDER BY a.created_at ASC, a.id ASC
+                         LIMIT 1) AS cover_asset_id
                   FROM public.morrow_canvases c
                   LEFT JOIN public.morrow_canvas_graphs g ON g.canvas_id = c.id
                  WHERE c.project_id = ?
@@ -30,7 +34,8 @@ public class CanvasSummaryServiceImpl implements CanvasSummaryService {
                 rs.getString("canvas_id"),
                 rs.getInt("node_count"),
                 rs.getInt("edge_count"),
-                rs.getInt("asset_count")), projectId);
+                rs.getInt("asset_count"),
+                rs.getString("cover_asset_id")), projectId);
     }
 
     @Override

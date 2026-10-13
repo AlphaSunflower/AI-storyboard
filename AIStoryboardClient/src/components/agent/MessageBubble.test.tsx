@@ -242,29 +242,74 @@ describe('MessageBubble project library import', () => {
     expect(container.querySelector('.chat-markdown br')).toBeTruthy();
   });
 
-  it('collapses four or more generated images into one batch receipt', () => {
+  it('lays out one preset slot per generated image and drops the inline copies', () => {
     const openGenerationCenter = vi.fn();
-    const images = Array.from(
-      { length: 6 },
-      (_, index) => `![分镜 ${index + 1}](/api/files/images/scene-${index + 1}.png)`,
-    ).join('\n');
+    useAgentStore.setState({
+      tasks: {
+        'task-1': {
+          taskId: 'task-1',
+          conversationId: 'conversation-1',
+          projectId: 'project-1',
+          title: '批量生成 3 张图片',
+          toolName: 'image',
+          kind: 'image-batch',
+          status: 'running',
+          stage: '',
+          progress: 33,
+          resultSummary: '',
+          error: '',
+          parentTaskId: '',
+          anchorMessageId: '',
+          version: 1,
+          createdAt: '',
+          updatedAt: '',
+          assetIds: [],
+          resultUrls: [],
+          result: '',
+          liveText: '',
+          liveThinking: '',
+          liveStage: '',
+          canCancel: true,
+          canRetry: false,
+          canFollowUp: false,
+          slots: [
+            {
+              index: 0,
+              label: '分镜 1',
+              status: 'completed',
+              prompt: '海边',
+              url: '/api/files/images/scene-1.png',
+              assetId: 'asset-1',
+              error: '',
+            },
+            { index: 1, label: '分镜 2', status: 'running', prompt: '草原', url: '', assetId: '', error: '' },
+            { index: 2, label: '分镜 3', status: 'pending', prompt: '雪山', url: '', assetId: '', error: '' },
+          ],
+        },
+      } as never,
+    });
     const { container } = render(
       <MessageBubble
         role="assistant"
-        content={`已补齐缺图分镜。\n已生成 6 张图片\n${images}\n//# (async-task:batch-1:end)`}
+        content={'已补齐缺图分镜。\n已生成 3 张图片\n![分镜 1](/api/files/images/scene-1.png)\n//# (async-task:task-1:end)'}
+        metadata={{ taskCards: [{ taskId: 'task-1', title: '批量生成 3 张图片', kind: 'image-batch' }] } as never}
         onOpenGenerationCenter={openGenerationCenter}
       />,
     );
 
-    expect(screen.getByText('本批图片已生成')).toBeTruthy();
-    expect(screen.getByText('共 6 张，集中到生成中心查看')).toBeTruthy();
-    expect(screen.queryByText('已生成 6 张图片')).toBeNull();
+    expect(container.querySelectorAll('.gen-slot')).toHaveLength(3);
+    expect(container.querySelectorAll('.gen-slot__media img')).toHaveLength(1);
+    expect(container.querySelector('[data-status="generating"]')).toBeTruthy();
+    expect(container.querySelector('[data-status="queued"]')).toBeTruthy();
+    // 状态胶囊 + 无障碍朗读各一份，取自同一帧的进度文案
+    expect(screen.getAllByText('生成中 33%').length).toBeGreaterThan(0);
+    expect(screen.queryByText('已生成 3 张图片')).toBeNull();
     expect(screen.queryByText(/async-task/)).toBeNull();
-    expect(container.querySelectorAll('.chat-image-batch__cover img')).toHaveLength(4);
-    expect(container.querySelector('.chat-image-batch__more')?.textContent).toBe('+2');
 
-    fireEvent.click(screen.getByRole('button', { name: '查看全部 6 张生成图片' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看全部' }));
     expect(openGenerationCenter).toHaveBeenCalledTimes(1);
+
+    useAgentStore.setState({ tasks: {} });
   });
 
   it('keeps small image groups inline', () => {

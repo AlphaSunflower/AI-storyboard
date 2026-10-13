@@ -148,7 +148,7 @@ describe('ChatComposer project library drops', () => {
 
     render(<ChatComposer />);
 
-    expect(screen.getByPlaceholderText('描述你的需求…')).toBeTruthy();
+    expect(screen.getByPlaceholderText('发消息或创建任务… / 使用技能 @ 添加资料')).toBeTruthy();
     expect(screen.getByRole('button', { name: '审批模式：方案批准' })).toBeTruthy();
   });
 
@@ -244,6 +244,46 @@ describe('ChatComposer project library drops', () => {
     render(<ChatComposer />);
     expect(screen.queryByRole('meter')).toBeNull();
     expect(document.querySelector('.chat-context-tip')).toBeNull();
+  });
+
+  it('replaces the disclaimer with the footer status bar once usage exists', () => {
+    useAgentStore.setState({
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '完成',
+        createdAt: new Date().toISOString(),
+        metadata: {
+          metrics: {
+            inputTokens: 64_000,
+            outputTokens: 1_000,
+            cachedInputTokens: 60_000,
+            totalTokens: 65_000,
+            contextTokens: 64_000,
+            contextWindowTokens: 128_000,
+            durationMs: 4_000,
+            modelCalls: 3,
+            complete: true,
+            modelDurationMs: 3_000,
+            toolDurationMs: 500,
+            systemPromptTokens: 1_500,
+            toolDefinitionTokens: 5_600,
+            messageTokens: 56_900,
+          },
+        },
+      }] as never,
+      generating: {},
+    });
+
+    const { container } = render(<ChatComposer />);
+
+    expect(screen.queryByText('内容由 AI 生成，请仔细甄别')).toBeNull();
+    const bar = container.querySelector('.chat-status-bar');
+    expect(bar).not.toBeNull();
+    // 圆环从输入卡工具栏移到底部状态栏
+    expect(bar!.querySelector('[role="meter"]')).toBeTruthy();
+    expect(screen.getByText('0 轮 3 步')).toBeTruthy();
   });
 
   it('keeps legacy conversations read-only', () => {
@@ -579,5 +619,150 @@ describe('ChatComposer 只有注释时发送', () => {
     expect(content).toContain('<selected-text-context>');
     expect(content).toContain('这是需要追问的原文片段');
     window.history.replaceState({}, '', '/chat');
+  });
+});
+
+describe('ChatComposer canvas mode command', () => {
+  beforeEach(() => {
+    useAgentStore.setState({ activeConversationId: 'conversation-1', messages: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('exits canvas mode from the slash menu when the canvas sub-site is in canvas mode', async () => {
+    const onExit = vi.fn();
+    const onEnter = vi.fn();
+    render(<ChatComposer canvasModeCommand={{ active: true, restorable: true, onExit, onEnter }} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/发消息或创建任务/), { target: { value: '/' } });
+    fireEvent.click(await screen.findByRole('option', { name: /退出画布模式/ }));
+
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(onEnter).not.toHaveBeenCalled();
+  });
+
+  it('re-enters canvas mode from the slash menu after the user detached', async () => {
+    const onExit = vi.fn();
+    const onEnter = vi.fn();
+    render(<ChatComposer canvasModeCommand={{ active: false, restorable: true, onExit, onEnter }} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/发消息或创建任务/), { target: { value: '/' } });
+    fireEvent.click(await screen.findByRole('option', { name: /进入画布模式/ }));
+
+    expect(onEnter).toHaveBeenCalledTimes(1);
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it('hides the canvas mode command outside the canvas sub-site', async () => {
+    render(<ChatComposer />);
+
+    fireEvent.change(screen.getByPlaceholderText(/发消息或创建任务/), { target: { value: '/' } });
+
+    expect(screen.queryByRole('option', { name: /画布模式/ })).toBeNull();
+  });
+});
+
+describe('ChatComposer compact mode', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      refImageUrls: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+    });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps only the input line and the send button while the thread is scrolled up', () => {
+    const { container } = render(<ChatComposer compact />);
+
+    expect(container.querySelectorAll('.chat-composer-extra--inline.is-collapsed')).toHaveLength(2);
+    expect(screen.getByPlaceholderText(/发消息或创建任务/).getAttribute('rows')).toBe('1');
+    expect(screen.getByRole('button', { name: '发送' })).toBeTruthy();
+  });
+
+  it('restores the full composer as soon as the input is focused', () => {
+    const { container } = render(<ChatComposer compact />);
+
+    fireEvent.focus(screen.getByPlaceholderText(/发消息或创建任务/));
+
+    expect(container.querySelectorAll('.chat-composer-extra--inline.is-collapsed')).toHaveLength(0);
+    expect(screen.getByPlaceholderText(/发消息或创建任务/).getAttribute('rows')).toBe('2');
+  });
+
+  it('stays expanded when the thread is at the bottom', () => {
+    const { container } = render(<ChatComposer />);
+
+    expect(container.querySelector('.chat-composer-extra--inline.is-collapsed')).toBeNull();
+  });
+
+  it('narrows the input card horizontally while collapsed', () => {
+    const collapsed = render(<ChatComposer compact />);
+    const collapsedCard = collapsed.container.querySelector<HTMLElement>('.chat-composer-card');
+    expect(collapsedCard?.style.maxWidth).toBe('480px');
+    cleanup();
+
+    const expanded = render(<ChatComposer />);
+    const expandedCard = expanded.container.querySelector<HTMLElement>('.chat-composer-card');
+    expect(expandedCard?.style.maxWidth).toBe('780px');
+  });
+
+  it('reports its collapsed state so outside controls can follow the card edge', () => {
+    const onCollapsedChange = vi.fn();
+    render(<ChatComposer compact onCollapsedChange={onCollapsedChange} />);
+
+    expect(onCollapsedChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.focus(screen.getByPlaceholderText(/发消息或创建任务/));
+
+    expect(onCollapsedChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('collapses the footer status bar slot so the input card drops into its place', () => {
+    const { container } = render(<ChatComposer compact />);
+    const slot = container.querySelector('.chat-status-bar-slot');
+
+    expect(slot?.classList.contains('is-collapsed')).toBe(true);
+    expect(slot?.hasAttribute('inert')).toBe(true);
+
+    fireEvent.focus(screen.getByPlaceholderText(/发消息或创建任务/));
+
+    expect(container.querySelector('.chat-status-bar-slot')?.classList.contains('is-collapsed'))
+      .toBe(false);
+    expect(container.querySelector('.chat-status-bar-slot')?.hasAttribute('inert')).toBe(false);
+  });
+
+  it('keeps the footer status bar slot open when the thread is at the bottom', () => {
+    const { container } = render(<ChatComposer />);
+
+    expect(container.querySelector('.chat-status-bar-slot')?.classList.contains('is-collapsed'))
+      .toBe(false);
+  });
+
+  it('puts the input and the send button on the same row while collapsed', () => {
+    const { container } = render(<ChatComposer compact />);
+    const card = container.querySelector<HTMLElement>('.chat-composer-card');
+    const input = screen.getByPlaceholderText(/发消息或创建任务/);
+    const send = screen.getByRole('button', { name: '发送' });
+
+    expect(card?.style.flexDirection).toBe('row');
+    expect(card?.style.background).toContain('rgba(255, 255, 255, 0.62)');
+    expect(card?.style.backdropFilter).toContain('blur');
+    // 输入框与「发送」所在的底部行是卡片这一行里的兄弟节点
+    expect(input.parentElement).toBe(card);
+    expect(card?.contains(send)).toBe(true);
+    expect(input.nextElementSibling).toBe(send.parentElement?.parentElement);
+    expect(input.style.flex).toContain('1');
   });
 });

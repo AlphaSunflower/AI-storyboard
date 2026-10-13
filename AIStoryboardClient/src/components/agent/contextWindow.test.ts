@@ -3,6 +3,7 @@ import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   contextUsageRatio,
   contextWindowTokensFor,
+  formatApproxTokenCount,
   formatTokenCount,
 } from './contextWindow';
 
@@ -47,5 +48,21 @@ describe('formatTokenCount', () => {
     expect(formatTokenCount(70_000)).toBe('70k');
     expect(formatTokenCount(128_000)).toBe('128k');
     expect(formatTokenCount(1_000_000)).toBe('1M');
+  });
+});
+
+describe('formatApproxTokenCount', () => {
+  it('keeps one decimal under 100k so small estimates stay readable', () => {
+    expect(formatApproxTokenCount(0)).toBe('0');
+    expect(formatApproxTokenCount(640)).toBe('640');
+    expect(formatApproxTokenCount(1_500)).toBe('1.5k');
+    expect(formatApproxTokenCount(5_600)).toBe('5.6k');
+    expect(formatApproxTokenCount(88_500)).toBe('88.5k');
+  });
+
+  it('rounds to whole thousands above 100k and to millions above 1M', () => {
+    expect(formatApproxTokenCount(127_000)).toBe('127k');
+    expect(formatApproxTokenCount(1_000_000)).toBe('1M');
+    expect(formatApproxTokenCount(2_400_000)).toBe('2.4M');
   });
 });

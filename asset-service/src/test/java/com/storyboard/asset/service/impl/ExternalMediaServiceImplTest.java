@@ -12,14 +12,17 @@ import com.storyboard.asset.client.AssetContracts.MetadataState;
 import com.storyboard.asset.repository.LibraryRepository;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.storage.ObjectStorage;
+import com.storyboard.common.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -63,6 +66,7 @@ class ExternalMediaServiceImplTest {
     void registersExternalObjectWhenSourceIsNew() {
         when(repository.findAssetBySource("user-1", "canvas", "canvas-asset-2"))
                 .thenReturn(Optional.empty());
+        when(storage.exists("images/frame.png")).thenReturn(true);
         when(storage.contentLength("images/frame.png")).thenReturn(12L);
         AssetSummary registered = asset("asset-2");
         when(catalogService.registerMedia(eq("user-1"), any(), eq("external:canvas:canvas-asset-2")))
@@ -83,6 +87,43 @@ class ExternalMediaServiceImplTest {
                                 && registration.mediaType() == MediaType.IMAGE
                                 && registration.objectKey().equals("images/frame.png")),
                 eq("external:canvas:canvas-asset-2"));
+    }
+
+    @Test
+    void stripsSignatureQueryFromObjectKey() {
+        when(repository.findAssetBySource("user-1", "canvas-upload", "canvas-asset-3"))
+                .thenReturn(Optional.empty());
+        when(storage.exists("images/frame.png")).thenReturn(true);
+        when(storage.contentLength("images/frame.png")).thenReturn(12L);
+        when(catalogService.registerMedia(eq("user-1"), any(), any())).thenReturn(asset("asset-3"));
+
+        service.register("user-1", new ExternalMediaRegistration(
+                "user-1", "project-1", "IMAGE", "frame.png", null,
+                "canvas-upload", "canvas-asset-3", "/api/files/images/frame.png?token=1.abc",
+                "image/png", null, null, MediaRole.REFERENCE, 0));
+
+        verify(catalogService).registerMedia(
+                eq("user-1"),
+                org.mockito.ArgumentMatchers.argThat(registration ->
+                        registration.objectKey().equals("images/frame.png")
+                                && registration.sha256().equals(
+                                        LibraryRepository.sha256Hex(
+                                                "images/frame.png".getBytes(StandardCharsets.UTF_8)))),
+                eq("external:canvas-upload:canvas-asset-3"));
+    }
+
+    @Test
+    void rejectsObjectMissingFromStorage() {
+        when(repository.findAssetBySource("user-1", "canvas", "canvas-asset-4"))
+                .thenReturn(Optional.empty());
+        when(storage.exists("images/gone.png")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.register("user-1", new ExternalMediaRegistration(
+                "user-1", null, "IMAGE", "gone.png", null,
+                "canvas", "canvas-asset-4", "images/gone.png",
+                "image/png", null, null, MediaRole.REFERENCE, 0)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("外部媒体对象不存在");
     }
 
     private static AssetSummary asset(String id) {

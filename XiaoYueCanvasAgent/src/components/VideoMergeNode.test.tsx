@@ -11,6 +11,12 @@ import { persistExistingCanvasAsset } from '../services/canvasMedia';
 import { processVideoRequest, probeVideoRequest } from '../services/videoProcessingService';
 import { createVideoAsset } from '../utils/mediaPipeline';
 
+// 面板走 NodeToolbar（需要 ReactFlowProvider），单测里就地渲染子节点
+vi.mock('@xyflow/react', () => ({
+  NodeToolbar: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  Position: { Bottom: 'bottom', Left: 'left', Right: 'right', Top: 'top' },
+}));
+
 vi.mock('../services/canvasMedia', () => ({
   persistExistingCanvasAsset: vi.fn(),
 }));

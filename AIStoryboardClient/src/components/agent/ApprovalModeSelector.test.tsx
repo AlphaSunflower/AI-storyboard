@@ -3,6 +3,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 
 describe('ApprovalModeSelector', () => {
+  it('renders the menu outside its own subtree so ancestor overflow cannot clip it', () => {
+    render(
+      <div data-testid="clipper" style={{ overflow: 'hidden' }}>
+        <ApprovalModeSelector mode="PLAN_APPROVAL" onChange={() => {}} />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /审批模式/ }));
+
+    const menu = screen.getByRole('menu', { name: '选择审批模式' });
+    expect(screen.getByTestId('clipper').contains(menu)).toBe(false);
+    expect(document.body.contains(menu)).toBe(true);
+  });
+
   afterEach(() => cleanup());
 
   it('lists all modes and selects a new policy', () => {

@@ -30,7 +30,7 @@ const buildLineage = (nodes: CanvasNode[], startId: string): LineageStep[] => {
 
 const formatTime = (at?: number) => (at ? new Date(at).toLocaleString('zh-CN', { hour12: false }) : undefined);
 
-const fieldInput = 'w-full rounded-lg border border-[var(--border-dark)] bg-[rgba(19,34,30,0.55)] px-3 text-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(215,255,84,0.18)]';
+const fieldInput = 'w-full rounded-lg border border-[var(--border-dark)] bg-[rgba(20,20,20,0.55)] px-3 text-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(244,244,245,0.18)]';
 
 function FrameAssetProperty({ assetId, label }: { assetId?: string; label: string }) {
   const asset = useMediaStore((state) => assetId ? state.assets[assetId] : undefined);
@@ -55,7 +55,7 @@ function FrameAssetProperty({ assetId, label }: { assetId?: string; label: strin
   }, [asset, assetId, clearAssetError, markAssetError, upsertAsset]);
 
   return (
-    <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+    <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.04)] p-3">
       <header className="flex items-center justify-between gap-2">
         <span className="text-[12px] text-foreground">{label}</span>
         {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}</small>}
@@ -194,7 +194,7 @@ export function InspectorPanel() {
   if (!selectedNodeId || !nodeData) {
     return (
       <div className="grid h-full place-items-center gap-2 p-6 text-center">
-        <span className="h-8 w-8 rounded-full border border-[var(--border-dark)] bg-[rgba(215,255,84,0.06)]" />
+        <span className="h-8 w-8 rounded-full border border-[var(--border-dark)] bg-[rgba(244,244,245,0.06)]" />
         <h3 className="text-[15px] font-semibold text-foreground">尚未选择节点</h3>
         <p className="max-w-[240px] text-[13px] leading-relaxed text-muted-foreground">选择图片或文字节点后，可以编辑名称和说明。</p>
       </div>
@@ -208,7 +208,7 @@ export function InspectorPanel() {
   return (
     <>
     <div className="flex flex-col gap-3 p-4" key={selectedNodeId}>
-      <div className="flex items-center gap-3 rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.05)] p-3">
+      <div className="flex items-center gap-3 rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.05)] p-3">
         <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: nodeData.accent }} />
         <div className="min-w-0">
           <small className="block font-mono text-[10px] tracking-[0.12em] text-muted-foreground">{nodeData.kind.toUpperCase()} NODE</small>
@@ -220,7 +220,7 @@ export function InspectorPanel() {
         <input defaultValue={nodeData.label} onBlur={(event) => updateNode(selectedNodeId, { label: event.target.value })} className={`h-9 ${fieldInput}`} />
       </label>
       {(isVideo || (nodeData.kind === 'video' && nodeData.assetId)) && (
-        <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+        <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.04)] p-3">
           <header className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-[12px] text-foreground"><Video size={14} className="text-acid" />视频预览</span>
             {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}{asset.durationSeconds ? ` · ${asset.durationSeconds.toFixed(1)}s` : ''}</small>}
@@ -237,7 +237,7 @@ export function InspectorPanel() {
         </section>
       )}
       {!isVideo && nodeData.kind === 'image' && nodeData.assetId && (
-        <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+        <section className="rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.04)] p-3">
           <header className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-[12px] text-foreground"><ImageIcon size={14} className="text-acid" />图片预览</span>
             {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}</small>}
@@ -277,7 +277,7 @@ export function InspectorPanel() {
       )}
 
       {nodeData.operation && (
-        <div className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+        <div className="rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.04)] p-3">
           <small className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">操作记录</small>
           <div className="mt-1 font-medium text-foreground">{operationLabel(nodeData.operation.type)}</div>
           {nodeData.operation.at && <div className="mt-0.5 text-[11px] text-muted-foreground">{formatTime(nodeData.operation.at)}</div>}
@@ -286,7 +286,7 @@ export function InspectorPanel() {
       )}
 
       {lineage.length > 1 && (
-        <div className="rounded-xl border border-[var(--border-dark)] bg-[rgba(215,255,84,0.04)] p-3">
+        <div className="rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.04)] p-3">
           <small className="font-mono text-[10px] tracking-[0.08em] text-muted-foreground">血缘链</small>
           <ol className="mt-2 list-none space-y-1.5 p-0">
             <li className="font-medium text-foreground">{lineage[0].label}</li>

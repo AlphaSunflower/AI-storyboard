@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { CanvasGraphV2 } from './graphContracts';
-import { getNodeDefinition, validateRunnable } from './graphContracts';
+import { getNodeDefinition, listNodeDefinitions, validateRunnable } from './graphContracts';
+
+describe('node library surface', () => {
+  it('hides the retired script node but keeps the definition for stored canvases', () => {
+    const kinds = listNodeDefinitions().map((definition) => definition.kind);
+
+    expect(kinds).not.toContain('script');
+    expect(kinds).toContain('text');
+    // 存量画布里的剧本节点仍要能渲染：定义还在
+    expect(getNodeDefinition('script')?.title).toBe('剧本');
+  });
+});
 
 describe('image node contract', () => {
   it('keeps image nodes as result containers without generation actions', () => {
@@ -38,9 +49,9 @@ describe('image node contract', () => {
         },
         {
           id: 'batch-1',
-          type: 'batchImageRefine',
+          type: 'imageGeneration',
           position: { x: 300, y: 0 },
-          data: { kind: 'batchImageRefine', label: '批量完善图片', prompt: '', status: 'idle', accent: '#b48cff' },
+          data: { kind: 'imageGeneration', label: '图片生成', prompt: '', status: 'idle', accent: '#b48cff', mode: 'batchRefine' },
         },
       ],
       edges: [{
@@ -55,7 +66,30 @@ describe('image node contract', () => {
       generationRecords: [],
     };
 
-    expect(validateRunnable(graph, 'batch-1', 'refineBatch')).toEqual({ ok: true });
+    expect(validateRunnable(graph, 'batch-1', 'redraw')).toEqual({ ok: true });
+  });
+
+  it('reports mode-driven missing inputs for merged generators', () => {
+    const graph: CanvasGraphV2 = {
+      schemaVersion: 2,
+      nodes: [
+        {
+          id: 'video-1',
+          type: 'videoGeneration',
+          position: { x: 0, y: 0 },
+          data: { kind: 'videoGeneration', label: '视频生成', prompt: '', status: 'idle', accent: '#8f9cff', mode: 'firstLastFrame' },
+        },
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      generationRecords: [],
+    };
+
+    expect(validateRunnable(graph, 'video-1', 'generate')).toMatchObject({
+      ok: false,
+      code: 'INPUT_REQUIRED',
+      message: '需要至少 2 张图片',
+    });
   });
 });
 

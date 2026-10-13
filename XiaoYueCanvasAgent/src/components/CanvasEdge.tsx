@@ -37,9 +37,9 @@ function CanvasEdgeComponent({
   const isCropLabel = data?.operation === 'crop';
   const isSelected = Boolean(selected);
 
-  // acid 荧光绿 + 选中更亮
-  const lineColor = isSelected ? '#d7ff54' : 'rgba(215, 255, 84, 0.5)';
-  const shadowColor = isSelected ? 'rgba(215, 255, 84, 0.5)' : 'rgba(215, 255, 84, 0.28)';
+  // 中性灰白连线：选中更亮，不使用荧光绿
+  const lineColor = isSelected ? '#f4f4f5' : 'rgba(244, 244, 245, 0.45)';
+  const shadowColor = isSelected ? 'rgba(244, 244, 245, 0.45)' : 'rgba(244, 244, 245, 0.22)';
   const arrowId = `arrow-${id}`;
   const glowId = `glow-${id}`;
   const haloId = `halo-${id}`;

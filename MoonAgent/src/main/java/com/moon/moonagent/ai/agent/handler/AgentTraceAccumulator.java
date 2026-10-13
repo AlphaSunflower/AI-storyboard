@@ -51,6 +51,9 @@ public class AgentTraceAccumulator {
     private volatile OffsetDateTime thinkingEndedAt;
     private final AgentUsageAccumulator usage = new AgentUsageAccumulator();
     private final int contextWindowTokens;
+    /** 当前上下文组成估算：系统提示词 / 工具定义（每轮开始时由运行时写入）。 */
+    private volatile long systemPromptTokens;
+    private volatile long toolDefinitionTokens;
 
     public AgentTraceAccumulator(OrchestrationRequest request) {
         this(request, AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS);
@@ -230,10 +233,36 @@ public class AgentTraceAccumulator {
         usage.recordUsage(inputTokens, outputTokens, cachedInputTokens);
     }
 
+    /** 记录一次模型调用的 token 用量与该次推理耗时（毫秒）。 */
+    public void recordUsage(long inputTokens, long outputTokens, long cachedInputTokens,
+                            long modelDurationMs) {
+        usage.recordUsage(inputTokens, outputTokens, cachedInputTokens);
+        usage.addModelDuration(modelDurationMs);
+    }
+
+    /** 工具开始执行（ToolResult 开始）。 */
+    public void beginToolCall(String toolCallId) {
+        usage.beginToolCall(toolCallId);
+    }
+
+    /** 工具执行结束（ToolResult 结束）：累计该次执行耗时。 */
+    public void endToolCall(String toolCallId) {
+        usage.endToolCall(toolCallId);
+    }
+
+    /**
+     * 设置本轮「上下文组成」估算：系统提示词与工具定义 token。
+     * 对话消息量在快照时由「上下文占用 − 系统 − 工具」推出。
+     */
+    public void setContextBreakdown(long systemPromptTokens, long toolDefinitionTokens) {
+        this.systemPromptTokens = Math.max(0L, systemPromptTokens);
+        this.toolDefinitionTokens = Math.max(0L, toolDefinitionTokens);
+    }
+
     /** 当前执行段的不可变指标快照。 */
     public AgentTurnMetrics turnMetrics() {
         long durationMs = Duration.between(startedAt, OffsetDateTime.now()).toMillis();
-        return usage.snapshot(durationMs, contextWindowTokens);
+        return usage.snapshot(durationMs, contextWindowTokens, systemPromptTokens, toolDefinitionTokens);
     }
 
     /** 给终态 SSE payload 注入统一指标；重复调用不会重复累计。 */

@@ -2,6 +2,19 @@ import type { ComponentType } from 'react';
 import type { ResultSlotBinding } from './resultSlots';
 import type { XYPosition, Viewport } from '@xyflow/react';
 import type { MediaNodeData, NodeStatus } from '../types';
+import {
+  DEFAULT_IMAGE_GENERATION_MODE,
+  DEFAULT_VIDEO_GENERATION_MODE,
+  GENERATION_KIND_ALIASES,
+  IMAGE_GENERATION_KIND,
+  LEGACY_GENERATION_PORT_ALIASES,
+  LEGACY_GENERATION_PORT_ORDER,
+  MERGED_GENERATION_SOURCE_KINDS,
+  VIDEO_GENERATION_KIND,
+  generationModeInputRule,
+  mergedGenerationKind,
+  resolveNodeMode,
+} from './generationModes';
 
 export type CanvasNodeKind =
   | 'text'
@@ -18,6 +31,8 @@ export type CanvasNodeKind =
   | 'imageToVideo'
   | 'firstLastFrameToVideo'
   | 'referenceToVideo'
+  | 'imageGeneration'
+  | 'videoGeneration'
   | 'videoMerge';
 
 export type LegacyNodeKind =
@@ -333,30 +348,32 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
   }),
   script: define({
     kind: 'script', title: '剧本', category: '输入', icon: 'file-text', defaultSize: { width: 420, height: 320 },
-    inputs: [], outputs: [port({ id: 'script', label: '剧本', media: 'script', acceptsKinds: [], role: 'source', order: 0, ordered: false, min: 0, max: Infinity, required: false })],
+    // 输出与文字同媒体：文字即剧本，存量剧本节点仍能接分镜拆解
+    inputs: [], outputs: [port({ id: 'script', label: '剧本', media: 'text', acceptsKinds: [], role: 'source', order: 0, ordered: false, min: 0, max: Infinity, required: false })],
     actions: noneAction(), createDefaultData: () => ({ ...data('script', '剧本', '#a9c9f5'), scriptText: '' }), renderer,
   }),
   note: define({
     kind: 'note', title: '批注', category: '辅助', icon: 'message-square', defaultSize: { width: 250, height: 250 },
     inputs: [], outputs: [], actions: noneAction(),
-    createDefaultData: () => ({ ...data('note', '批注', '#d7ff54'), richText: '' }), renderer,
+    createDefaultData: () => ({ ...data('note', '批注', '#e5e7eb'), richText: '' }), renderer,
   }),
   image: define({
     kind: 'image', title: '图片', category: '输入', icon: 'image', defaultSize: { width: 250, height: 250 },
-    inputs: [port({ id: 'origin', label: '生成来源', media: 'image', acceptsKinds: ['textToImage', 'imageToImage', 'batchImageRefine', 'shot'], role: 'origin', order: 0, ordered: false, min: 0, max: 1, required: false })],
+    inputs: [port({ id: 'origin', label: '生成来源', media: 'image', acceptsKinds: ['imageGeneration', 'textToImage', 'imageToImage', 'batchImageRefine', 'shot'], role: 'origin', order: 0, ordered: false, min: 0, max: 1, required: false })],
     outputs: [outputImage()], actions: noneAction(),
     createDefaultData: () => data('image', '图片', '#ff775f'), renderer,
   }),
   video: define({
     kind: 'video', title: '视频', category: '输入', icon: 'video', defaultSize: { width: 420, height: 236 },
-    inputs: [port({ id: 'origin', label: '生成来源', media: 'video', acceptsKinds: ['textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'shot'], role: 'origin', order: 0, ordered: false, min: 0, max: 1, required: false })],
+    inputs: [port({ id: 'origin', label: '生成来源', media: 'video', acceptsKinds: ['videoGeneration', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'shot'], role: 'origin', order: 0, ordered: false, min: 0, max: 1, required: false })],
     outputs: [outputVideo()], actions: noneAction(),
     createDefaultData: () => data('video', '视频', '#8f9cff'), renderer,
   }),
   storyboardPlanner: define({
     kind: 'storyboardPlanner', title: '分镜拆解', category: '分镜', icon: 'clapperboard', defaultSize: { width: 520, height: 420 },
     inputs: [
-      port({ id: 'script', label: '剧本', media: 'script', acceptsKinds: ['script'], role: 'source', order: 0, ordered: false, min: 1, max: 1, required: true }),
+      // 入口改收文字：剧本节点已下架，文字节点直接可接
+      port({ id: 'script', label: '文字', media: 'text', acceptsKinds: ['text', 'script'], role: 'source', order: 0, ordered: false, min: 1, max: 1, required: true }),
       port({ id: 'reference', label: '参考图', media: 'image', acceptsKinds: ['image'], role: 'reference', order: 1, ordered: true, min: 0, max: 9, required: false }),
     ],
     outputs: [port({ id: 'shots', label: '镜头', media: 'shot', acceptsKinds: ['shot'], role: 'result', order: 0, ordered: true, min: 0, max: Infinity, required: false })],
@@ -421,13 +438,42 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
     outputs: [outputVideo()], actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
     createDefaultData: () => ({ ...data('referenceToVideo', '参考物生视频', '#8f9cff'), videoMode: 'fullReference' }), renderer,
   }),
+  // ── 合并后的生成节点（节点库只展示这两个；旧 kind 走 getNodeDefinition 别名归一）──
+  // 端口刻意取宽（文/图/视频都能连），真正的必填与上限由 generationModes 的「模式规则」决定，
+  // 见 validateRunnable / getMissingRequiredInputs。
+  videoGeneration: define({
+    kind: 'videoGeneration', title: '视频生成', category: '视频生成', icon: 'video', defaultSize: { width: 480, height: 520 },
+    inputs: [
+      port({ id: 'prompt', label: '提示词', media: 'text', acceptsKinds: ['text', 'script'], role: 'prompt', order: 0, ordered: false, min: 0, max: 1, required: false }),
+      port({ id: 'reference', label: '参考图', media: 'image', acceptsKinds: ['image'], role: 'reference', order: 1, ordered: true, min: 0, max: 9, required: false }),
+      port({ id: 'video', label: '参考视频', media: 'video', acceptsKinds: ['video'], role: 'video_reference', order: 2, ordered: false, min: 0, max: 1, required: false }),
+    ],
+    outputs: [outputVideo()],
+    actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
+    createDefaultData: () => ({ ...data(VIDEO_GENERATION_KIND, '视频生成', '#8f9cff'), mode: DEFAULT_VIDEO_GENERATION_MODE }),
+    renderer,
+  }),
+  imageGeneration: define({
+    kind: 'imageGeneration', title: '图片生成', category: '图像生成', icon: 'sparkles', defaultSize: { width: 480, height: 560 },
+    inputs: [
+      port({ id: 'prompt', label: '提示词', media: 'text', acceptsKinds: ['text', 'script'], role: 'prompt', order: 0, ordered: false, min: 0, max: 1, required: false }),
+      port({ id: 'reference', label: '参考图', media: 'image', acceptsKinds: ['image'], role: 'reference', order: 1, ordered: true, min: 0, max: 14, required: false }),
+    ],
+    outputs: [outputImage()],
+    actions: [
+      action('generate', '生成图片', 'image.generate', 'media-nodes'),
+      action('redraw', '图生图', 'image.redraw', 'media-nodes'),
+    ],
+    createDefaultData: () => ({ ...data(IMAGE_GENERATION_KIND, '图片生成', '#b48cff'), mode: DEFAULT_IMAGE_GENERATION_MODE }),
+    renderer,
+  }),
   videoMerge: define({
     kind: 'videoMerge', title: '视频合并', category: '视频处理', icon: 'list-video', defaultSize: { width: 560, height: 440 },
     inputs: [port({
       id: 'clips',
       label: '视频片段',
       media: 'video',
-      acceptsKinds: ['video', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'shot', 'videoMerge'],
+      acceptsKinds: ['video', 'videoGeneration', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'shot', 'videoMerge'],
       role: 'source',
       order: 0,
       ordered: true,
@@ -446,13 +492,26 @@ export function getNodeDefinition(kind: string | undefined): NodeDefinition | un
   if (!kind) return undefined;
   const alias: Record<string, CanvasNodeKind> = {
     prompt: 'text',
-    imageGen: 'textToImage',
-    videoGen: 'referenceToVideo',
     storyboard: 'storyboardPlanner',
     storyboardGen: 'storyboardPlanner',
+    // 生成的四个视频节点 / 三个图片节点已合并（见 generationModes）
+    ...GENERATION_KIND_ALIASES,
   };
   const normalized = alias[kind] ?? kind;
   return CANVAS_NODE_DEFINITIONS[normalized as CanvasNodeKind];
+}
+
+/**
+ * 旧图里的端口 id 归一到合并后的端口（first/last/source/images → reference）。
+ * 只有生成节点的目标端口需要归一；其余节点原样返回。
+ */
+export function normalizeGenerationPortId(
+  targetKind: string | undefined,
+  handleId: string | null | undefined,
+): string | undefined {
+  if (!handleId) return undefined;
+  if (!mergedGenerationKind(targetKind)) return handleId;
+  return LEGACY_GENERATION_PORT_ALIASES[handleId] ?? handleId;
 }
 
 export function getNodeFlowRole(kind: string | undefined): MediaFlowRole | undefined {
@@ -479,12 +538,22 @@ export function getMediaPlaceholderContract(kind: string | undefined): MediaPlac
   return undefined;
 }
 
+/** 不再出现在节点库 / 右键菜单的 kind（定义保留，存量画布照旧渲染）。 */
+export const MENU_HIDDEN_NODE_KINDS: ReadonlySet<string> = new Set(['script']);
+
 export function listNodeDefinitions(): NodeDefinition[] {
-  return Object.values(CANVAS_NODE_DEFINITIONS);
+  // 已合并的旧生成节点、以及「剧本」都仍然保留定义（存量数据可渲染），但不再出现在节点库/右键菜单里。
+  // 剧本下架原因：文字即剧本，分镜拆解改收文字节点。
+  return Object.values(CANVAS_NODE_DEFINITIONS).filter((definition) =>
+    !MERGED_GENERATION_SOURCE_KINDS.has(definition.kind) && !MENU_HIDDEN_NODE_KINDS.has(definition.kind));
 }
 
 export function isCanvasNodeKind(kind: string): kind is CanvasNodeKind {
   return kind in CANVAS_NODE_DEFINITIONS;
+}
+
+export function isMergedGenerationKind(kind: string | undefined): boolean {
+  return Boolean(mergedGenerationKind(kind));
 }
 
 const activeEdges = (graph: CanvasGraphV2) =>
@@ -505,6 +574,24 @@ const withOrderedPortFallback = (edges: CanvasEdgeV2[]) => {
     return { edge, order };
   }).sort((left, right) => left.order - right.order);
 };
+
+/** 某个输入端口在当前节点模式下的最小连线数（生成节点按模式取值，其余沿用端口声明）。 */
+const requiredCountForPort = (kind: string | undefined, data: Record<string, unknown>, port: NodePort): number => {
+  const rule = generationModeInputRule(kind, data);
+  if (!rule) return port.min;
+  if (port.id === 'reference') return rule.referenceMin;
+  if (port.id === 'video') return rule.videoMin;
+  return port.min;
+};
+
+const missingInputMessage = (input: NodePort, required: number): string =>
+  input.id === 'reference' && required > 1
+    ? `需要至少 ${required} 张图片`
+    : `${input.label} 至少需要 ${required} 个输入`;
+
+/** 目标节点上该端口当前的连线（兼容旧端口 id）。 */
+const edgesIntoPort = (edges: CanvasEdgeV2[], nodeId: string, targetKind: string | undefined, portId: string) =>
+  edges.filter((edge) => edge.target === nodeId && normalizeGenerationPortId(targetKind, edge.targetHandle) === portId);
 
 const hasPath = (edges: CanvasEdgeV2[], from: string, to: string): boolean => {
   const adjacency = new Map<string, string[]>();
@@ -534,13 +621,14 @@ export function validateEdge(
   const sourceNode = graph.nodes.find((node) => node.id === proposed.source);
   const targetNode = graph.nodes.find((node) => node.id === proposed.target);
   if (!sourceNode || !targetNode) return { ok: false, code: 'NODE_NOT_FOUND', message: '源节点或目标节点不存在' };
-  if (!proposed.sourceHandle || !proposed.targetHandle) {
+  const targetHandle = normalizeGenerationPortId(targetNode.data.kind, proposed.targetHandle);
+  if (!proposed.sourceHandle || !proposed.targetHandle || !targetHandle) {
     return { ok: false, code: 'HANDLE_REQUIRED', message: 'V2 连线必须指定 sourceHandle 和 targetHandle' };
   }
   const sourceDef = getNodeDefinition(sourceNode.data.kind);
   const targetDef = getNodeDefinition(targetNode.data.kind);
   const sourcePort = findPort(sourceDef?.outputs ?? [], proposed.sourceHandle);
-  const targetPort = findPort(targetDef?.inputs ?? [], proposed.targetHandle);
+  const targetPort = findPort(targetDef?.inputs ?? [], targetHandle);
   if (!sourcePort || !targetPort) return { ok: false, code: 'PORT_NOT_FOUND', message: '找不到对应的输出端口或输入端口' };
   if (!targetPort.acceptsKinds.includes(sourceNode.data.kind)) {
     return { ok: false, code: 'PORT_KIND_MISMATCH', message: `${targetPort.label} 不接受 ${sourceDef?.title ?? sourceNode.data.kind}` };
@@ -553,19 +641,34 @@ export function validateEdge(
     edge.source === proposed.source
     && edge.target === proposed.target
     && edge.sourceHandle === proposed.sourceHandle
-    && edge.targetHandle === proposed.targetHandle)) {
+    && normalizeGenerationPortId(targetNode.data.kind, edge.targetHandle) === targetHandle)) {
     return { ok: false, code: 'DUPLICATE_EDGE', message: '该连线已存在' };
   }
-  const targetEdges = edges.filter((edge) => edge.target === proposed.target && edge.targetHandle === proposed.targetHandle);
-  if (Number.isFinite(targetPort.max) && targetEdges.length >= targetPort.max) {
-    return { ok: false, code: 'PORT_LIMIT_EXCEEDED', message: `${targetPort.label} 最多连接 ${targetPort.max} 条` };
+  const targetEdges = edges.filter((edge) =>
+    edge.target === proposed.target && normalizeGenerationPortId(targetNode.data.kind, edge.targetHandle) === targetHandle);
+  const modeRule = generationModeInputRule(targetNode.data.kind, targetNode.data);
+  const modeLimit = modeRule
+    ? targetPort.id === 'reference'
+      ? modeRule.referenceMax
+      : targetPort.id === 'video'
+        ? modeRule.videoMax
+        : undefined
+    : undefined;
+  const maxEdges = modeLimit === undefined ? targetPort.max : Math.min(targetPort.max, modeLimit);
+  if (Number.isFinite(maxEdges) && targetEdges.length >= maxEdges) {
+    return { ok: false, code: 'PORT_LIMIT_EXCEEDED', message: `${targetPort.label} 最多连接 ${maxEdges} 条` };
   }
   if (targetPort.ordered) {
-    const order = proposed.data?.portOrder;
+    // 旧端口自带顺序（first → 0 / last → 1），存量连线没有 portOrder 也按它判定
+    const impliedOrder = mergedGenerationKind(targetNode.data.kind)
+      ? LEGACY_GENERATION_PORT_ORDER[proposed.targetHandle]
+      : undefined;
+    const order = proposed.data?.portOrder ?? impliedOrder;
     if (!Number.isInteger(order) || order === undefined || order < 0) {
       return { ok: false, code: 'PORT_ORDER_REQUIRED', message: `${targetPort.label} 需要 portOrder` };
     }
-    if (targetEdges.some((edge) => edge.data?.portOrder === order)) {
+    if (targetEdges.some((edge) => (edge.data?.portOrder
+      ?? (mergedGenerationKind(targetNode.data.kind) ? LEGACY_GENERATION_PORT_ORDER[edge.targetHandle ?? ''] : undefined)) === order)) {
       return { ok: false, code: 'PORT_ORDER_CONFLICT', message: `${targetPort.label} 的顺序 ${order} 已被占用` };
     }
   }
@@ -587,16 +690,21 @@ export function validateRunnable(
     return { ok: false, code: 'ACTION_NOT_FOUND', message: '节点动作不存在' };
   }
   const edges = activeEdges(graph);
-  const imageToImage = node.data.kind === 'imageToImage';
-  if (imageToImage && !edges.some((edge) =>
-    edge.target === nodeId && (edge.targetHandle === 'source' || edge.targetHandle === 'reference'))) {
-    return { ok: false, code: 'INPUT_REQUIRED', message: '图片至少需要 1 个输入' };
-  }
   for (const input of definition.inputs) {
-    if (imageToImage && input.id === 'source') continue;
-    const bound = edges.filter((edge) => edge.target === nodeId && edge.targetHandle === input.id);
-    if (bound.length < input.min) {
-      return { ok: false, code: 'INPUT_REQUIRED', message: `${input.label} 至少需要 ${input.min} 个输入` };
+    const bound = edgesIntoPort(edges, nodeId, node.data.kind, input.id);
+    const required = requiredCountForPort(node.data.kind, node.data, input);
+    if (bound.length < required) {
+      return { ok: false, code: 'INPUT_REQUIRED', message: missingInputMessage(input, required) };
+    }
+    const rule = generationModeInputRule(node.data.kind, node.data);
+    if (rule && input.id === 'reference' && bound.length > rule.referenceMax) {
+      return {
+        ok: false,
+        code: 'PORT_LIMIT_EXCEEDED',
+        message: resolveNodeMode(node.data.kind, node.data) === 'firstLastFrame'
+          ? '首尾帧只支持首帧与尾帧两张图片'
+          : `参考图最多 ${rule.referenceMax} 张`,
+      };
     }
     if (input.ordered) {
       const orders = withOrderedPortFallback(bound).map((item) => item.order);
@@ -616,37 +724,19 @@ export function getMissingRequiredInputs(
   const definition = getNodeDefinition(node?.data.kind);
   if (!definition) return [];
   const edges = activeEdges(graph);
-  const imageToImage = node?.data.kind === 'imageToImage';
   const missing: MissingNodeInput[] = [];
 
-  if (imageToImage) {
-    const imageInputs = edges.filter((edge) =>
-      edge.target === nodeId && (edge.targetHandle === 'source' || edge.targetHandle === 'reference'));
-    if (!imageInputs.length) {
-      const source = definition.inputs.find((input) => input.id === 'source');
-      if (source) {
-        missing.push({
-          portId: source.id,
-          label: source.label,
-          media: source.media,
-          required: source.required,
-          min: source.min,
-          bound: 0,
-        });
-      }
-    }
-  }
-
   for (const input of definition.inputs) {
-    if (imageToImage && input.id === 'source') continue;
-    const bound = edges.filter((edge) => edge.target === nodeId && edge.targetHandle === input.id).length;
-    if (bound >= input.min) continue;
+    const bound = edgesIntoPort(edges, nodeId, node?.data.kind, input.id).length;
+    const required = requiredCountForPort(node?.data.kind, node?.data ?? {}, input);
+    if (bound >= required) continue;
     missing.push({
       portId: input.id,
       label: input.label,
       media: input.media,
-      required: input.required,
-      min: input.min,
+      // 生成节点的必填由模式决定：端口本身是可选，但当前模式要求它时必须如实上报
+      required: input.required || required > 0,
+      min: required,
       bound,
     });
   }
@@ -663,7 +753,7 @@ export function getInputBindings(
   if (!definition?.actions.some((item) => item.id === actionId)) return {};
   const result: NodeRunContext['inputBindings'] = {};
   for (const input of definition.inputs) {
-    const bound = activeEdges(graph).filter((edge) => edge.target === nodeId && edge.targetHandle === input.id);
+    const bound = edgesIntoPort(activeEdges(graph), nodeId, node?.data.kind, input.id);
     const ordered = input.ordered ? withOrderedPortFallback(bound) : bound.map((edge, order) => ({ edge, order }));
     result[input.id] = ordered
       .sort((a, b) => a.order - b.order)

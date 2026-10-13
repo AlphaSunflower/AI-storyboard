@@ -629,6 +629,11 @@ interface AgentState {
   uploadRefImage: (file: File, purpose?: string, kind?: 'reference' | 'asset') => Promise<void>;
   uploadRefImages: (files: File[], purposes?: string[], kinds?: Array<'reference' | 'asset'>) => Promise<void>;
   addLocalUserMessage: (content: string) => void;
+  /**
+   * 追加一条只在本地存在的助手媒体消息（视频抽帧结果等）。
+   * 后端没有对应记录，刷新后消失；会话内的渲染与悬浮操作与生成结果一致。
+   */
+  addLocalMediaMessage: (content: string) => void;
 
   // 本次携带的资产ID（持久化到发送时消费，不随渲染丢失）
   pickedAssetIds: string[];
@@ -3190,6 +3195,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       id: `tmp-asset-${Date.now()}`,
       conversationId: s.activeConversationId ?? '',
       role: 'user',
+      content,
+      createdAt: new Date().toISOString(),
+    }],
+  })),
+  addLocalMediaMessage: (content) => set((s) => ({
+    messages: [...s.messages, {
+      id: `local-media-${Date.now()}`,
+      conversationId: s.activeConversationId ?? '',
+      role: 'assistant',
       content,
       createdAt: new Date().toISOString(),
     }],

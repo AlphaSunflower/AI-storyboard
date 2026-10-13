@@ -6,7 +6,7 @@ AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScr
 
 - MoonAgent 是 Spring Boot 4.1.1 + Java 25 + AgentScope 2.0.4 服务，监听 `8084`；`MoonAgentRuntime` 是唯一智能体执行器。
 - MoonSandbox 是独立常驻执行服务，监听宿主 `127.0.0.1:8090`，工作目录只存在于 Docker 命名卷 `sandbox-workspaces`；MoonAgent 通过内部 HTTP 调用，不挂载 Docker socket。
-- MoonSandbox 不注册 Nacos。MoonAgent 通过 `AGENT_SANDBOX_ENABLED`、`MOON_SANDBOX_BASE_URL`、`MOON_SANDBOX_INTERNAL_SECRET` 连接；Nacos 只承载 Skill、全局提示词和 MCP 元数据。
+- MoonSandbox 不注册 Nacos。MoonAgent 通过 `AGENT_SANDBOX_ENABLED`、`MOON_SANDBOX_BASE_URL`、`MOON_SANDBOX_INTERNAL_SECRET` 连接。服务发现默认关闭（`NACOS_DISCOVERY_ENABLED=false`），ApiGateway 按 `BACKEND_URI`/`ASSET_SERVICE_URI`/`CANVAS_URI`/`MOON_AGENT_URI` 直连各服务；Nacos（可选，`deploy/docker/nacos` 单起）现在只承载 Skill、全局提示词和 MCP 元数据。
 - 会话隔离采用“`/workspaces/{conversationId}` 独立目录 + Redis 会话任务锁 + runner 内文件锁”。同一会话严格串行，不同会话共享容器并可并发。
 - Markdown、TXT、DOCX、XLSX、PDF 和图表等最终产物必须上传 MinIO，并写入 `agent_assets`；聊天消息通过 `metadata.sandboxAttachments` 展示文件卡片。
 - 2026-09-21 的“项目库统一改造”仍是已批准方向，但已转入存量架构要求：保留 `canvas_assets.id`、`/api/assets` 只读兼容与统一 `asset.library_*` 数据映射，相关权限、上传、快照、迁移和跨服务故障测试仍须补齐。
@@ -119,7 +119,7 @@ AI-storyboard/
 
 | 服务 | 目录 | 端口 | 说明 |
 |------|------|------|------|
-| nacos | `nacos/` | 8848/9848/8850 | `nacos/nacos-server:v3.2.3` standalone 服务发现；数据卷 `nacos-data` |
+| nacos | `nacos/` | 8848/9848/8850 | `nacos/nacos-server:v3.2.3` standalone 服务发现；数据卷 `nacos-data`。**已不参与统一栈**：栈内 `NACOS_DISCOVERY_ENABLED=false` 走直连，仅在需要恢复注册发现时单起 |
 | vosk | `vosk/` | 2700 | 离线中文语音识别；模型挂载 `vosk/data/models/vosk-model-cn-0.22` |
 | redis | `redis/` | 6379 | 会话锁、缓存；`redis-ai` + AOF 命名卷 |
 | minio | `minio/` | 9000/9001 | 最终对象存储：S3 API + 控制台；数据在 `minio/data/` |
@@ -140,6 +140,13 @@ cp .env.example .env
 - runner 使用非 root、只读根文件系统、`tmpfs /tmp`、CPU/内存/PIDs 限额和 `unless-stopped`。
 - 日常停止不要使用 `docker compose down -v`，否则会删除 `sandbox-workspaces` 命名卷。
 - 沙箱工作文件最终仍以 MinIO 为准；MoonAgent 的 `SandboxOutputReconciler` 每轮扫描并发布 `output/`。
+
+### 统一业务栈（deploy/stack/）
+
+`deploy/stack/` 用一个 compose 项目把基础设施与业务一起拉起（6 个 Java 服务 + 主前端/画布前端 + Postgres/Redis/MinIO/MoonSandbox，共 12 个容器；不含 Nacos 与画布 Bridge——服务发现默认关闭、网关直连，浏览器画布命令由 canvas 服务的信箱转发），
+入口 `http://localhost/`，默认账号 `admin@qq.com`。首启由 `db/` 下的 `docker-entrypoint-initdb.d` 脚本建库、还原
+`ai_storyboard` / `llm_gateway` 转储并把账号收敛为 `admin@qq.com`；MinIO 直接挂载 `deploy/docker/minio/data`。
+构建/启停/验收/离线打包脚本在 `deploy/stack/scripts/`，细节与排障要点见 `deploy/stack/README.md`。
 
 ## Databases
 
@@ -430,7 +437,7 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - 沙箱最终产物统一经 `SandboxArtifactPublisher` 上传 MinIO 并写 `agent_assets`；聊天卡片只引用资产 URL 和 message metadata，不暴露宿主机路径。
 - 六个生产 Skill：`storyboard`、`image`、`video`、`canvas-design`、`canvas-run`、`general`。
 - Nacos 发布脚本：`scripts/nacos/publish_assets.py`；只支持 upload/review/release 生命周期，
-  Canvas Bridge 不进入共享 Nacos。
+  画布执行信箱（canvas 服务内）不进入共享 Nacos。
 
 ## Historical pre-AgentScope notes (`/api/agent/**`) — 非当前协议，仅供迁移追溯
 

@@ -48,7 +48,7 @@ public class ExternalMediaServiceImpl implements ExternalMediaService {
                 : request.type().trim().toUpperCase();
         MediaType mediaType = parseMediaType(mediaTypeValue);
         AssetType assetType = AssetType.valueOf(mediaType.name());
-        long size = request.sizeBytes() == null ? storage.contentLength(objectKey) : request.sizeBytes();
+        long size = request.sizeBytes() == null ? storageSize(objectKey) : request.sizeBytes();
         if (size < 0) throw new BusinessException(50201, "外部媒体对象不存在: " + objectKey);
         String sha256 = request.sha256() == null || !request.sha256().matches("[0-9a-fA-F]{64}")
                 ? LibraryRepository.sha256Hex(objectKey.getBytes(StandardCharsets.UTF_8))
@@ -120,12 +120,26 @@ public class ExternalMediaServiceImpl implements ExternalMediaService {
 
     private static String cleanObjectKey(String objectKey) {
         String cleaned = objectKey.trim().replace('\\', '/');
+        // 调用方常传 /api/files/** 的签名 URL（?token=...），签名不参与 object key
+        int query = cleaned.indexOf('?');
+        if (query >= 0) cleaned = cleaned.substring(0, query);
+        int fragment = cleaned.indexOf('#');
+        if (fragment >= 0) cleaned = cleaned.substring(0, fragment);
+        int marker = cleaned.indexOf("/api/files/");
+        if (marker >= 0) cleaned = cleaned.substring(marker + "/api/files/".length());
         while (cleaned.startsWith("/")) cleaned = cleaned.substring(1);
         if (!cleaned.startsWith("images/") && !cleaned.startsWith("videos/") && !cleaned.startsWith("audios/")
                 && !cleaned.startsWith("documents/") && !cleaned.startsWith("files/")) {
             throw new BusinessException(40001, "对象 key 不属于媒体目录");
         }
         return cleaned;
+    }
+
+    private long storageSize(String objectKey) {
+        if (!storage.exists(objectKey)) {
+            throw new BusinessException(50201, "外部媒体对象不存在: " + objectKey);
+        }
+        return storage.contentLength(objectKey);
     }
 
     private static String fileName(String objectKey) {

@@ -57,6 +57,7 @@ interface CanvasContextMenuProps {
   canRedo: boolean;
   onClose: () => void;
   onUpload: () => void;
+  /** 从项目库多选素材上传到画布 */
   onOpenAssets: () => void;
   onAddText: () => void;
   onAddImage: () => void;
@@ -119,8 +120,8 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
 
   return <div ref={menuRef} className={`canvas-context-menu ${flyoutLeft ? 'is-flyout-left' : ''}`} role="menu" aria-label="画布右键菜单" style={position} onContextMenu={(event) => event.preventDefault()}>
     {target.type === 'pane' && <>
-      <MenuItem onSelect={run(props.onUpload)}>上传</MenuItem>
-      <MenuItem onSelect={run(props.onOpenAssets)}>添加资产</MenuItem>
+      <MenuItem onSelect={run(props.onUpload)} title="图片、视频文件按类型落成对应节点">上传本地文件</MenuItem>
+      <MenuItem onSelect={run(props.onOpenAssets)} title="从项目库多选素材上传到画布">上传资产</MenuItem>
       <Separator />
       <MenuItem submenu={addNodeSubmenu}>添加节点</MenuItem>
       <MenuItem disabled title="首批仅开放图片与文字节点">添加辅助工具</MenuItem>

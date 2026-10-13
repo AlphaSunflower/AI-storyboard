@@ -9,6 +9,34 @@ export const CHAT_SIDEBAR_SPLIT_MIN_WIDTH = 720;
 export const CHAT_SIDEBAR_RESTORE_HYSTERESIS = 64;
 /** 会话栏收起后的图标 rail 宽度 */
 export const CHAT_SIDEBAR_COLLAPSED_WIDTH = 48;
+/** 会话栏拖拽可调区间 */
+export const CHAT_SIDEBAR_MIN_WIDTH = 180;
+export const CHAT_SIDEBAR_MAX_WIDTH = 360;
+
+/** 会话栏拖拽结果：正常改宽，或「拖到最窄」直接收起。 */
+export type ChatSidebarDragOutcome =
+  | { action: 'resize'; width: number }
+  | { action: 'collapse' };
+
+/**
+ * 拖拽会话栏右边缘 → 下一状态。
+ *
+ * 拖到比最小宽度还窄即视为「拖到底」，收起成图标 rail；
+ * 收起后由 rail 顶部的展开按钮还原，不需要再留一个收起按钮。
+ */
+export function resolveChatSidebarDrag({
+  startWidth,
+  deltaX,
+}: {
+  startWidth: number;
+  deltaX: number;
+}): ChatSidebarDragOutcome {
+  const raw = startWidth + deltaX;
+  if (!Number.isFinite(raw)) return { action: 'resize', width: CHAT_SIDEBAR_MIN_WIDTH };
+  if (raw < CHAT_SIDEBAR_MIN_WIDTH) return { action: 'collapse' };
+  return { action: 'resize', width: Math.min(CHAT_SIDEBAR_MAX_WIDTH, raw) };
+}
+
 /** 消息导航行边栏自身占用的独立窄列宽度（与 ChatMessageRail 的 --rail-width 同源） */
 export const CHAT_MESSAGE_RAIL_WIDTH = 44;
 /** 低于该宽度就不显示消息导航行边栏（行边栏占 44px 独立窄列） */

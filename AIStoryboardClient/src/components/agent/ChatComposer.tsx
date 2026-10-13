@@ -18,7 +18,7 @@ import {
 import { FileText, Paperclip } from 'lucide-react';
 import {
   PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X,
-  Minimize2, Info, PanelRightOpen,
+  Minimize2, Info, PanelRightOpen, Frame, MessagesSquare,
 } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
@@ -33,10 +33,12 @@ import { currentSideChatId } from '../../lib/sideChatSelectionSync';
 import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
+import { isComposerCollapsed } from '../../lib/chatScrollState';
+import './ChatComposer.css';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { SideChatContextChip } from './SideChatContextChip';
-import { ContextUsageRing } from './ContextUsageRing';
+import { ChatStatusBar } from './ChatStatusBar';
 import { ChatSlashMenu, type SlashCommandItem } from './ChatSlashMenu';
 import { ConversationStatusCard } from './ConversationStatusCard';
 import { agentChatTokens, type AgentChatTokens } from './agentChatTokens';
@@ -59,7 +61,34 @@ const REFERENCE_PREVIEW_LIMIT = 5;
  * DeepSeek 风格输入卡（780px 悬浮胶囊）：/chat 页 hero 居中与底部输入共用。
  * 逻辑复用 agentStore（参考图/pendingPicUrl/发送/流式禁用）。
  */
-export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boolean } = {}) {
+export interface CanvasModeCommand {
+  /** 当前是否处于画布编辑模式 */
+  active: boolean;
+  /** 是否持有可恢复的画布目标（画布子站锁定场景） */
+  restorable: boolean;
+  onExit: () => void;
+  onEnter: () => void;
+}
+
+export function ChatComposer({
+  enableSideChat = true,
+  canvasModeCommand,
+  compact = false,
+  onCollapsedChange,
+  docked = false,
+  onViewConversation,
+}: {
+  enableSideChat?: boolean;
+  canvasModeCommand?: CanvasModeCommand;
+  /** 消息区离开底部时的收缩态：只留一行输入框 + 发送按钮，聚焦输入框立即还原 */
+  compact?: boolean;
+  /** 收缩态变化回调：供页面把「回到底部」等外部元素对齐到输入卡当前右边缘 */
+  onCollapsedChange?: (collapsed: boolean) => void;
+  /** 智能体被挤成右下角浮窗输入框：收起计数器，并把「查看当前对话」挂进工具栏 */
+  docked?: boolean;
+  /** 查看当前对话（浮窗里展开聊天记录） */
+  onViewConversation?: () => void;
+} = {}) {
   const {
     streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
     refImageUrls, uploadRefImages, sendMessage, interruptAndSend, stopGeneration,
@@ -85,6 +114,8 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
   const sideChatSelections = currentSideChatId() ? storedSideChatSelections : [];
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
+  /** 卡片内任意控件获得焦点（含下拉按钮）都算「在用」，此时不收缩 */
+  const [engaged, setEngaged] = useState(false);
   const [recording, setRecording] = useState(false);
   const [removeModalOpen, setRemoveModalOpen] = useState(false);
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
@@ -104,6 +135,7 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
   const [dropActive, setDropActive] = useState(false);
   const [dragKind, setDragKind] = useState<'file' | 'scene' | 'library' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
@@ -132,10 +164,6 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
     // 兼容旧后端：无 contextTokens 时退回累加口径
     return (contextBaseline?.inputTokens ?? 0) + (activeUsageDraft?.inputTokens ?? 0);
   }, [activeUsageDraft, contextBaseline]);
-  const contextCachedTokens = useMemo(
-    () => activeUsageDraft?.cachedInputTokens ?? contextBaseline?.cachedInputTokens ?? 0,
-    [activeUsageDraft, contextBaseline],
-  );
   const contextLimitTokens = useMemo(() => {
     const window = activeUsageDraft?.contextWindowTokens
       || activeTurnContextWindow
@@ -377,6 +405,22 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
           activeConversationId ?? undefined,
           activeConversation?.title,
         );
+      },
+    },
+    {
+      // 画布子站：画布模式默认开启，通过 / 菜单显式进出（退出即回到普通 Moon 对话）
+      id: canvasModeCommand?.active ? 'canvas-exit' : 'canvas-enter',
+      icon: <Frame size={16} strokeWidth={2} />,
+      title: canvasModeCommand?.active ? '退出画布模式' : '进入画布模式',
+      description: canvasModeCommand?.active
+        ? '离开画布编辑模式，回到普通 Moon 对话'
+        : '回到当前画布的编辑模式',
+      visible: !!canvasModeCommand?.restorable,
+      run: () => {
+        setText('');
+        if (!canvasModeCommand) return;
+        if (canvasModeCommand.active) canvasModeCommand.onExit();
+        else canvasModeCommand.onEnter();
       },
     },
   ];
@@ -659,27 +703,66 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
     });
   };
 
+  const hasAttachmentRow = !!(
+    canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
+    || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
+    || fileAttachments.length > 0 || pendingGroup || boundGroups.length > 0
+  );
+  /** 输入框上方的附加行：收缩态整块收起，所以只有真的渲染了内容时才占位 */
+  const hasComposerExtras = !!(
+    compressing || compressNotice
+    || (!readOnly && hasPendingAnnotations) || (!readOnly && hasSideChatSelections)
+    || hasAttachmentRow || pendingPicUrls.length > 0 || canvasBinding || canvasExitPending || readOnly
+  );
+  const collapsed = isComposerCollapsed(compact, focused || engaged)
+    && !menuOpen && !removeModalOpen && !sceneModalOpen && !projectLibraryOpen && !canvasMediaOpen
+    && !slashMenuVisible && !statusOpen;
+
+  useEffect(() => {
+    onCollapsedChange?.(collapsed);
+  }, [collapsed, onCollapsedChange]);
+
   return (
     <>
     <div
-      className="chat-composer-card"
+      ref={cardRef}
+      className={`chat-composer-card${collapsed ? ' is-collapsed' : ''}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onFocusCapture={() => setEngaged(true)}
+      onBlurCapture={() => setEngaged(false)}
       style={{
-      width: '100%', maxWidth: DS.maxContent, margin: '0 auto',
-      border: `1px solid ${dropActive ? DS.brand : focused ? 'rgba(65,118,230,0.45)' : DS.border}`, borderRadius: 22,
-      background: dropActive ? 'rgba(65,118,230,0.035)' : 'white',
+      width: '100%', maxWidth: collapsed ? DS.maxContentCompact : DS.maxContent, margin: '0 auto',
+      border: `1px solid ${dropActive ? DS.brand : focused ? 'rgba(65,118,230,0.45)' : DS.border}`,
+      borderRadius: collapsed ? 18 : 22,
+      background: dropActive
+        ? 'rgba(65,118,230,0.035)'
+        : collapsed ? 'rgba(255, 255, 255, 0.62)' : 'white',
+      backdropFilter: collapsed ? 'blur(10px)' : undefined,
+      WebkitBackdropFilter: collapsed ? 'blur(10px)' : undefined,
       boxShadow: dropActive
         ? '0 0 0 3px rgba(65,118,230,0.14), 0 0 24px rgba(65,118,230,0.20)'
-        : focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
-      transition: 'border-color 0.2s, box-shadow 0.2s',
-      padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10,
+        : focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)'
+          : collapsed ? '0 10px 26px -14px rgba(20, 20, 19, 0.35)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
+      transition: 'border-color 0.2s, box-shadow 0.2s, background-color 240ms ease, padding 240ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 240ms ease, max-width 260ms cubic-bezier(0.22, 1, 0.36, 1)',
+      padding: collapsed ? '4px 6px 4px 12px' : '10px 14px 12px',
+      display: 'flex',
+      // 收缩态：输入框与发送按钮并排一行
+      flexDirection: collapsed ? 'row' : 'column',
+      alignItems: collapsed ? 'center' : undefined,
+      gap: collapsed ? 8 : 10,
       boxSizing: 'border-box', position: 'relative',
     }}>
+      {/* 两个向上弹出的浮层放在附加行之外：附加行收缩时要裁剪，浮层不能被裁 */}
       {slashMenuVisible && (
-        <ChatSlashMenu items={slashItems} query={slashQuery ?? ''} onClose={() => setText('')} />
+        <ChatSlashMenu
+          items={slashItems}
+          query={slashQuery ?? ''}
+          onClose={() => setText('')}
+          anchorRef={cardRef}
+        />
       )}
       {statusOpen && (
         <ConversationStatusCard
@@ -690,6 +773,9 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
           onClose={() => setStatusOpen(false)}
         />
       )}
+      {hasComposerExtras && (
+      <div className={`chat-composer-extra${collapsed ? ' is-collapsed' : ''}`}>
+      <div className="chat-composer-extra__inner">
       {compressing && (
         <div style={{ fontSize: 12, color: DS.textSecondary }}>正在压缩上下文…</div>
       )}
@@ -947,6 +1033,9 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
           {readOnlyHint}
         </div>
       )}
+      </div>
+      </div>
+      )}
       <textarea
         ref={inputRef}
         value={text}
@@ -963,17 +1052,46 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '描述你的需求…'}
+        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
         disabled={readOnly || (busy && !canInterruptSend)}
-        rows={2}
+        rows={collapsed ? 1 : 2}
         style={{
           border: 'none', outline: 'none', resize: 'none', background: 'transparent',
           fontSize: 16, lineHeight: 1.6, color: DS.ink, fontFamily: 'inherit',
           boxSizing: 'border-box', overflowY: 'hidden', scrollbarWidth: 'thin',
+          ...(collapsed ? { flex: '1 1 auto', minWidth: 0, minHeight: 24 } : {}),
         }}
       />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          ...(collapsed ? { flex: '0 0 auto' } : {}),
+        }}
+      >
+        <div className={`chat-composer-extra chat-composer-extra--inline${collapsed ? ' is-collapsed' : ''}`}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          {/* 浮窗（智能体被挤成一个输入框）时，工具栏里保留「查看当前对话」入口 */}
+          {onViewConversation && (
+            <Tooltip label="查看当前对话">
+              <button
+                type="button"
+                onClick={onViewConversation}
+                aria-label="查看当前对话"
+                className="chat-plus-trigger"
+                onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
+                style={{
+                  width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
+                  cursor: 'pointer', color: DS.textSecondary, flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <MessagesSquare size={17} strokeWidth={1.8} />
+              </button>
+            </Tooltip>
+          )}
           <ApprovalModeSelector
             mode={approvalMode}
             disabled={readOnly || streaming || !!waitingHumanInput || !!waitingVideoPlan
@@ -1018,23 +1136,17 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
             )}
           </div>
         </div>
+        </div>
         {/* 右侧：麦克风 + 发送，紧贴排列 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-          {/* 上下文占用：麦克风左侧，悬浮出详情卡；无真实数据时不渲染 */}
-          {hasContextData && (
-            <ContextUsageRing
-              usedTokens={contextUsageTokens}
-              limitTokens={contextLimitTokens}
-              cachedTokens={contextCachedTokens}
-              disabled={readOnly}
-            />
-          )}
+          <span className={`chat-composer-extra chat-composer-extra--inline${collapsed ? ' is-collapsed' : ''}`}>
           <MicButton
             onToggle={handleMicToggle}
             onPcm={handlePcm}
             // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
             disabled={readOnly || (busy && !recording)}
           />
+          </span>
           {streaming && !agentVideoTask && !canSend ? (
             <button
               onClick={stopGeneration}
@@ -1335,10 +1447,17 @@ export function ChatComposer({ enableSideChat = true }: { enableSideChat?: boole
         onClose={() => setPreviewMedia(null)}
       />
     </div>
-    {/* 底部免责声明（位于输入框卡片下方） */}
-    <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--color-muted-soft)', lineHeight: 1.4, marginTop: 8 }}>
-      内容由 AI 生成，请仔细甄别
-    </div>
+    {/* 底部状态栏（位于输入框卡片下方）：收缩态整块收起，输入卡下沉贴到原计数器位置 */}
+    {!docked && (
+      <div
+        className={`chat-status-bar-slot${collapsed ? ' is-collapsed' : ''}`}
+        inert={collapsed}
+      >
+        <div className="chat-status-bar-slot__inner">
+          <ChatStatusBar compact={compact} disabled={readOnly} collapsed={collapsed} />
+        </div>
+      </div>
+    )}
     </>
   );
 }

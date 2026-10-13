@@ -4,6 +4,9 @@ import {
   CHAT_MESSAGE_RAIL_MIN_CHAT_WIDTH,
   CHAT_MESSAGE_RAIL_WIDTH,
   CHAT_SIDEBAR_COLLAPSED_WIDTH,
+  CHAT_SIDEBAR_MAX_WIDTH,
+  CHAT_SIDEBAR_MIN_WIDTH,
+  resolveChatSidebarDrag,
   resolveChatColumnWidth,
   resolveChatDockMode,
   resolveChatSidebarCollapseWidth,
@@ -13,6 +16,29 @@ import {
   shouldRestoreAutoCollapsedSidebar,
   shouldShowChatMessageRail,
 } from './chatDockLayout';
+
+describe('resolveChatSidebarDrag', () => {
+  it('resizes the sidebar between the min and max widths', () => {
+    expect(resolveChatSidebarDrag({ startWidth: 240, deltaX: 40 }))
+      .toEqual({ action: 'resize', width: 280 });
+    expect(resolveChatSidebarDrag({ startWidth: 240, deltaX: -20 }))
+      .toEqual({ action: 'resize', width: 220 });
+  });
+
+  it('clamps to the max width while dragging outward', () => {
+    expect(resolveChatSidebarDrag({ startWidth: 240, deltaX: 500 }))
+      .toEqual({ action: 'resize', width: CHAT_SIDEBAR_MAX_WIDTH });
+  });
+
+  it('collapses once dragged narrower than the minimum width', () => {
+    expect(resolveChatSidebarDrag({ startWidth: 240, deltaX: -60 }))
+      .toEqual({ action: 'resize', width: CHAT_SIDEBAR_MIN_WIDTH });
+    expect(resolveChatSidebarDrag({ startWidth: 240, deltaX: -61 }))
+      .toEqual({ action: 'collapse' });
+    expect(resolveChatSidebarDrag({ startWidth: 240, deltaX: -400 }))
+      .toEqual({ action: 'collapse' });
+  });
+});
 
 const base = {
   previousMode: 'split' as const,

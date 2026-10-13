@@ -1,0 +1,28 @@
+[start] url=http://localhost:3000/canvas/ cwd=E:\Desktop\AI-storyboard\XiaoYueCanvasAgent
+[server ready] true
+[browser launched]
+[goto] status=200
+[t+3s] title=Morrow Creative Canvas rootChildren=1 serverAlive=true
+[t+6s] title=Morrow Creative Canvas rootChildren=1 serverAlive=true
+[t+9s] title=Morrow Creative Canvas rootChildren=1 serverAlive=true
+[t+12s] title=Morrow Creative Canvas rootChildren=1 serverAlive=true
+[t+15s] title=Morrow Creative Canvas rootChildren=1 serverAlive=true
+[body text] MORROW / LOCAL CREATIVE WORKBENCH | 设计发生在你的设备上。 |  | 项目、原图与每个派生版本保存在本地。没有演示素材，没有伪造任务，也不会把文件上传到未知服务。 |  | 新建项目 | 导入 .morrow | LOCAL PROJECTS | 最近项目 | 1 个项目 | 0 | 能力探测项目 | 刚刚 · 0 个节点 · 0 项素材
+[screenshot] repro-canvas-load.png
+[page events]
+  console.debug: [vite] connecting...
+  console.debug: [vite] connected.
+  console.info: %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold
+[server alive after load] true
+[server exit code] null
+[server log tail]
+
+> morrow-creative-canvas@0.1.0 dev
+> vite --host localhost --port 3000
+
+
+  VITE v6.4.3  ready in 265 ms
+
+  ➜  Local:   http://localhost:3000/canvas/
+
+[done]

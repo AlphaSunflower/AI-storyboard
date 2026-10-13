@@ -1,61 +1,75 @@
+import { apiFetch } from '../services/morrowApi';
 import { createId } from '../utils/id';
 import { executeToolCall } from './toolRegistry';
-import {
-  BRIDGE_BROWSER_COMMAND_TIMEOUT_MS,
-  BRIDGE_DEFAULT_PORT,
-  BRIDGE_POLL_INTERVAL_MS,
-  type BridgePollResult,
-  type CanvasBridgeResponse,
-  type BridgeHealth,
-} from './bridgeProtocol';
+import type { BridgeSource, CanvasBridgeResponse } from './bridgeTypes';
 
-const endpoint = import.meta.env.VITE_BRIDGE_URL?.trim().replace(/\/$/, '') || `http://127.0.0.1:${BRIDGE_DEFAULT_PORT}`;
-const bridgeToken = import.meta.env.VITE_BRIDGE_TOKEN?.trim() ?? '';
+// 画布命令信箱（canvas 服务）：浏览器每 1s 轮询一次，领取 MCP 侧投递的命令并在页面内执行。
+// 同源调用，身份走正常登录态（apiFetch 自带 Bearer 与 401 刷新），不再需要独立端口与桥接令牌。
+// 路径相对 morrowApi 的 /api/canvas 前缀，最终落到 /api/canvas/bridge/**。
+const BRIDGE_PATH = '/bridge';
+const BRIDGE_POLL_INTERVAL_MS = 1000;
 const BRIDGE_RETRY_INTERVAL_MS = 2000;
 const BRIDGE_HTTP_TIMEOUT_MS = 5_000;
+const BRIDGE_BROWSER_COMMAND_TIMEOUT_MS = 10 * 60_000;
 
 export interface CanvasBridgeStatus {
   state: 'connecting' | 'ready' | 'error';
   message?: string;
 }
 
-// 打开项目后调用，返回一个停止函数。浏览器以轮询方式从 Bridge 拉取
-// 外部（CLI/MCP）命令，执行命令层后回传结果。
-// Bridge 未启动时**不启动轮询**（避免 fetch 抛 ERR_CONNECTION_REFUSED 在控制台无限刷屏）；
-// 仅在 /health 探测成功后才 register + poll，之后单次网络失败也保持静默。
+interface BridgePollResult {
+  command?: {
+    requestId: string;
+    method: string;
+    params: Record<string, unknown>;
+    source?: BridgeSource;
+    dryRun?: boolean;
+    expectedRevision?: number;
+  };
+}
+
+interface BridgeHealth {
+  ok?: boolean;
+  version?: number;
+  projects?: Array<{ projectId: string; canvasId: string }>;
+}
+
+// 打开项目后调用，返回一个停止函数。浏览器以轮询方式从画布服务拉取
+// 外部（MCP/CLI）命令，执行命令层后回传结果。
+// 服务不可达时**不启动轮询**，仅在 /bridge/health 探测成功后才 register + poll，
+// 之后单次网络失败也保持静默并定时重连。
 export function startCanvasBridge(
   projectId: string,
   canvasId: string,
   onStatus?: (status: CanvasBridgeStatus) => void,
   titles?: { projectTitle?: string; canvasTitle?: string },
 ): () => void {
-  if (!bridgeToken) {
-    onStatus?.({ state: 'error', message: '未配置画布桥接令牌' });
-    return () => {};
-  }
   const tabId = createId();
   let stopped = false;
   let timer: number | null = null;
   let retryTimer: number | null = null;
 
-  const fetchWithTimeout = (input: string, init: RequestInit = {}, timeoutMs = BRIDGE_HTTP_TIMEOUT_MS) => {
+  const fetchWithTimeout = (
+    path: string,
+    init: RequestInit = {},
+    timeoutMs = BRIDGE_HTTP_TIMEOUT_MS,
+  ) => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-    const headers = new Headers(init.headers);
-    if (bridgeToken) headers.set('X-Bridge-Token', bridgeToken);
-    return fetch(input, { ...init, headers, signal: controller.signal }).finally(() => window.clearTimeout(timeout));
+    return apiFetch(path, { ...init, signal: controller.signal })
+      .finally(() => window.clearTimeout(timeout));
   };
 
   const post = async (path: string, body: unknown) => {
     try {
-      const response = await fetchWithTimeout(`${endpoint}${path}`, {
+      const response = await fetchWithTimeout(`${BRIDGE_PATH}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       return response.ok;
     } catch {
-      // Bridge 已停止/网络错误：静默忽略（轮询在下一轮自然停止或继续）。
+      // 服务已停止/网络错误：静默忽略（轮询在下一轮自然停止或继续）。
       return false;
     }
   };
@@ -64,7 +78,7 @@ export function startCanvasBridge(
     requestId: string,
     method: string,
     params: Record<string, unknown>,
-    source: 'mcp' | 'cli' | 'agent',
+    source: BridgeSource,
     dryRun: boolean,
     expectedRevision?: number,
   ) => {
@@ -112,7 +126,8 @@ export function startCanvasBridge(
   const poll = async () => {
     if (stopped) return;
     try {
-      const response = await fetchWithTimeout(`${endpoint}/poll?tabId=${encodeURIComponent(tabId)}`);
+      const response = await fetchWithTimeout(
+        `${BRIDGE_PATH}/poll?tabId=${encodeURIComponent(tabId)}`);
       if (response.ok) {
         const data = (await response.json()) as BridgePollResult;
         if (data.command) {
@@ -152,11 +167,11 @@ export function startCanvasBridge(
     if (stopped) return;
     onStatus?.({ state: 'connecting', message: '正在连接画布服务…' });
     try {
-      const response = await fetchWithTimeout(`${endpoint}/health`);
+      const response = await fetchWithTimeout(`${BRIDGE_PATH}/health`);
       if (stopped) return;
       if (!response.ok) throw new Error('Bridge health check failed');
       const health = (await response.json()) as BridgeHealth;
-      if (!health?.ok) throw new Error('Bridge is not healthy');
+      if (health?.ok !== true) throw new Error('Bridge is not healthy');
       const registered = await post('/register', {
         tabId,
         projectId,

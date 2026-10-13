@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Handle, NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
-import { Clapperboard, FileText, GripVertical, Image as ImageIcon, LayoutGrid, Layers, Merge, MessageSquare, Minimize2, PanelRightOpen, Sparkles, Type, Wand2 } from 'lucide-react';
+import { Image as ImageIcon, Minimize2, PanelRightOpen } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import type { CanvasNode } from '../types';
 import { buildReferenceImagePool } from '../canvas/referenceImagePool';
@@ -21,32 +21,26 @@ import { useCanvasUi } from '../canvas/CanvasUiContext';
 import { useNodeTextDraft } from '../hooks/useNodeTextDraft';
 import { VideoMergeNode } from './VideoMergeNode';
 import { CompactNodeView } from './nodes/CompactNodeView';
-
-/** 节点标题（点击重命名）。 */
-function TitleInput({ nodeId, label, onLabel }: { nodeId: string; label: string; onLabel: (label: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(label);
-  if (editing) {
-    return (
-      <input
-        className="node-card__header-title nodrag"
-        aria-label="节点标题"
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => { onLabel(draft.trim() || label); setEditing(false); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { onLabel(draft.trim() || label); setEditing(false); } if (e.key === 'Escape') { setDraft(label); setEditing(false); } }}
-      />
-    );
-  }
-  return <span className="node-card__header-title" title="点击重命名" onClick={() => { setDraft(label); setEditing(true); }}>{label}</span>;
-}
+import { NodeExternalTitle } from './nodes/NodeExternalTitle';
 
 type MediaNodeProps = NodeProps<CanvasNode> & {
   displayCollapsed?: boolean;
   showMinimize?: boolean;
   onMinimize?: (nodeId: string) => void;
 };
+
+/**
+ * 「预览面 + 框下编辑面板」的节点：除文字节点外的全部节点。
+ * 外层的 .node-card 只留布局（不画第二层框），框内交给 .node-surface 预览面，
+ * 所有操作控件由各视图挂到框下的 .node-float-panel。
+ * 文字节点（text / note / prompt / script）保持原样：正文输入区就是内容本身。
+ */
+const SURFACE_KINDS = new Set([
+  'image',
+  'imageGen', 'textToImage', 'imageToImage', 'batchImageRefine', 'imageGeneration',
+  'videoGen', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'videoGeneration',
+  'storyboard', 'storyboardGen', 'storyboardPlanner', 'shot', 'videoMerge', 'sequence',
+]);
 
 function FullMediaNodeComponent({ id, data, selected, width, height, positionAbsoluteX, positionAbsoluteY, showMinimize, onMinimize }: MediaNodeProps) {
   const updateNode = useCanvasStore((state) => state.updateNode);
@@ -69,12 +63,12 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
     onChange: (value) => updateNode(id, { scriptText: value }),
   });
   const node: CanvasNode = { id, type: 'media', position: { x: positionAbsoluteX, y: positionAbsoluteY }, width, height, data };
-  const Icon = data.kind === 'text' ? Type : data.kind === 'script' ? FileText : data.kind === 'note' ? MessageSquare : data.kind === 'prompt' ? Wand2 : data.kind === 'sequence' ? Layers : data.kind === 'storyboard' ? Clapperboard : data.kind === 'storyboardGen' ? LayoutGrid : data.kind === 'imageGen' ? Sparkles : data.kind === 'videoMerge' ? Merge : ImageIcon;
   const definition = getNodeDefinition(data.kind);
+  const generating = Boolean(data.isGenerating);
 
   // 参考图池：仅生成类节点（imageGen/videoGen）需要；其它节点不建池（省计算）。
   const referencePool = useMemo(() => {
-    if (!['imageGen', 'videoGen', 'textToImage', 'imageToImage', 'batchImageRefine', 'storyboardPlanner', 'shot', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo'].includes(data.kind)) return null;
+    if (!['imageGen', 'videoGen', 'textToImage', 'imageToImage', 'batchImageRefine', 'storyboardPlanner', 'shot', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'imageGeneration', 'videoGeneration'].includes(data.kind)) return null;
     return buildReferenceImagePool(id, nodes, edges, 1);
   }, [data.kind, id, nodes, edges]);
 
@@ -107,13 +101,11 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
   };
 
   return (
-    <article className={`media-node media-node--${data.kind} ${selected ? 'is-selected' : ''}`}>
+    <article className={`media-node media-node--${data.kind} ${SURFACE_KINDS.has(String(data.kind)) ? 'has-surface' : ''} ${selected ? 'is-selected' : ''}`}>
+      <NodeExternalTitle nodeId={id} kind={data.kind} label={data.label} dragHandle />
       <div className="node-card">
-        <div className="node-card__header node-drag-handle">
-          <GripVertical className="node-drag-grip" size={14} />
-          <Icon size={15} />
-          <TitleInput nodeId={id} label={data.label} onLabel={(label) => updateNode(id, { label })} />
-          {(data.kind === 'imageGen' || data.kind === 'videoGen' || data.kind === 'storyboardGen' || data.kind === 'storyboardPlanner') && data.isGenerating && (
+        <div className={`node-card__header${generating ? ' is-generating' : ''}`}>
+          {(data.kind === 'imageGen' || data.kind === 'videoGen' || data.kind === 'storyboardGen' || data.kind === 'storyboardPlanner' || data.kind === 'imageGeneration' || data.kind === 'videoGeneration') && data.isGenerating && (
             <span className="node-card__badge-gen">生成中</span>
           )}
           {showMinimize && (
@@ -160,10 +152,10 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
           <BatchImageRefineView node={node} updateNode={updateNode} referencePool={referencePool!} />
         ) : data.kind === 'storyboardGen' ? (
           <StoryboardGenView node={node} updateNode={updateNode} />
-        ) : data.kind === 'imageGen' || data.kind === 'textToImage' || data.kind === 'imageToImage' ? (
-          <ImageGenNode id={id} data={data} updateNode={updateNode} textDraft={promptDraft.value} setTextDraft={promptDraft.setValue} referencePool={referencePool!} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
-        ) : data.kind === 'videoGen' || data.kind === 'textToVideo' || data.kind === 'imageToVideo' || data.kind === 'firstLastFrameToVideo' || data.kind === 'referenceToVideo' ? (
-          <VideoGenNode id={id} data={data} updateNode={updateNode} textDraft={promptDraft.value} setTextDraft={promptDraft.setValue} referencePool={referencePool} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
+        ) : data.kind === 'imageGen' || data.kind === 'textToImage' || data.kind === 'imageToImage' || data.kind === 'imageGeneration' ? (
+          <ImageGenNode id={id} data={data} selected={selected} updateNode={updateNode} textDraft={promptDraft.value} setTextDraft={promptDraft.setValue} referencePool={referencePool!} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
+        ) : data.kind === 'videoGen' || data.kind === 'textToVideo' || data.kind === 'imageToVideo' || data.kind === 'firstLastFrameToVideo' || data.kind === 'referenceToVideo' || data.kind === 'videoGeneration' ? (
+          <VideoGenNode id={id} data={data} selected={selected} updateNode={updateNode} textDraft={promptDraft.value} setTextDraft={promptDraft.setValue} referencePool={referencePool} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
         ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
           <TextNotePromptNode id={id} data={data} updateNode={updateNode} />
         ) : data.kind === 'sequence' ? (
@@ -206,7 +198,7 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
           }} />
         </NodeToolbar>
       )}
-      {(['imageGen', 'videoGen', 'storyboardGen', 'storyboard', 'storyboardPlanner', 'shot', 'textToImage', 'imageToImage', 'batchImageRefine', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'videoMerge'] as const).includes(data.kind as never) && (
+      {(['imageGen', 'videoGen', 'storyboardGen', 'storyboard', 'storyboardPlanner', 'shot', 'textToImage', 'imageToImage', 'batchImageRefine', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'imageGeneration', 'videoGeneration', 'videoMerge'] as const).includes(data.kind as never) && (
         <NodeResizer
           nodeId={id}
           isVisible={selected}
@@ -214,7 +206,7 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
           maxWidth={900}
           minHeight={280}
           maxHeight={1000}
-          color="#d7ff54"
+          color="#f4f4f5"
           handleClassName="node-resizer-handle"
           lineClassName="node-resizer-line"
           onResize={(_, params) => updateNodeGeometry(id, { width: params.width, height: params.height })}

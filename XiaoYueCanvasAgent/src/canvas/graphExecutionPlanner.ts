@@ -1,6 +1,7 @@
 import type { CanvasGraphV2 } from './graphContracts';
 import { getNodeDefinition } from './graphContracts';
 import { RESULT_SLOT_ACTION_ID, resolveResultSlots, type ResultSlotBinding } from './resultSlots';
+import { resolveActionId } from './generationModes';
 
 export interface PlannedNode {
   nodeId: string;
@@ -16,6 +17,13 @@ export interface GraphExecutionPlan {
 const startableActions = (graph: CanvasGraphV2, nodeId: string) => {
   const node = graph.nodes.find((candidate) => candidate.id === nodeId);
   return getNodeDefinition(node?.data.kind)?.actions.filter((action) => action.automation.startable) ?? [];
+};
+
+/** 未显式指定动作时，按节点模式挑默认动作（合并后的图片节点在 generate / redraw 之间切换）。 */
+const defaultActionId = (graph: CanvasGraphV2, nodeId: string, actions: { id: string }[]): string | undefined => {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  const preferred = resolveActionId(node?.data.kind, node?.data);
+  return actions.find((action) => action.id === preferred)?.id ?? actions[0]?.id;
 };
 
 const ancestorClosure = (graph: CanvasGraphV2, roots: Iterable<string>) => {
@@ -99,7 +107,7 @@ export function planGraphExecution(
     const actions = startableActions(graph, nodeId);
     const actionId = actionByNode[nodeId] && actions.some((action) => action.id === actionByNode[nodeId])
       ? actionByNode[nodeId]
-      : actions[0]?.id;
+      : defaultActionId(graph, nodeId, actions);
     return {
       nodeId,
       actionId,
@@ -118,7 +126,7 @@ export function planGraphExecution(
         nodeId,
         actionId: actionByNode[nodeId] && actions.some((action) => action.id === actionByNode[nodeId])
           ? actionByNode[nodeId]
-          : actions[0]!.id,
+          : defaultActionId(graph, nodeId, actions)!,
         dependencies: executableDependencies(graph, nodeId, executable),
       });
     }
@@ -170,7 +178,7 @@ export function newlyReachableExecutableNodes(
     const actions = startableActions(graph, nodeId);
     const actionId = actionByNode[nodeId] && actions.some((action) => action.id === actionByNode[nodeId])
       ? actionByNode[nodeId]
-      : actions[0]?.id;
+      : defaultActionId(graph, nodeId, actions);
     return actionId ? [{
       nodeId,
       actionId,

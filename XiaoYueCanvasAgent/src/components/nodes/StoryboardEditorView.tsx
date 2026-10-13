@@ -9,6 +9,7 @@ import { cancelStoryboardVideo, enqueueStoryboardVideo } from '../../services/st
 import { VideoPlanGateModal } from '../VideoPlanGateModal';
 import { useNodeTextDraft } from '../../hooks/useNodeTextDraft';
 import { createPersistedCanvasAsset } from '../../services/canvasMedia';
+import { NodeFloatPanel, NodeSurface, NodeSurfaceEmpty } from './nodePanel';
 
 const ASPECTS = ['16:9', '9:16', '1:1', '4:3'] as const;
 const RESOLUTIONS = ['720p', '1080p'] as const;
@@ -170,90 +171,109 @@ export const StoryboardEditorView = memo(function StoryboardEditorView({ node, u
 
   return (
     <div className="storyboard-editor nodrag nowheel">
-      <div className="storyboard-editor__toolbar">
-        <label className="storyboard-editor__select-all" title="全选/取消全选">
-          <input type="checkbox" checked={allChecked} onChange={toggleAll} />
-          <span>{allChecked ? '已全选' : '全选'}</span>
-        </label>
-        <span className="storyboard-editor__review" title="分镜审查结果">
-          审查 · 图 {review.image}/{review.total} · 视频 {review.video}/{review.total}
-        </span>
-        <button className="storyboard-editor__generate" disabled={selectedCount === 0}
-          title={selectedCount ? `为已勾选的 ${selectedCount} 个分镜生成视频` : '请先勾选分镜'}
-          onClick={() => { if (!selectedCount) return; setGateOpen(true); }}>
-          <Clapperboard size={14} /> 生成视频{selectedCount ? ` (${selectedCount})` : ''}
-        </button>
-      </div>
-      {frames.length === 0 ? (
-        <div className="empty-image-node"><Clapperboard size={26} /><strong>分镜节点</strong><span>连接剧本节点，生成后展示分镜帧</span></div>
-      ) : (
-        <div className="storyboard-editor__rows">
-          {frames.map((frame, index) => {
-            const active = frame.videoStatus === 'queued' || frame.videoStatus === 'running' || frame.videoStatus === 'cancelling';
-            const configOpen = expandedConfig === index;
-            const config = frame.config ?? {};
-            const promptValue = frame.prompt ?? frame.description ?? '';
-            return (
-              <article key={index} className={`storyboard-row ${frame.checked ? 'is-checked' : ''}`} data-video-status={frame.videoStatus ?? 'idle'}>
-                <label className="storyboard-row__check" title="勾选用于生成视频">
-                  <input type="checkbox" checked={Boolean(frame.checked)} onChange={() => toggleChecked(index)} />
-                </label>
-                <div className="storyboard-row__thumb">
-                  <StoryboardThumb frame={frame} index={index} />
-                </div>
-                <div className="storyboard-row__body">
-                  <div className="storyboard-row__head">
-                    <span className="storyboard-row__no">#{String(index + 1).padStart(2, '0')}</span>
-                    <span className="storyboard-row__label">{frame.label ?? `镜头${index + 1}`}</span>
-                    <span className={`storyboard-badge ${hasFrameImage(frame) ? 'is-ok' : 'is-miss'}`}>{hasFrameImage(frame) ? '有图' : '缺图'}</span>
-                    <span className={`storyboard-badge ${hasFrameVideo(frame) ? 'is-ok' : 'is-miss'}`}>{hasFrameVideo(frame) ? '有视频' : '缺视频'}</span>
-                    {frame.videoStatus === 'completed' && <span className="storyboard-badge is-video">视频已生成</span>}
-                    {frame.videoStatus === 'failed' && <span className="storyboard-badge is-failed">生成失败</span>}
-                    {active && <span className="storyboard-badge is-active">{frame.videoStatus === 'running' ? '生成中' : frame.videoStatus === 'cancelling' ? '取消中' : '排队中'}</span>}
-                  </div>
-                  <StoryboardPromptEditor
-                    nodeId={id}
-                    index={index}
-                    value={promptValue}
-                    onCommit={(value) => updateFrame(index, { prompt: value })}
-                  />
-                  <div className="storyboard-row__meta">
-                    <button className="storyboard-row__cfg" title="修改配置" onClick={() => setExpandedConfig(configOpen ? null : index)}>
-                      <Settings2 size={13} /> <span>{configSummary(config)}</span>
-                    </button>
-                    <span className="storyboard-row__refs">
-                      {frame.imageAssetId && <span className="storyboard-ref-pill" title="已上传参考图片">图</span>}
-                      {(frame.assetIds?.length ?? 0) > 0 && <span className="storyboard-ref-pill" title={`已上传 ${frame.assetIds!.length} 项资产`}>资产 {frame.assetIds!.length}</span>}
-                    </span>
-                  </div>
-                  <div className="storyboard-row__actions">
-                    <button title="上传参考图片" onClick={() => pickFile(index, 'image')}><ImagePlus size={14} /> 上传图片</button>
-                    <button title="上传资产（图片/视频）" onClick={() => pickFile(index, 'asset')}><Package size={14} /> 上传资产</button>
-                    {active && <button className="is-cancel" title="取消生成" onClick={() => cancelFrame(index)}><CircleStop size={14} /> 取消</button>}
-                  </div>
-                  {configOpen && (
-                    <div className="storyboard-row__config">
-                      <label><span>模型</span><StoryboardModelEditor nodeId={id} index={index} value={config.model ?? ''} onCommit={(value) => updateFrame(index, { config: { ...config, model: value } })} /></label>
-                      <label><span>比例</span>
-                        <select value={config.aspectRatio ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, aspectRatio: e.target.value } })}>
-                          <option value="">默认</option>{ASPECTS.map((a) => <option key={a} value={a}>{a}</option>)}
-                        </select>
-                      </label>
-                      <label><span>时长(s)</span><input type="number" min={2} value={config.duration ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, duration: Number(e.target.value) || undefined } })} /></label>
-                      <label><span>清晰度</span>
-                        <select value={config.resolution ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, resolution: e.target.value } })}>
-                          <option value="">默认</option>{RESOLUTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                      </label>
-                    </div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
+      <NodeSurface state={frames.length ? 'ready' : 'empty'} className="storyboard-editor-surface">
+        {frames.length === 0 ? (
+          <NodeSurfaceEmpty icon={<Clapperboard size={30} />} label="分镜节点" hint="连接剧本节点，生成后展示分镜帧" />
+        ) : (
+          <div className="storyboard-preview-grid">
+            {frames.map((frame, index) => (
+              <figure key={index} className="storyboard-preview-cell">
+                <div className="storyboard-preview-thumb"><StoryboardThumb frame={frame} index={index} /></div>
+                <figcaption className="storyboard-preview-cap">
+                  <span>#{String(index + 1).padStart(2, '0')}</span>
+                  <i className={hasFrameVideo(frame) ? 'is-video' : hasFrameImage(frame) ? 'is-image' : ''}>
+                    {hasFrameVideo(frame) ? '视频' : hasFrameImage(frame) ? '图片' : '空'}
+                  </i>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </NodeSurface>
+      <NodeFloatPanel nodeId={id} className="storyboard-editor-panel">
+        <div className="storyboard-editor__toolbar">
+          <label className="storyboard-editor__select-all" title="全选/取消全选">
+            <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+            <span>{allChecked ? '已全选' : '全选'}</span>
+          </label>
+          <span className="storyboard-editor__review" title="分镜审查结果">
+            审查 · 图 {review.image}/{review.total} · 视频 {review.video}/{review.total}
+          </span>
+          <button className="storyboard-editor__generate" disabled={selectedCount === 0}
+            title={selectedCount ? `为已勾选的 ${selectedCount} 个分镜生成视频` : '请先勾选分镜'}
+            onClick={() => { if (!selectedCount) return; setGateOpen(true); }}>
+            <Clapperboard size={14} /> 生成视频{selectedCount ? ` (${selectedCount})` : ''}
+          </button>
         </div>
-      )}
-      {feedback && <small className="node-upload-error storyboard-editor__feedback">{feedback}</small>}
+        {frames.length > 0 && (
+          <div className="storyboard-editor__rows">
+            {frames.map((frame, index) => {
+              const active = frame.videoStatus === 'queued' || frame.videoStatus === 'running' || frame.videoStatus === 'cancelling';
+              const configOpen = expandedConfig === index;
+              const config = frame.config ?? {};
+              const promptValue = frame.prompt ?? frame.description ?? '';
+              return (
+                <article key={index} className={`storyboard-row ${frame.checked ? 'is-checked' : ''}`} data-video-status={frame.videoStatus ?? 'idle'}>
+                  <label className="storyboard-row__check" title="勾选用于生成视频">
+                    <input type="checkbox" checked={Boolean(frame.checked)} onChange={() => toggleChecked(index)} />
+                  </label>
+                  <div className="storyboard-row__thumb">
+                    <StoryboardThumb frame={frame} index={index} />
+                  </div>
+                  <div className="storyboard-row__body">
+                    <div className="storyboard-row__head">
+                      <span className="storyboard-row__no">#{String(index + 1).padStart(2, '0')}</span>
+                      <span className="storyboard-row__label">{frame.label ?? `镜头${index + 1}`}</span>
+                      <span className={`storyboard-badge ${hasFrameImage(frame) ? 'is-ok' : 'is-miss'}`}>{hasFrameImage(frame) ? '有图' : '缺图'}</span>
+                      <span className={`storyboard-badge ${hasFrameVideo(frame) ? 'is-ok' : 'is-miss'}`}>{hasFrameVideo(frame) ? '有视频' : '缺视频'}</span>
+                      {frame.videoStatus === 'completed' && <span className="storyboard-badge is-video">视频已生成</span>}
+                      {frame.videoStatus === 'failed' && <span className="storyboard-badge is-failed">生成失败</span>}
+                      {active && <span className="storyboard-badge is-active">{frame.videoStatus === 'running' ? '生成中' : frame.videoStatus === 'cancelling' ? '取消中' : '排队中'}</span>}
+                    </div>
+                    <StoryboardPromptEditor
+                      nodeId={id}
+                      index={index}
+                      value={promptValue}
+                      onCommit={(value) => updateFrame(index, { prompt: value })}
+                    />
+                    <div className="storyboard-row__meta">
+                      <button className="storyboard-row__cfg" title="修改配置" onClick={() => setExpandedConfig(configOpen ? null : index)}>
+                        <Settings2 size={13} /> <span>{configSummary(config)}</span>
+                      </button>
+                      <span className="storyboard-row__refs">
+                        {frame.imageAssetId && <span className="storyboard-ref-pill" title="已上传参考图片">图</span>}
+                        {(frame.assetIds?.length ?? 0) > 0 && <span className="storyboard-ref-pill" title={`已上传 ${frame.assetIds!.length} 项资产`}>资产 {frame.assetIds!.length}</span>}
+                      </span>
+                    </div>
+                    <div className="storyboard-row__actions">
+                      <button title="上传参考图片" onClick={() => pickFile(index, 'image')}><ImagePlus size={14} /> 上传图片</button>
+                      <button title="上传资产（图片/视频）" onClick={() => pickFile(index, 'asset')}><Package size={14} /> 上传资产</button>
+                      {active && <button className="is-cancel" title="取消生成" onClick={() => cancelFrame(index)}><CircleStop size={14} /> 取消</button>}
+                    </div>
+                    {configOpen && (
+                      <div className="storyboard-row__config">
+                        <label><span>模型</span><StoryboardModelEditor nodeId={id} index={index} value={config.model ?? ''} onCommit={(value) => updateFrame(index, { config: { ...config, model: value } })} /></label>
+                        <label><span>比例</span>
+                          <select value={config.aspectRatio ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, aspectRatio: e.target.value } })}>
+                            <option value="">默认</option>{ASPECTS.map((a) => <option key={a} value={a}>{a}</option>)}
+                          </select>
+                        </label>
+                        <label><span>时长(s)</span><input type="number" min={2} value={config.duration ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, duration: Number(e.target.value) || undefined } })} /></label>
+                        <label><span>清晰度</span>
+                          <select value={config.resolution ?? ''} onChange={(e) => updateFrame(index, { config: { ...config, resolution: e.target.value } })}>
+                            <option value="">默认</option>{RESOLUTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+        {feedback && <small className="node-upload-error storyboard-editor__feedback">{feedback}</small>}
+      </NodeFloatPanel>
       <VideoPlanGateModal open={gateOpen} count={selectedCount} onClose={() => setGateOpen(false)} onConfirm={confirmGenerate} />
     </div>
   );

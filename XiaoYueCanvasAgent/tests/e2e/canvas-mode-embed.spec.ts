@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback, mockCanvasAuth, postCanvasAuth } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
 test('reports a controlled canvas only after it is bridge-ready', async ({ page }) => {
   const projectId = 'embed-project';
   const canvasId = 'embed-canvas';
 
+  // 内嵌 iframe 与宿主同源，同样会走 /api/auth/refresh 续期；不 mock 会打到宿主网关并 401 登出
+  await mockCanvasAuth(page);
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api/canvas', '');
@@ -21,12 +26,13 @@ test('reports a controlled canvas only after it is bridge-ready', async ({ page 
     }
     return route.fulfill({ json: {} });
   });
-  await page.route('http://127.0.0.1:8787/health', (route) => route.fulfill({
-    json: { ok: true, version: 1, projects: [] },
-  }));
-  await page.route('http://127.0.0.1:8787/register', (route) => route.fulfill({ json: { ok: true } }));
-  await page.route('http://127.0.0.1:8787/poll**', (route) => route.fulfill({ json: {} }));
-  await page.route('http://127.0.0.1:8787/unregister', (route) => route.fulfill({ json: { ok: true } }));
+  // 画布命令信箱已并入 canvas 服务，走同源 /api/canvas/bridge/**
+  await page.route('**/api/canvas/bridge/**', (route) => {
+    const path = new URL(route.request().url()).pathname.replace('/api/canvas/bridge', '');
+    if (path === '/health') return route.fulfill({ json: { ok: true, version: 1, projects: [] } });
+    if (path === '/poll') return route.fulfill({ json: {} });
+    return route.fulfill({ json: { ok: true } });
+  });
 
   await page.goto('/');
   await page.evaluate(async ({ projectId, canvasId }) => {
@@ -93,6 +99,9 @@ test('reports a controlled canvas only after it is bridge-ready', async ({ page 
     iframe.src = `/?${params.toString()}#project=${projectId}&canvas=${canvasId}`;
     document.body.appendChild(iframe);
   }, { projectId, canvasId });
+
+  // 内嵌画布的登录态由宿主页面注入（等价 EmbeddedAppWindow 的行为）
+  await postCanvasAuth(page);
 
   await expect.poll(async () => page.evaluate(() =>
     (window as typeof window & { __canvasModeMessages?: unknown[] }).__canvasModeMessages ?? [],

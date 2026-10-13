@@ -56,7 +56,8 @@ class AgentScopeEventMapperTest {
                 .containsEntry("outputTokens", 120)
                 .containsEntry("cachedTokens", 640)
                 .containsEntry("contextTokens", 960)
-                .containsEntry("contextWindowTokens", 200_000L);
+                .containsEntry("contextWindowTokens", 200_000L)
+                .containsEntry("modelMs", 1_000L);
     }
 
     @Test

@@ -244,7 +244,7 @@ export const RichPromptInput = memo(function RichPromptInput({
         const raw = entry.sourceNodeName || `图${token.imageNumber}`;
         const label = `#${token.imageNumber}`;
         const compactToken = buildReferenceToken(token.imageNumber);
-        html += `<span contenteditable="false" data-token="${compactToken}" data-image-number="${token.imageNumber}" data-media-type="${token.mediaType || 'image'}" title="${escapeHTML(raw)}" class="rt-chip nodrag" style="display:inline-flex;align-items:center;gap:4px;max-width:54px;min-width:38px;justify-content:center;overflow:hidden;box-sizing:border-box;background:rgba(215,255,84,0.16);border:1px solid rgba(215,255,84,0.35);border-radius:6px;padding:1px 6px 1px 8px;font-size:12px;line-height:20px;color:var(--acid);font-weight:500;white-space:nowrap;vertical-align:middle;user-select:none;margin:0 1px">${label}<span data-chip-delete style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:0 0 14px;border-radius:50%;font-size:10px;color:var(--acid);cursor:pointer;margin-left:2px;opacity:0.7">×</span></span>`;
+        html += `<span contenteditable="false" data-token="${compactToken}" data-image-number="${token.imageNumber}" data-media-type="${token.mediaType || 'image'}" title="${escapeHTML(raw)}" class="rt-chip nodrag" style="display:inline-flex;align-items:center;gap:4px;max-width:54px;min-width:38px;justify-content:center;overflow:hidden;box-sizing:border-box;background:rgba(244,244,245,0.16);border:1px solid rgba(244,244,245,0.35);border-radius:6px;padding:1px 6px 1px 8px;font-size:12px;line-height:20px;color:var(--acid);font-weight:500;white-space:nowrap;vertical-align:middle;user-select:none;margin:0 1px">${label}<span data-chip-delete style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:0 0 14px;border-radius:50%;font-size:10px;color:var(--acid);cursor:pointer;margin-left:2px;opacity:0.7">×</span></span>`;
       } else {
         html += `<span style="background:rgba(234,88,12,0.15);border:1px solid rgba(234,88,12,0.3);border-radius:4px;padding:0 4px;color:var(--text-muted);text-decoration:line-through;font-size:12px">${escapeHTML(token.text)}</span>`;
       }
@@ -459,8 +459,9 @@ export const RichPromptInput = memo(function RichPromptInput({
             wordBreak: 'break-word', whiteSpace: 'pre-wrap', outline: 'none', border: 'none',
             borderRadius: '6px', padding: '6px 8px', minHeight: `${Math.max(_minHeight - 12, 40)}px`, flex: 1,
             ...(maxHeight > 0 ? { maxHeight: `${maxHeight}px` } : {}), overflow: 'auto',
-            color: 'var(--text-primary)', caretColor: 'var(--text-primary)', opacity: disabled ? 0.5 : 1,
-            backgroundColor: 'rgba(19,34,30,.55)',
+            // 不能用未定义的 var()：在深色容器里会退化成继承色，导致「能输入但看不见字」
+            color: '#f4f4f5', caretColor: '#f4f4f5', opacity: disabled ? 0.5 : 1,
+            backgroundColor: 'rgba(20,20,20,.55)',
           }}
         />
         {!value && (

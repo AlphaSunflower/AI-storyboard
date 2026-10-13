@@ -1,0 +1,10 @@
+# 画布 Bridge 镜像构建上下文瘦身（Dockerfile 只拷贝 package.json / src / bridge）
+node_modules
+dist
+.npm-cache
+.hermes
+.idea
+tests
+*.log
+*.png
+.vite-dev.stderr.log

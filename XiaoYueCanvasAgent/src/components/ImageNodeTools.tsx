@@ -186,7 +186,7 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
   const [isApplying, setIsApplying] = useState(false);
   const [cropRatio, setCropRatio] = useState('原图比例'); const [cropRect, setCropRect] = useState<CropRect>(FULL_CROP);
   const [brightness, setBrightness] = useState(0); const [contrast, setContrast] = useState(0); const [saturation, setSaturation] = useState(0);
-  const [annotationMode, setAnnotationMode] = useState<AnnotationMode>('brush'); const [annotationColor, setAnnotationColor] = useState('#d7ff54'); const [annotationWidth, setAnnotationWidth] = useState(8); const [annotationText, setAnnotationText] = useState('标注');
+  const [annotationMode, setAnnotationMode] = useState<AnnotationMode>('brush'); const [annotationColor, setAnnotationColor] = useState('#ffffff'); const [annotationWidth, setAnnotationWidth] = useState(8); const [annotationText, setAnnotationText] = useState('标注');
   const [shapes, setShapes] = useState<AnnotationShape[]>(node.data.annotation?.shapes ?? []); const [shapePast, setShapePast] = useState<AnnotationShape[][]>([]); const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [splitMatrixHover, setSplitMatrixHover] = useState({ rows: 1, columns: 1 }); const [isSplitMatrixOpen, setIsSplitMatrixOpen] = useState(false);
   const splitCloseTimerRef = useRef<number | null>(null);
@@ -293,10 +293,10 @@ export function ImageNodeTools({ node }: { node: CanvasNode }) {
     let targetNodeId = multiAngleNodeIdRef.current;
     if (!targetNodeId) {
       const sourceWidth = node.width ?? node.measured?.width ?? 250;
-      targetNodeId = canvas.createConnectedNode(node.id, 'imageToImage', {
+      targetNodeId = canvas.createConnectedNode(node.id, 'imageGeneration', {
         x: node.position.x + sourceWidth + 160,
         y: node.position.y,
-      }, undefined, nextData);
+      }, undefined, { ...nextData, mode: 'image2image' });
       if (!targetNodeId) throw new Error('无法创建多角度图生图节点');
       multiAngleNodeIdRef.current = targetNodeId;
     } else {

@@ -179,3 +179,13 @@ export function buildSceneInspectPrompt(scenes: EmbeddedSceneReference[]): strin
   const sceneRefs = scenes.map((scene) => `分镜${scene.sceneNumber}`).join('、');
   return `请查看${sceneRefs}`;
 }
+
+/**
+ * 内嵌画布上报的连接状态 → 用户在聊天页看到的文案。
+ * bridge-error 优先用画布侧给的具体原因，缺省时回落为通用重试提示。
+ */
+export function canvasBindingStatusText(message: CanvasModeStatusMessage): string {
+  if (message.state === 'bridge-connecting') return '正在连接画布服务…';
+  if (message.state === 'bridge-error') return message.message || '画布服务未就绪，正在重试…';
+  return '请选择要编辑的画布';
+}

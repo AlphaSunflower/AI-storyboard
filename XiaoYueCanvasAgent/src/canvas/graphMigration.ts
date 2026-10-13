@@ -2,6 +2,7 @@ import type { Viewport } from '@xyflow/react';
 import {
   CANVAS_NODE_DEFINITIONS,
   getNodeDefinition,
+  normalizeGenerationPortId,
   type CanvasEdgeV2,
   type CanvasGraphV2,
   type CanvasNodeKind,
@@ -9,6 +10,11 @@ import {
   type GenerationRecord,
   type MigrationReport,
 } from './graphContracts';
+import {
+  LEGACY_GENERATION_PORT_ORDER,
+  mergedGenerationKind,
+  resolveNodeMode,
+} from './generationModes';
 
 interface LegacyCanvasNode {
   id: string;
@@ -199,13 +205,15 @@ export function migrateCanvasGraphV1ToV2(input: LegacyCanvasGraph): CanvasGraphV
       selected: Boolean(edge.selected),
       data: {
         ...(edge.data as CanvasEdgeV2['data']),
-        portOrder: targetPort.ordered ? migratedEdges.filter((candidate) =>
-          candidate.target === target.id && candidate.targetHandle === targetPort.id).length : undefined,
+        portOrder: targetPort.ordered
+          ? LEGACY_GENERATION_PORT_ORDER[edge.targetHandle ?? ''] ?? migratedEdges.filter((candidate) =>
+            candidate.target === target.id && candidate.targetHandle === targetPort.id).length
+          : undefined,
       },
     });
   }
 
-  return {
+  return normalizeGenerationNodes({
     schemaVersion: 2,
     nodes: migratedNodes,
     edges: migratedEdges,
@@ -217,5 +225,49 @@ export function migrateCanvasGraphV1ToV2(input: LegacyCanvasGraph): CanvasGraphV
       invalidEdges,
       warnings,
     },
-  };
+  });
+}
+
+/**
+ * 把已合并的旧生成节点 kind 归一为 canonical kind 并落 `data.mode`，同时把旧端口 id
+ * （first/last/source/images）重写到 `reference`。对已经是 canonical 的图幂等。
+ */
+export function normalizeGenerationNodes(graph: CanvasGraphV2): CanvasGraphV2 {
+  let changed = false;
+  const nodes = graph.nodes.map((node) => {
+    const merged = mergedGenerationKind(node.data.kind);
+    if (!merged) return node;
+    const needsKind = node.data.kind !== merged || node.type !== merged;
+    const needsMode = typeof node.data.mode !== 'string';
+    if (!needsKind && !needsMode) return node;
+    changed = true;
+    return {
+      ...node,
+      type: merged,
+      data: {
+        ...node.data,
+        kind: merged,
+        mode: needsMode ? resolveNodeMode(node.data.kind, node.data) : node.data.mode,
+      },
+    };
+  });
+  if (!changed) return graph;
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const edges = graph.edges.map((edge) => {
+    const target = nodeById.get(edge.target);
+    const portId = normalizeGenerationPortId(target?.data.kind, edge.targetHandle);
+    if (!portId || portId === edge.targetHandle) return edge;
+    // 旧的首帧/尾帧端口自带顺序：重写端口 id 时把顺序落到 portOrder，避免首尾颠倒
+    const legacyOrder = LEGACY_GENERATION_PORT_ORDER[edge.targetHandle ?? ''];
+    return {
+      ...edge,
+      targetHandle: portId,
+      data: legacyOrder === undefined || edge.data?.portOrder !== undefined
+        ? edge.data
+        : { ...edge.data, portOrder: legacyOrder },
+    };
+  });
+
+  return { ...graph, nodes, edges };
 }

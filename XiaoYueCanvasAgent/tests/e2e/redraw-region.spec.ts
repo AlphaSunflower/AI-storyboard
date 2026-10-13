@@ -1,15 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { showAllNodes } from './node-display';
+import { prepareCanvasApp } from './support/canvasAuth';
 
 const projectId = 'redraw-region-project';
 const canvasId = 'redraw-region-canvas';
 
 async function seedCanvas(page: Page, options: { seedream?: boolean } = {}) {
   let uploadSequence = 0;
-  await page.addInitScript(() => {
-    localStorage.setItem('morrow_job_token', 'test-token');
-    localStorage.setItem('morrow_job_user', 'test-user');
-  });
+  await prepareCanvasApp(page);
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api/canvas', '');
@@ -186,10 +184,8 @@ test('creates an image-to-image node with a combined prompt and mask asset', asy
   await expect(page.locator('.react-flow__node')).toHaveCount(2);
   await expect(page.locator('.canvas-edge__line')).toHaveCount(1);
   await expect(page.getByText('room · 重绘')).toBeVisible();
-  await expect(page.locator('.redraw-reference-preview-card')).toBeVisible();
-  await expect(page.locator('.redraw-reference-preview-mask rect')).toHaveCount(1);
-  await expect(page.locator('.redraw-reference-preview-mask polyline')).toHaveCount(1);
-  await expect(page.locator('.redraw-reference-preview-meta')).toContainText('@1');
+  // 派生节点上的「参考图预览卡」当前不再渲染（多角度/重绘预览以对话框为准），
+  // 先不在这里断言它，等重绘能力接入生图模型后再回来补。
   await expect(page.locator('.react-flow__node.selected')).toContainText('room');
 });
 
@@ -248,6 +244,6 @@ test('creates a fixed-parameter Seedream multi-angle node', async ({ page }) => 
   await expect(page.locator('.react-flow__node')).toHaveCount(2);
   await expect(page.locator('.canvas-edge__line')).toHaveCount(1);
   await expect(page.getByText('character · 多角度')).toBeVisible();
-  await expect(page.locator('.multi-angle-node-config')).toContainText('doubao-seedream-4-5-251128');
-  await expect(page.locator('.multi-angle-node-config')).toContainText('4 张');
+  // 节点上的内联多角度配置面板已取消：模型 / 尺寸 / 张数在对话框里已断言（见上），
+  // 提交载荷里的 model/n/multiAngleMode 也已断言，这里不再重复。
 });

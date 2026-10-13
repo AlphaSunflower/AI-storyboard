@@ -1,0 +1,88 @@
+/* 输入卡收缩态：消息区离开底部时只留一行输入框 + 发送按钮，回到输入框立即还原。 */
+
+/* 输入框上方整块附加行：0fr → 1fr 的网格行高补间，内容多高都跟着走 */
+.chat-composer-extra {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  opacity: 1;
+  transition:
+    grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.chat-composer-extra__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-composer-extra.is-collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 横向收缩：底部同行内的左右两组控件（方案批准 / 上传、上下文占用 / 麦克风） */
+.chat-composer-extra--inline {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  opacity: 1;
+  transition:
+    max-width 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
+}
+
+/* 只在收起终态裁剪：展开态必须 overflow 可见，否则「方案批准」下拉、上下文占用详情会被裁掉 */
+.chat-composer-extra--inline.is-collapsed {
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer-extra,
+  .chat-composer-extra--inline {
+    transition: none;
+  }
+}
+
+/* 底部状态栏槽位：收缩态用 grid 0fr 补间整块收起，输入卡因此下沉到原计数器位置 */
+.chat-status-bar-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.chat-status-bar-slot__inner {
+  min-height: 0;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.chat-status-bar-slot.is-collapsed {
+  grid-template-rows: 0fr;
+}
+
+/* 只在收起终态裁剪：展开态必须 overflow 可见，否则上下文悬浮提示会被裁掉 */
+.chat-status-bar-slot.is-collapsed .chat-status-bar-slot__inner {
+  overflow: hidden;
+  opacity: 0;
+}
+
+.chat-status-bar-slot.is-collapsed .chat-status-bar-slot__inner * {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-status-bar-slot,
+  .chat-status-bar-slot__inner {
+    transition: none;
+  }
+}

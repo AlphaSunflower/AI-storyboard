@@ -76,24 +76,30 @@ describe('canvasCommandService MCP execution surface', () => {
     expect(edge.ok).toBe(true);
     const created = useCanvasStore.getState().edges[0];
     expect(created.sourceHandle).toBe('image');
-    expect(created.targetHandle).toBe('source');
+    expect(created.targetHandle).toBe('reference');
   });
 
   it('returns node definitions with ports and actions', () => {
     const result = canvasCommandService.listNodeTypes(context);
     expect(result.ok).toBe(true);
     expect(result.result).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'textToImage' }),
-      expect.objectContaining({ kind: 'imageToVideo' }),
+      expect.objectContaining({ kind: 'imageGeneration' }),
+      expect.objectContaining({ kind: 'videoGeneration' }),
       expect.objectContaining({ kind: 'storyboardPlanner' }),
     ]));
+    // 合并后节点库里视频/图片各只剩一个生成节点
+    const kinds = (result.result as Array<{ kind: string }>).map((definition) => definition.kind);
+    expect(kinds.filter((kind) => kind === 'imageGeneration')).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === 'videoGeneration')).toHaveLength(1);
+    expect(kinds).not.toContain('textToImage');
+    expect(kinds).not.toContain('referenceToVideo');
   });
 
   it('exposes media relay roles and placeholder contracts', () => {
     const result = canvasCommandService.listNodeTypes(context);
     const definitions = result.result as Array<Record<string, unknown>>;
 
-    expect(definitions.find((definition) => definition.kind === 'textToImage')).toMatchObject({
+    expect(definitions.find((definition) => definition.kind === 'imageGeneration')).toMatchObject({
       flowRole: 'producer',
     });
     expect(definitions.find((definition) => definition.kind === 'image')).toMatchObject({

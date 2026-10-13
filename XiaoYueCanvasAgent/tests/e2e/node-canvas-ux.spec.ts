@@ -1,10 +1,18 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 import { showAllNodes } from './node-display';
 
 test('drags a shot node from its handle and opens details in the inspector', async ({ page }) => {
   const projectId = 'node-ux-project';
   const canvasId = 'node-ux-canvas';
   const submittedJobRequests: Array<Record<string, unknown>> = [];
+  // 画布启动依赖 /api/auth/refresh 换 token；这里自闭环，避免依赖本机 ApiGateway。
+  await page.route('**/api/auth/refresh', (route) =>
+    route.fulfill({ json: { data: { accessToken: 'test-token', userId: 'test-user' } } }));
+  await page.route('**/api/auth/stream-ticket', (route) =>
+    route.fulfill({ json: { data: { ticket: 'test-ticket' } } }));
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api/canvas', '');
@@ -74,6 +82,21 @@ test('drags a shot node from its handle and opens details in the inspector', asy
     }
     if (path === `/canvases/${canvasId}` && request.method() === 'PATCH') {
       return route.fulfill({ json: { id: canvasId, projectId, title: '默认画布' } });
+    }
+    // 提交生成任务前会拉取画布资产清单；没有后端时返回空清单
+    if (path === `/canvases/${canvasId}/assets`) {
+      return route.fulfill({ json: [] });
+    }
+    if (path === '/assets/upload' && request.method() === 'POST') {
+      return route.fulfill({
+        json: {
+          id: 'uploaded-asset',
+          canvasId,
+          type: 'image',
+          mimeType: 'image/png',
+          url: '/api/files/images/uploaded.png',
+        },
+      });
     }
     return route.fulfill({ status: 404, json: { message: `unmocked ${request.method()} ${path}` } });
   });
@@ -192,13 +215,14 @@ test('drags a shot node from its handle and opens details in the inspector', asy
         },
         {
           id: 'batch-ux-1',
-          type: 'batchImageRefine',
+          type: 'imageGeneration',
           position: { x: 1220, y: 600 },
-          width: 560,
-          height: 460,
+          width: 480,
+          height: 560,
           data: {
-            kind: 'batchImageRefine',
-            label: '批量完善图片',
+            kind: 'imageGeneration',
+            mode: 'batchRefine',
+            label: '图片生成',
             prompt: '变成卡通形象',
             status: 'idle',
             accent: '#b48cff',
@@ -206,13 +230,14 @@ test('drags a shot node from its handle and opens details in the inspector', asy
         },
         {
           id: 'image-to-image-ux-1',
-          type: 'imageToImage',
+          type: 'imageGeneration',
           position: { x: 1220, y: 1100 },
-          width: 520,
-          height: 420,
+          width: 480,
+          height: 560,
           data: {
-            kind: 'imageToImage',
-            label: '图生图',
+            kind: 'imageGeneration',
+            mode: 'image2image',
+            label: '图片生成',
             prompt: '把图片转换为动画风格',
             status: 'idle',
             accent: '#b48cff',
@@ -225,7 +250,7 @@ test('drags a shot node from its handle and opens details in the inspector', asy
           source: 'image-ux-1',
           sourceHandle: 'image',
           target: 'batch-ux-1',
-          targetHandle: 'images',
+          targetHandle: 'reference',
           type: 'canvas',
         },
         {
@@ -233,7 +258,7 @@ test('drags a shot node from its handle and opens details in the inspector', asy
           source: 'image-ux-1',
           sourceHandle: 'image',
           target: 'image-to-image-ux-1',
-          targetHandle: 'source',
+          targetHandle: 'reference',
           type: 'canvas',
         },
       ],
@@ -271,7 +296,7 @@ test('drags a shot node from its handle and opens details in the inspector', asy
 
   const node = page.locator('.react-flow__node[data-id="shot-ux-1"]');
   await expect(node).toBeVisible();
-  const handle = node.locator('.node-drag-handle');
+  const handle = node.locator('.ai-node-external-title.node-drag-handle');
   await expect(handle).toBeVisible();
   await expect(node.locator('.shot-node-view input, .shot-node-view textarea')).toHaveCount(0);
 
@@ -291,7 +316,7 @@ test('drags a shot node from its handle and opens details in the inspector', asy
 
   await page.getByRole('button', { name: 'Fit View' }).click();
   const videoNode = page.locator('.react-flow__node[data-id="video-ux-1"]');
-  const videoHandle = videoNode.locator('.node-floating-title.node-drag-handle');
+  const videoHandle = videoNode.locator('.ai-node-external-title.node-drag-handle');
   await expect(videoHandle).toBeVisible();
   const videoBefore = await videoNode.boundingBox();
   const videoHandleBox = await videoHandle.boundingBox();
@@ -305,6 +330,11 @@ test('drags a shot node from its handle and opens details in the inspector', asy
   expect(videoAfter).not.toBeNull();
   expect(Math.abs(videoAfter!.x - videoBefore!.x) + Math.abs(videoAfter!.y - videoBefore!.y)).toBeGreaterThan(80);
 
+  // 拖动后视频节点仍处于选中态，它框下的编辑面板会浮在下方节点之上；先点空白处取消选中再操作剧本节点
+  const paneBox = await page.locator('.react-flow__pane').boundingBox();
+  await page.mouse.click(paneBox!.x + paneBox!.width - 160, paneBox!.y + 90);
+  await expect(page.locator('.react-flow__node-toolbar[data-id="video-ux-1"]')).toHaveCount(0);
+
   const scriptNode = page.locator('.react-flow__node[data-id="script-ux-1"]');
   await expect(scriptNode.getByRole('button', { name: /创建分镜拆解|生成分镜/ })).toHaveCount(0);
   const scriptEditor = page.getByLabel('剧本内容');
@@ -314,13 +344,26 @@ test('drags a shot node from its handle and opens details in the inspector', asy
   await page.waitForTimeout(320);
   await expect(scriptEditor).toHaveValue('wwww');
 
+  const imageToImageNode = page.locator('.react-flow__node[data-id="image-to-image-ux-1"]');
+  await imageToImageNode.scrollIntoViewIfNeeded();
+  await imageToImageNode.click();
+  const redrawComposer = page.locator('.react-flow__node-toolbar[data-id="image-to-image-ux-1"]');
+  await expect(redrawComposer).toBeVisible();
+  await expect(redrawComposer.getByRole('button', { name: '图生图' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(redrawComposer.getByLabel('模型')).toBeVisible();
+  await expect(redrawComposer.getByRole('button', { name: '执行重绘' })).toBeVisible();
+
   const batchNode = page.locator('.react-flow__node[data-id="batch-ux-1"]');
   await batchNode.scrollIntoViewIfNeeded();
   await expect(batchNode).toBeVisible();
-  const batchPrompt = await batchNode.locator('.batch-refine-content > textarea').boundingBox();
-  const batchItems = await batchNode.locator('.batch-refine-items').boundingBox();
-  const batchSubmit = await batchNode.locator('.node-upload--generate').boundingBox();
-  const batchView = await batchNode.locator('.batch-image-refine-view').boundingBox();
+  // composer 挂在节点下方（react-flow__node-toolbar），选中节点后才出现
+  await batchNode.click();
+  const batchComposer = page.locator('.react-flow__node-toolbar[data-id="batch-ux-1"]');
+  await expect(batchComposer).toBeVisible();
+  const batchPrompt = await batchComposer.locator('.batch-refine-content > textarea').boundingBox();
+  const batchItems = await batchComposer.locator('.batch-refine-items').boundingBox();
+  const batchSubmit = await batchComposer.locator('.gen-send').boundingBox();
+  const batchView = await batchComposer.locator('.gen-composer').boundingBox();
   expect(batchPrompt).not.toBeNull();
   expect(batchItems).not.toBeNull();
   expect(batchSubmit).not.toBeNull();
@@ -329,30 +372,24 @@ test('drags a shot node from its handle and opens details in the inspector', asy
   expect(batchItems!.y + batchItems!.height).toBeLessThanOrEqual(batchSubmit!.y + 1);
   expect(batchItems!.y + batchItems!.height).toBeLessThanOrEqual(batchView!.y + batchView!.height + 1);
   expect(batchSubmit!.y + batchSubmit!.height).toBeLessThanOrEqual(batchView!.y + batchView!.height + 1);
-  await expect(batchNode.getByLabel('模型')).toBeVisible();
-  await expect(batchNode.getByLabel('质量')).toBeVisible();
-  await expect(batchNode.getByLabel('风格', { exact: true })).toBeVisible();
-  await expect(batchNode.getByLabel('尺寸')).toBeVisible();
-  await expect(batchNode.getByLabel('响应格式')).toBeVisible();
-  await expect(batchNode.getByLabel('提示词优化')).toBeVisible();
-  await batchNode.getByRole('button', { name: '批量完善图片' }).dispatchEvent('click');
-  await expect(batchNode.locator('.batch-refine-content > .node-upload-error')).toHaveText('已提交 1 个改图任务');
-  await expect(batchNode.getByRole('button', { name: '批量完善图片' })).toBeEnabled();
-  await expect(batchNode.locator('.batch-refine-status')).toContainText(/已提交|生成中|已完成|失败/);
+  await expect(batchComposer.getByLabel('模型')).toBeVisible();
+  await expect(batchComposer.getByRole('group', { name: '生成模式' })).toBeVisible();
+  await batchComposer.getByRole('button', { name: '参数设置', exact: true }).click();
+  await expect(batchComposer.getByRole('group', { name: '分辨率' })).toBeVisible();
+  await expect(batchComposer.getByRole('group', { name: '宽高比' })).toBeVisible();
+  await expect(batchComposer.getByRole('textbox', { name: '生成个数' })).toBeVisible();
+  // 参数浮层不出现「输出格式」「码率档位」
+  await expect(batchComposer.getByLabel('输出格式')).toHaveCount(0);
+  await expect(batchComposer.getByLabel('码率档位')).toHaveCount(0);
+  await batchComposer.getByRole('button', { name: '参数设置', exact: true }).click();
+  await batchComposer.getByRole('button', { name: '批量完善图片' }).dispatchEvent('click');
+  await expect(batchComposer.locator('.batch-refine-content > .node-upload-error')).toHaveText('已提交 1 个改图任务');
+  await expect(batchComposer.getByRole('button', { name: '批量完善图片' })).toBeEnabled();
+  await expect(batchComposer.locator('.batch-refine-status')).toContainText(/已提交|生成中|已完成|失败/);
   expect(submittedJobRequests).toHaveLength(1);
-  expect((submittedJobRequests[0].params as Record<string, unknown>).referenceImages).toEqual([
-    expect.stringMatching(/^data:image\/png;base64,/),
-  ]);
-
-  const imageToImageNode = page.locator('.react-flow__node[data-id="image-to-image-ux-1"]');
-  await imageToImageNode.scrollIntoViewIfNeeded();
-  await expect(imageToImageNode.getByLabel('质量')).toBeVisible();
-  await expect(imageToImageNode.getByLabel('风格', { exact: true })).toBeVisible();
-  await expect(imageToImageNode.getByLabel('个数')).toBeVisible();
-  await expect(imageToImageNode.getByLabel('比例')).toBeVisible();
-  await expect(imageToImageNode.getByLabel('尺寸')).toBeVisible();
-  await expect(imageToImageNode.getByLabel('响应格式')).toBeVisible();
-  await expect(imageToImageNode.getByLabel('提示词优化')).toBeVisible();
+  const batchParams = submittedJobRequests[0].params as Record<string, unknown>;
+  expect(batchParams.actionId).toBe('redraw');
+  expect(batchParams.referenceAssetIds).toContain('uploaded-asset');
 
   const imageNode = page.locator('.react-flow__node[data-id="image-ux-1"]');
   await imageNode.click();
@@ -360,7 +397,9 @@ test('drags a shot node from its handle and opens details in the inspector', asy
   await expect(page.locator('.image-generate-panel')).toHaveCount(0);
   await expect(imageNode.getByText('生图', { exact: true })).toHaveCount(0);
 
-  await node.locator('.shot-node-details').click();
+  // 镜头节点的操作挂在框下的浮动面板（节点框内只剩预览面，选中后出现）
+  await node.locator('.ai-node-external-title').click();
+  await page.locator('.react-flow__node-toolbar[data-id="shot-ux-1"]').getByRole('button', { name: '编辑详情' }).click();
   await expect(page.getByText('节点属性', { exact: true })).toBeVisible();
   await expect(page.getByLabel('画面描述')).toBeVisible();
 

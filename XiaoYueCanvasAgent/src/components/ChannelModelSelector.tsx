@@ -20,7 +20,7 @@ interface Props {
 const DROPDOWN_STYLE: React.CSSProperties = {
   position: 'fixed',
   backgroundColor: '#1c2a25',
-  border: '1px solid rgba(215,255,84,.16)',
+  border: '1px solid rgba(244,244,245,.16)',
   borderRadius: '8px',
   boxShadow: '0 4px 12px rgba(0,0,0,.5)',
   padding: '4px',
@@ -34,7 +34,7 @@ const ITEM_STYLE = (active: boolean): React.CSSProperties => ({
   padding: '6px 10px',
   border: 'none',
   borderRadius: '4px',
-  backgroundColor: active ? 'rgba(215,255,84,.12)' : 'transparent',
+  backgroundColor: active ? 'rgba(244,244,245,.12)' : 'transparent',
   color: active ? 'var(--acid)' : 'rgba(238,240,223,.85)',
   fontSize: '12px',
   cursor: 'pointer',
@@ -102,7 +102,7 @@ export const ChannelModelSelector = memo(function ChannelModelSelector({
           <Trigger open={openMenu === 'channel'} onClick={() => { placeMenu(channelTriggerRef.current); setOpenMenu(openMenu === 'channel' ? null : 'channel'); }} label={currentChannel?.label ?? '通道'} />
         )}
       </div>
-      <span style={{ color: 'rgba(215,255,84,.25)', fontSize: '12px' }}>|</span>
+      <span style={{ color: 'rgba(244,244,245,.25)', fontSize: '12px' }}>|</span>
       <div ref={modelTriggerRef} className="flex items-center gap-1">
         <Trigger open={openMenu === 'model'} onClick={() => { placeMenu(modelTriggerRef.current); setOpenMenu(openMenu === 'model' ? null : 'model'); }} label={currentModel?.label ?? '模型'} />
       </div>

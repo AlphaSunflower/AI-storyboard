@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
 const record = {
   id: 'record-redraw',
@@ -26,6 +29,11 @@ test('keeps active work in the queue and exposes provenance in generation record
     localStorage.setItem('morrow_job_token', `header.${payload}.signature`);
   });
 
+  // 画布启动依赖 /api/auth/refresh 换 token；这里自闭环，避免依赖本机 ApiGateway。
+  await page.route('**/api/auth/refresh', (route) =>
+    route.fulfill({ json: { data: { accessToken: 'test-token', userId: 'test-user' } } }));
+  await page.route('**/api/auth/stream-ticket', (route) =>
+    route.fulfill({ json: { data: { ticket: 'test-ticket' } } }));
   await page.route('**/api/canvas/**', async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -56,10 +64,62 @@ test('keeps active work in the queue and exposes provenance in generation record
         revision: 1,
       });
     }
+    // 恢复流程会用 GET /jobs/{id} 校准未完成任务：这里保持 running，避免被判为中断
+    if (/^\/jobs\/[^/]+$/.test(path) && method === 'GET') return json({ status: 'running', progress: 0.42 });
+    // 事件流保持空流（不发终态），未完成任务才有资格留在任务队列
+    if (/^\/jobs\/[^/]+\/events$/.test(path)) {
+      return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: ': keep-alive\n\n' });
+    }
     if (method === 'PUT') return json({ graph: JSON.parse(route.request().postData() ?? '{}').graph, revision: 2 });
     if (method === 'PATCH' || method === 'DELETE') return json({ ok: true });
     return json({ code: 40401, message: `not mocked: ${path}` });
   });
+
+  // 运行中的任务必然带一条本地队列记录：不 seed 会被恢复流程判定为「执行中断」
+  await page.goto('/');
+  await page.evaluate(async ({ now }) => {
+    const request = indexedDB.open('morrow-creative-canvas-v1', 5);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('legacyProjects')) db.createObjectStore('legacyProjects', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('canvases')) db.createObjectStore('canvases', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('generationQueue')) {
+        const store = db.createObjectStore('generationQueue', { keyPath: 'id' });
+        store.createIndex('by-projectId', 'projectId');
+        store.createIndex('by-canvasId', 'canvasId');
+        store.createIndex('by-project-canvas', ['projectId', 'canvasId']);
+        store.createIndex('by-status-updatedAt', ['status', 'updatedAt']);
+        store.createIndex('by-updatedAt', 'updatedAt');
+      }
+    };
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    if (!db.objectStoreNames.contains('generationQueue')) {
+      db.close();
+      return;
+    }
+    const transaction = db.transaction(['generationQueue'], 'readwrite');
+    transaction.objectStore('generationQueue').put({
+      id: 'queue-redraw',
+      projectId: 'project-1',
+      canvasId: 'canvas-1',
+      producerNodeId: 'producer',
+      generationRecordId: 'record-redraw',
+      requestSnapshot: { capabilityId: 'image.redraw', sourceAssetIds: ['source-asset'], params: {} },
+      status: 'running',
+      jobId: 'job-redraw',
+      attempt: 1,
+      createdAt: now - 5_000,
+      updatedAt: now,
+    });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  }, { now: Date.now() });
 
   await page.goto('/#project=project-1&canvas=canvas-1');
   await expect(page.getByRole('textbox', { name: '画布名称' })).toHaveValue('生成记录验收');
@@ -75,7 +135,7 @@ test('keeps active work in the queue and exposes provenance in generation record
   await expect(page.getByText('生成链路')).toBeVisible();
   await expect(page.getByText('来源素材 1')).toBeVisible();
   await expect(page.getByText('由「图生图节点」提交')).toBeVisible();
-  await expect(page.locator('.generation-record-card > strong')).toHaveCSS('color', 'rgb(240, 243, 228)');
+  await expect(page.locator('.generation-record-card > strong')).toHaveCSS('color', 'rgb(244, 244, 245)');
 
   await page.setViewportSize({ width: 390, height: 844 });
   const panelBox = await page.locator('.generation-records-panel').boundingBox();

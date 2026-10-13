@@ -13,6 +13,12 @@ interface ContextUsageRingProps {
   size?: number;
   /** 只读会话：保留展示，禁用悬浮详情。 */
   disabled?: boolean;
+  /** 组成明细卡是否展开（由父级统一管理，保证同时只开一张卡）。 */
+  open?: boolean;
+  /** 其他卡片展开时抑制悬浮提示，避免两者叠在一起。 */
+  suppressTip?: boolean;
+  /** 点击环切换明细卡。 */
+  onToggle?: () => void;
 }
 
 /** 占用等级 → 语义色（常态品牌蓝 / 偏高琥珀 / 近满危险红）。 */
@@ -24,7 +30,7 @@ function ringColorFor(ratio: number): string {
 
 /**
  * 输入框右下角「上下文占用」圆圈：常驻显示占用比例，悬浮弹出深色详情卡
- * （占比 / 剩余 / 已用 token 与总量）。放在麦克风左侧，尺寸与工具栏图标对齐。
+ * （占比 / 剩余 / 已用 token 与总量）；点击切换「上下文组成」三色明细卡。
  */
 export function ContextUsageRing({
   usedTokens,
@@ -32,12 +38,16 @@ export function ContextUsageRing({
   cachedTokens = 0,
   size = 28,
   disabled = false,
+  open = false,
+  suppressTip = false,
+  onToggle,
 }: ContextUsageRingProps) {
   const [hovered, setHovered] = useState(false);
   const ratio = contextUsageRatio(usedTokens, limitTokens);
   const percent = Math.round(ratio * 100);
   const color = ringColorFor(ratio);
-  const tipVisible = hovered && !disabled;
+  const tipVisible = hovered && !disabled && !open && !suppressTip;
+  const interactive = !!onToggle && !disabled;
 
   // 由 size 推导航办几何：stroke 随尺寸微调，保证 20~36px 都不糊边。
   const stroke = size <= 24 ? 2.6 : size >= 32 ? 3.4 : 3;
@@ -62,13 +72,23 @@ export function ContextUsageRing({
         aria-valuenow={percent}
         aria-valuemin={0}
         aria-valuemax={100}
-        title={title}
+        {...(interactive ? { 'aria-expanded': open } : {})}
         tabIndex={disabled ? -1 : 0}
+        onClick={interactive ? onToggle : undefined}
+        onKeyDown={interactive
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onToggle?.();
+              }
+            }
+          : undefined}
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
         style={{
           position: 'relative', width: size, height: size, flexShrink: 0,
-          display: 'grid', placeItems: 'center', cursor: disabled ? 'default' : 'help',
+          display: 'grid', placeItems: 'center',
+          cursor: disabled ? 'default' : interactive ? 'pointer' : 'help',
           outlineColor: T.brand,
         }}
       >
@@ -155,6 +175,7 @@ export function ContextUsageRing({
           />
         </div>
       )}
+
     </div>
   );
 }

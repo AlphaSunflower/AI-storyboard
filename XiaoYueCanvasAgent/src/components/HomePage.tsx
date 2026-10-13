@@ -28,7 +28,7 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   return (
     <main className="canvas-home min-h-dvh overflow-auto px-6 py-10 md:px-14"
-      style={{ background: 'radial-gradient(circle at 82% 8%, rgba(215,255,84,0.10), transparent 30%), radial-gradient(circle at 16% 90%, rgba(28,50,42,0.9), transparent 40%), var(--canvas)' }}>
+      style={{ background: 'radial-gradient(circle at 82% 8%, rgba(244,244,245,0.10), transparent 30%), radial-gradient(circle at 16% 90%, rgba(24,24,24,0.9), transparent 40%), var(--canvas)' }}>
       <input ref={fileInput} className="canvas-file-input" type="file" accept=".morrow,application/x-morrow-project,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.target.value = ''; }} />
 
       <header className="canvas-home__hero mx-auto flex max-w-6xl flex-wrap items-end justify-between gap-8 border-b border-[var(--border-dark)] pb-8">
@@ -50,9 +50,9 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
         </header>
         {loading ? <div className="grid place-items-center rounded-2xl border border-dashed border-[var(--border-dark)] py-16 text-muted-foreground">正在读取本地项目…</div> : projects.length ? (
           <div className="canvas-home__grid grid grid-cols-1 gap-4 sm:grid-cols-2">{projects.map((project) => (
-            <article key={project.id} className="group flex items-center gap-4 rounded-2xl border border-[var(--border-dark)] bg-card p-4 transition hover:border-[var(--acid)] hover:shadow-[0_0_24px_rgba(215,255,84,0.08)]">
+            <article key={project.id} className="group flex items-center gap-4 rounded-2xl border border-[var(--border-dark)] bg-card p-4 transition hover:border-[var(--acid)] hover:shadow-[0_0_24px_rgba(244,244,245,0.08)]">
               <button className="flex flex-1 items-center gap-4 rounded-xl text-left" onClick={() => onOpen(project.id)}>
-                <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[rgba(215,255,84,0.12)] text-acid"><Image size={24} /><i className="absolute bottom-1 right-1.5 font-mono text-[9px] not-italic text-acid/80">{project.assetCount}</i></span>
+                <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[rgba(244,244,245,0.12)] text-acid"><Image size={24} /><i className="absolute bottom-1 right-1.5 font-mono text-[9px] not-italic text-acid/80">{project.assetCount}</i></span>
                 <span className="min-w-0">
                   <strong className="block truncate text-[15px] font-semibold text-foreground">{project.title || 'Untitled'}</strong>
                   <small className="mt-1 block truncate text-xs text-muted-foreground">{relativeTime(project.updatedAt)} · {project.nodeCount} 个节点 · {project.assetCount} 项素材</small>

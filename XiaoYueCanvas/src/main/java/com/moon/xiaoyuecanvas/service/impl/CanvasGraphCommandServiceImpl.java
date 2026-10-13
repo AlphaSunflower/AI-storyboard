@@ -2,6 +2,7 @@ package com.moon.xiaoyuecanvas.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.entity.MorrowCanvas;
+import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.service.FileStorageService;
 import com.moon.moonagent.service.MorrowCanvasService;
 import com.moon.xiaoyuecanvas.dto.response.CanvasGraphResponse;
@@ -51,6 +52,7 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
     private final CanvasAssetMapper assetMapper;
     private final CanvasProjectLibraryService libraryService;
     private final FileStorageService fileStorageService;
+    private final FileUrlSigner fileUrlSigner;
     private final String internalStoryboardUrl;
 
     public CanvasGraphCommandServiceImpl(
@@ -61,6 +63,7 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
             CanvasAssetMapper assetMapper,
             CanvasProjectLibraryService libraryService,
             FileStorageService fileStorageService,
+            FileUrlSigner fileUrlSigner,
             @Value("${storyboard.internal-url:http://localhost:8082}") String internalStoryboardUrl
     ) {
         this.graphService = graphService;
@@ -70,6 +73,7 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
         this.assetMapper = assetMapper;
         this.libraryService = libraryService;
         this.fileStorageService = fileStorageService;
+        this.fileUrlSigner = fileUrlSigner;
         this.internalStoryboardUrl = trimSlash(internalStoryboardUrl);
     }
 
@@ -843,10 +847,12 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
     }
 
     private CanvasAsset findAssetByObject(String canvasId, String objectUrl) {
-        return assetMapper.selectOne(new LambdaQueryWrapper<CanvasAsset>()
+        CanvasAsset asset = assetMapper.selectOne(new LambdaQueryWrapper<CanvasAsset>()
                 .eq(CanvasAsset::getCanvasId, canvasId)
                 .eq(CanvasAsset::getObjectUrl, objectUrl)
                 .last("LIMIT 1"));
+        if (asset != null) asset.setObjectUrl(fileUrlSigner.signIfLocal(asset.getObjectUrl()));
+        return asset;
     }
 
     private Map<String, Object> mutableGraph(Map<String, Object> source) {

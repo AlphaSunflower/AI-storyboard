@@ -70,3 +70,19 @@ export function formatTokenCount(value: number): string {
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
   return String(n);
 }
+
+/**
+ * 估算值紧凑计数（用于「上下文组成」明细）：保留一位小数的千位，
+ * 让 1.5k / 5.6k / 88.5k 这类小数不被抹平；十万以上取整千（127k），百万以上取 M。
+ */
+export function formatApproxTokenCount(value: number): string {
+  const n = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+  if (n >= 999_500) {
+    const millions = n / 1_000_000;
+    const rounded = millions < 10 ? Math.round(millions * 10) / 10 : Math.round(millions);
+    return `${rounded}M`;
+  }
+  if (n >= 100_000) return `${Math.round(n / 1_000)}k`;
+  if (n >= 1_000) return `${Math.round(n / 100) / 10}k`;
+  return String(n);
+}

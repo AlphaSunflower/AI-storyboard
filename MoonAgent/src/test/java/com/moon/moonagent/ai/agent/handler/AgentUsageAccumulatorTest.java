@@ -68,4 +68,47 @@ class AgentUsageAccumulatorTest {
         assertThat(metrics.totalTokens()).isZero();
         assertThat(metrics.complete()).isFalse();
     }
+
+    @Test
+    void aggregatesModelAndToolDurations() {
+        AgentUsageAccumulator accumulator = new AgentUsageAccumulator();
+        accumulator.addModelDuration(1_200L);
+        accumulator.addToolDuration(350L);
+        accumulator.addToolDuration(-5L);
+
+        AgentTurnMetrics metrics = accumulator.snapshot(2_000L);
+
+        assertThat(metrics.modelDurationMs()).isEqualTo(1_200L);
+        assertThat(metrics.toolDurationMs()).isEqualTo(350L);
+    }
+
+    @Test
+    void splitsContextIntoSystemToolsAndMessages() {
+        AgentUsageAccumulator accumulator = new AgentUsageAccumulator();
+        accumulator.beginCall();
+        accumulator.recordUsage(100_000, 500, 90_000);
+
+        AgentTurnMetrics metrics = accumulator.snapshot(4_000L, 1_000_000L, 1_500L, 5_600L);
+
+        assertThat(metrics.contextTokens()).isEqualTo(100_000L);
+        assertThat(metrics.systemPromptTokens()).isEqualTo(1_500L);
+        assertThat(metrics.toolDefinitionTokens()).isEqualTo(5_600L);
+        assertThat(metrics.messageTokens()).isEqualTo(92_900L);
+        assertThat(metrics.systemPromptTokens()
+                + metrics.toolDefinitionTokens()
+                + metrics.messageTokens()).isEqualTo(metrics.contextTokens());
+    }
+
+    @Test
+    void clampsContextSplitWhenPromptAlreadyExceedsOccupancy() {
+        AgentUsageAccumulator accumulator = new AgentUsageAccumulator();
+        accumulator.beginCall();
+        accumulator.recordUsage(4_000, 10, 0);
+
+        AgentTurnMetrics metrics = accumulator.snapshot(100L, 0L, 3_000L, 3_000L);
+
+        assertThat(metrics.systemPromptTokens() + metrics.toolDefinitionTokens())
+                .isLessThanOrEqualTo(metrics.contextTokens());
+        assertThat(metrics.messageTokens()).isZero();
+    }
 }

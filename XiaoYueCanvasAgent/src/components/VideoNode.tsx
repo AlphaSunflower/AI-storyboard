@@ -10,6 +10,8 @@ import type { CanvasNode, VideoGenerationParams } from '../types';
 import { getVideoNodeSize } from '../utils/mediaPipeline';
 import { createPersistedCanvasAsset } from '../services/canvasMedia';
 import { VideoNodeTools } from './VideoNodeTools';
+import { NodeExternalTitle } from './nodes/NodeExternalTitle';
+import { NodeFloatPanel, NodeSurface, NodeSurfaceEmpty } from './nodes/nodePanel';
 
 const defaultParams: VideoGenerationParams = { model: 'Seedance 2.0 Mini', mode: '全能参考', aspectRatio: '16:9', resolution: '1080p', durationSeconds: 12, variations: 1 };
 
@@ -57,16 +59,32 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
     if (videoRef.current.paused) { void videoRef.current.play(); setPlaying(true); } else { videoRef.current.pause(); setPlaying(false); }
   };
   const seek = (next: number) => { if (videoRef.current) videoRef.current.currentTime = next; setTime(next); };
-  return <article ref={visibility.ref} className={`media-node media-node--video ${selected ? 'is-selected' : ''}`}>
-    <div className="node-floating-title node-drag-handle"><span className="video-node-dot" />{selected ? <input className="nodrag" aria-label="视频节点标题" key={data.label} defaultValue={data.label} onBlur={(event) => updateNode(id, { label: event.target.value })} /> : <span>{data.label}</span>}</div>
+  const videoUploadInput = (
+    <input ref={fileInputRef} className="canvas-file-input nodrag" type="file" accept="video/mp4,video/webm,video/quicktime" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; void createPersistedCanvasAsset(file, id).then((nextAsset) => { upsertAsset(nextAsset); useCanvasStore.getState().attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getVideoNodeSize(nextAsset.width, nextAsset.height) }); updateNode(id, { videoParams: defaultParams, videoPrompt: '', videoReferences: [] }); }).catch((error) => window.dispatchEvent(new CustomEvent('morrow:notice', { detail: error instanceof Error ? error.message : '视频导入失败' }))); }} />
+  );
+  const videoUploadButton = (
+    <button className="node-upload node-upload--panel nodrag" onClick={() => fileInputRef.current?.click()}>
+      <Upload size={15} /> {metadata ? '替换视频' : '上传视频'}
+    </button>
+  );
+  return <article ref={visibility.ref} className={`media-node media-node--video has-surface ${selected ? 'is-selected' : ''}`}>
+    <NodeExternalTitle nodeId={id} kind="video" label={data.label} dragHandle />
     <div className="node-card video-node-card">
-      {!metadata ? <div className="empty-image-node"><span className="video-empty-glyph">▶</span><strong>空视频节点</strong><span>导入真实视频后可播放和编排</span></div> : !videoUrl ? <div className="media-placeholder"><span>正在加载视频…</span></div> : <div className="video-player-shell">
-        <video ref={videoRef} src={videoUrl} muted={muted} playsInline preload="metadata" poster={posterUrl ?? undefined} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || metadata.durationSeconds || 0)} onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />
-        <div className="video-gradient" />
-        <button className="video-big-play nodrag" onClick={playToggle} aria-label={playing ? '暂停' : '播放'}>{playing ? <Pause size={22} /> : <Play size={22} fill="currentColor" />}</button>
-        <div className="video-controls nodrag" onPointerDown={(event) => event.stopPropagation()}><button onClick={playToggle} aria-label={playing ? '暂停' : '播放'}>{playing ? <Pause size={15} /> : <Play size={15} fill="currentColor" />}</button><span>{formatTime(time)}</span><input aria-label="视频进度" type="range" min="0" max={duration || 1} step="0.01" value={Math.min(time, duration || 1)} onChange={(event) => seek(Number(event.target.value))} /><span>{formatTime(duration || metadata.durationSeconds || 0)}</span><button onClick={() => setMuted((value) => !value)} aria-label={muted ? '打开声音' : '静音'}>{muted ? <VolumeX size={15} /> : <Volume2 size={15} />}</button></div>
-      </div>}
+      <NodeSurface state={videoUrl ? 'ready' : 'empty'}>
+        {!metadata ? <NodeSurfaceEmpty icon={<span className="video-empty-glyph">▶</span>} label="空视频节点" hint="上传本地视频后即可播放、拆帧和编排" /> : !videoUrl ? <div className="media-placeholder"><span>正在加载视频…</span></div> : <div className="video-player-shell">
+          <video ref={videoRef} src={videoUrl} muted={muted} playsInline preload="metadata" poster={posterUrl ?? undefined} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || metadata.durationSeconds || 0)} onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} />
+          <div className="video-gradient" />
+          <button className="video-big-play nodrag" onClick={playToggle} aria-label={playing ? '暂停' : '播放'}>{playing ? <Pause size={22} /> : <Play size={22} fill="currentColor" />}</button>
+          <div className="video-controls nodrag" onPointerDown={(event) => event.stopPropagation()}><button onClick={playToggle} aria-label={playing ? '暂停' : '播放'}>{playing ? <Pause size={15} /> : <Play size={15} fill="currentColor" />}</button><span>{formatTime(time)}</span><input aria-label="视频进度" type="range" min="0" max={duration || 1} step="0.01" value={Math.min(time, duration || 1)} onChange={(event) => seek(Number(event.target.value))} /><span>{formatTime(duration || metadata.durationSeconds || 0)}</span><button onClick={() => setMuted((value) => !value)} aria-label={muted ? '打开声音' : '静音'}>{muted ? <VolumeX size={15} /> : <Volume2 size={15} />}</button></div>
+        </div>}
+      </NodeSurface>
     </div>
+    <NodeFloatPanel nodeId={id} className="video-node-panel">
+      {videoUploadInput}
+      {videoUploadButton}
+      {!metadata && <p className="node-panel-status">支持 mp4 / webm / mov，全部在本地处理</p>}
+      {selected && asset && <p className="node-panel-status">选中后可用节点上方工具条提取帧、调色、变速</p>}
+    </NodeFloatPanel>
     {selected && asset && (
       <VideoNodeTools node={{
         id,
@@ -77,7 +95,6 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
         data,
       }} />
     )}
-    {selected && !metadata && <><input ref={fileInputRef} className="canvas-file-input nodrag" type="file" accept="video/mp4,video/webm,video/quicktime" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; void createPersistedCanvasAsset(file, id).then((nextAsset) => { upsertAsset(nextAsset); useCanvasStore.getState().attachAssetToNode(id, { assetId: nextAsset.id, label: file.name.replace(/\.[^.]+$/, ''), size: getVideoNodeSize(nextAsset.width, nextAsset.height) }); updateNode(id, { videoParams: defaultParams, videoPrompt: '', videoReferences: [] }); }).catch((error) => window.dispatchEvent(new CustomEvent('morrow:notice', { detail: error instanceof Error ? error.message : '视频导入失败' }))); }} /><button className="node-upload nodrag" onClick={() => fileInputRef.current?.click()}><Upload size={16} /> 上传视频</button></>}
     <Handle className="node-handle" id="origin" type="target" position={Position.Left} /><Handle className="node-handle" id="video" type="source" position={Position.Right} />
     <NodeResizer
       nodeId={id}
@@ -86,7 +103,7 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
       maxWidth={800}
       minHeight={180}
       maxHeight={800}
-      color="#d7ff54"
+      color="#f4f4f5"
       handleClassName="node-resizer-handle"
       lineClassName="node-resizer-line"
       onResize={(_, params) => updateNodeGeometry(id, { width: params.width, height: params.height })}

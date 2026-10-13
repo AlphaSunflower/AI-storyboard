@@ -1,19 +1,22 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VideoGenNode } from './VideoGenNode';
-import type { CanvasNode, PersistedAsset } from '../../types';
+import type { CanvasNode } from '../../types';
 import type { ReferenceImagePoolResult } from '../../canvas/referenceImagePool';
-import { useMediaStore } from '../../store/mediaStore';
 import { useCanvasStore } from '../../store/canvasStore';
+import { useMediaStore } from '../../store/mediaStore';
 
-const mocks = vi.hoisted(() => ({ getAsset: vi.fn() }));
+const { submitVideoGeneration } = vi.hoisted(() => ({ submitVideoGeneration: vi.fn() }));
 
-vi.mock('../../services/projectStorage', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../services/projectStorage')>(),
-  getAsset: mocks.getAsset,
+vi.mock('../../services/jobRunner', () => ({ submitVideoGeneration }));
+
+vi.mock('@xyflow/react', () => ({
+  NodeToolbar: ({ children, className, isVisible }: { children?: React.ReactNode; className?: string; isVisible?: boolean }) =>
+    isVisible === false ? null : <div className={className}>{children}</div>,
+  Position: { Top: 'top', Bottom: 'bottom' },
 }));
 
 vi.mock('../RichPromptInput', () => ({
@@ -21,26 +24,7 @@ vi.mock('../RichPromptInput', () => ({
     <div data-testid="prompt-pool-count">{pool.count}</div>,
 }));
 
-vi.mock('./ImageGenNode', () => ({
-  GenFooter: () => <button type="button">生成视频</button>,
-}));
-
-const referencePool = (): ReferenceImagePoolResult => {
-  const entries = [
-    { number: 2, assetId: 'last-image', sourceNodeId: 'node-2', sourceNodeName: '尾帧图', mediaType: 'image' as const, source: 'upstream' as const },
-    { number: 1, assetId: 'first-image', sourceNodeId: 'node-1', sourceNodeName: '首帧图', mediaType: 'image' as const, source: 'upstream' as const },
-  ];
-  return {
-    entries,
-    count: entries.length,
-    getByNumber: (number) => entries.find((entry) => entry.number === number),
-    getByAssetId: (assetId) => entries.find((entry) => entry.assetId === assetId),
-    assetIds: entries.map((entry) => entry.assetId),
-    isValidNumber: (number) => number >= 1 && number <= entries.length,
-  };
-};
-
-const emptyReferencePool: ReferenceImagePoolResult = {
+const emptyPool: ReferenceImagePoolResult = {
   entries: [],
   count: 0,
   getByNumber: () => undefined,
@@ -49,238 +33,149 @@ const emptyReferencePool: ReferenceImagePoolResult = {
   isValidNumber: () => false,
 };
 
-const frameEdges = () => [
-  { id: 'edge-first', source: 'node-1', sourceHandle: 'image', target: 'video-node', targetHandle: 'first', type: 'canvas' },
-  { id: 'edge-last', source: 'node-2', sourceHandle: 'image', target: 'video-node', targetHandle: 'last', type: 'canvas' },
-];
+const poolWith = (entries: Array<{ number: number; assetId: string; sourceNodeId: string; sourceNodeName: string }>): ReferenceImagePoolResult => ({
+  entries: entries.map((entry) => ({ ...entry, mediaType: 'image' as const, source: 'upstream' as const })),
+  count: entries.length,
+  getByNumber: (number) => entries.find((entry) => entry.number === number) as never,
+  getByAssetId: (assetId) => entries.find((entry) => entry.assetId === assetId) as never,
+  assetIds: entries.map((entry) => entry.assetId),
+  isValidNumber: (number) => number >= 1 && number <= entries.length,
+});
 
-const baseData: CanvasNode['data'] = {
-  kind: 'firstLastFrameToVideo',
-  label: '首尾帧生视频',
+const data = (overrides: Partial<CanvasNode['data']> = {}): CanvasNode['data'] => ({
+  kind: 'videoGeneration',
+  label: '视频生成',
   prompt: '',
   status: 'idle',
   accent: '#8f9cff',
-  videoMode: 'firstLastFrame',
-};
-
-const frameAsset = (id: string): PersistedAsset => ({
-  id,
-  kind: 'image',
-  name: `${id}.png`,
-  mimeType: 'image/png',
-  bytes: 1,
-  width: 100,
-  height: 100,
-  originalBlob: new Blob(['x'], { type: 'image/png' }),
-  thumbnailBlob: new Blob(['x'], { type: 'image/png' }),
-  previewBlob: new Blob(['x'], { type: 'image/png' }),
-  operation: { type: 'import', params: {} },
-  libraryState: 'project',
-  createdAt: 1,
+  ...overrides,
 });
 
-describe('VideoGenNode first-last-frame binding', () => {
-  afterEach(cleanup);
+const renderNode = (nodeData: CanvasNode['data'], pool = emptyPool, updateNode = vi.fn()) => render(
+  <VideoGenNode
+    id="video-node"
+    data={nodeData}
+    updateNode={updateNode}
+    textDraft=""
+    setTextDraft={vi.fn()}
+    referencePool={pool}
+    deleteReference={vi.fn()}
+    draftFeedback={null}
+    setDraftFeedback={vi.fn()}
+  />,
+);
 
-  it('assigns the first two upstream images to first and last frame slots', async () => {
-    useMediaStore.setState({
-      assets: {
-        'first-image': frameAsset('first-image'),
-        'last-image': frameAsset('last-image'),
-      },
-      metadata: {},
-    });
-    useCanvasStore.setState({
-      nodes: [
-        { id: 'node-1', type: 'image', position: { x: 0, y: 0 }, data: { kind: 'image', label: '首帧图', prompt: '', status: 'idle', accent: '#fff' } },
-        { id: 'node-2', type: 'image', position: { x: 0, y: 400 }, data: { kind: 'image', label: '尾帧图', prompt: '', status: 'idle', accent: '#fff' } },
-      ],
-      edges: frameEdges(),
-    });
-    function ControlledNode() {
-      const [data, setData] = React.useState(baseData);
-      return (
-        <VideoGenNode
-          id="video-node"
-          data={data}
-          updateNode={(_id, patch) => setData((current) => ({ ...current, ...patch }))}
-          textDraft=""
-          setTextDraft={vi.fn()}
-          referencePool={referencePool()}
-          deleteReference={vi.fn()}
-          draftFeedback={null}
-          setDraftFeedback={vi.fn()}
-        />
-      );
-    }
-
-    render(<ControlledNode />);
-
-    await waitFor(() => expect(screen.getByAltText('首帧')).toBeTruthy());
-    expect(screen.getByAltText('尾帧')).toBeTruthy();
-    expect(screen.getByAltText('首帧').closest('.video-ref-slot')?.getAttribute('data-asset-id')).toBe('first-image');
-    expect(screen.getByAltText('尾帧').closest('.video-ref-slot')?.getAttribute('data-asset-id')).toBe('last-image');
-    expect(screen.getByAltText('首帧').className).toBe('video-ref-image');
-    expect(screen.getByAltText('尾帧').className).toBe('video-ref-image');
-    expect(screen.getByTestId('prompt-pool-count').textContent).toBe('0');
+describe('VideoGenNode modes', () => {
+  afterEach(() => {
+    cleanup();
+    submitVideoGeneration.mockReset();
+    useCanvasStore.setState({ nodes: [], edges: [], generationRecords: [] });
+    useMediaStore.setState({ assets: {} });
   });
 
-  it('removes an assigned frame and disconnects its source image', async () => {
-    const deleteReference = vi.fn((entry: { sourceNodeId: string }) => {
-      useCanvasStore.setState((state) => ({
-        edges: state.edges.filter((edge) => !(edge.target === 'video-node' && edge.source === entry.sourceNodeId)),
-      }));
+  it('shows the four merged modes and switches data.mode', () => {
+    const updateNode = vi.fn();
+    renderNode(data(), emptyPool, updateNode);
+
+    ['文生视频', '全能参考', '首尾帧', '视频参考'].forEach((label) => {
+      expect(screen.getByRole('button', { name: label })).toBeTruthy();
     });
-    useMediaStore.setState({
-      assets: {
-        'first-image': frameAsset('first-image'),
-        'last-image': frameAsset('last-image'),
-      },
-      metadata: {},
-    });
-    useCanvasStore.setState({
-      nodes: [
-        { id: 'node-1', type: 'image', position: { x: 0, y: 0 }, data: { kind: 'image', label: '首帧图', prompt: '', status: 'idle', accent: '#fff' } },
-        { id: 'node-2', type: 'image', position: { x: 0, y: 400 }, data: { kind: 'image', label: '尾帧图', prompt: '', status: 'idle', accent: '#fff' } },
-      ],
-      edges: frameEdges(),
-    });
-
-    function ControlledNode() {
-      const [data, setData] = React.useState(baseData);
-      return (
-        <VideoGenNode
-          id="video-node"
-          data={data}
-          updateNode={(_id, patch) => setData((current) => ({ ...current, ...patch }))}
-          textDraft=""
-          setTextDraft={vi.fn()}
-          referencePool={referencePool()}
-          deleteReference={deleteReference}
-          draftFeedback={null}
-          setDraftFeedback={vi.fn()}
-        />
-      );
-    }
-
-    render(<ControlledNode />);
-    await waitFor(() => expect(screen.getByAltText('首帧')).toBeTruthy());
-
-    fireEvent.click(screen.getByRole('button', { name: '移除首帧' }));
-
-    expect(deleteReference).toHaveBeenCalledWith(expect.objectContaining({
-      number: 1,
-      sourceNodeId: 'node-1',
-    }));
-    await waitFor(() => expect(screen.queryByAltText('首帧')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: '首尾帧' }));
+    expect(updateNode).toHaveBeenCalledWith('video-node', { mode: 'firstLastFrame' });
   });
 
-  it('clears frame slots when the upstream connection disappears', async () => {
-    useMediaStore.setState({
-      assets: {
-        'first-image': frameAsset('first-image'),
-        'last-image': frameAsset('last-image'),
-      },
-      metadata: {},
-    });
-    useCanvasStore.setState({
-      nodes: [
-        { id: 'node-1', type: 'image', position: { x: 0, y: 0 }, data: { kind: 'image', label: '首帧图', prompt: '', status: 'idle', accent: '#fff' } },
-        { id: 'node-2', type: 'image', position: { x: 0, y: 400 }, data: { kind: 'image', label: '尾帧图', prompt: '', status: 'idle', accent: '#fff' } },
-      ],
-      edges: frameEdges(),
-    });
+  it('renders the two fixed slots for the first-last-frame mode', () => {
+    renderNode(data({ mode: 'firstLastFrame' }));
 
-    function ControlledNode({ pool }: { pool: ReferenceImagePoolResult }) {
-      const [data, setData] = React.useState(baseData);
-      return (
-        <VideoGenNode
-          id="video-node"
-          data={data}
-          updateNode={(_id, patch) => setData((current) => ({ ...current, ...patch }))}
-          textDraft=""
-          setTextDraft={vi.fn()}
-          referencePool={pool}
-          deleteReference={vi.fn()}
-          draftFeedback={null}
-          setDraftFeedback={vi.fn()}
-        />
-      );
-    }
-
-    const { rerender } = render(<ControlledNode pool={referencePool()} />);
-    await waitFor(() => expect(screen.getByAltText('首帧')).toBeTruthy());
-
-    useCanvasStore.setState({ edges: [] });
-    rerender(<ControlledNode pool={emptyReferencePool} />);
-
-    await waitFor(() => expect(screen.queryByAltText('首帧')).toBeNull());
-    expect(screen.queryByAltText('尾帧')).toBeNull();
+    expect(screen.getByText('首帧')).toBeTruthy();
+    expect(screen.getByText('尾帧')).toBeTruthy();
+    // 首尾帧只有两个槽，没有「＋」追加更多参考
+    expect(screen.queryByLabelText('添加参考素材')).toBeNull();
   });
 
-  it('loads assigned frame assets from IndexedDB when media store is empty', async () => {
-    mocks.getAsset.mockImplementation(async (id: string) => frameAsset(id));
-    useMediaStore.setState({ assets: {}, metadata: {} });
-    useCanvasStore.setState({
-      nodes: [
-        { id: 'node-1', type: 'image', position: { x: 0, y: 0 }, data: { kind: 'image', label: '首帧图', prompt: '', status: 'idle', accent: '#fff' } },
-        { id: 'node-2', type: 'image', position: { x: 0, y: 400 }, data: { kind: 'image', label: '尾帧图', prompt: '', status: 'idle', accent: '#fff' } },
-      ],
-      edges: frameEdges(),
-    });
+  it('offers the add-reference control in the full reference mode', () => {
+    renderNode(data({ mode: 'fullReference' }));
 
-    function ControlledNode() {
-      const [data, setData] = React.useState(baseData);
-      return (
-        <VideoGenNode
-          id="video-node"
-          data={data}
-          updateNode={(_id, patch) => setData((current) => ({ ...current, ...patch }))}
-          textDraft=""
-          setTextDraft={vi.fn()}
-          referencePool={referencePool()}
-          deleteReference={vi.fn()}
-          draftFeedback={null}
-          setDraftFeedback={vi.fn()}
-        />
-      );
-    }
-
-    render(<ControlledNode />);
-
-    await waitFor(() => expect(screen.getByAltText('首帧')).toBeTruthy());
-    expect(screen.getByAltText('尾帧')).toBeTruthy();
+    expect(screen.getByLabelText('添加参考素材')).toBeTruthy();
   });
 
-  it('grows a first-last-frame node so following controls flow below the previews', async () => {
+  it('maps ordered upstream images to first and last frame roles', () => {
     useCanvasStore.setState({
-      nodes: [{
-        id: 'video-node',
-        type: 'firstLastFrameToVideo',
-        position: { x: 0, y: 0 },
-        width: 560,
-        height: 420,
-        data: baseData,
-      }],
-      edges: [],
+      nodes: [
+        { id: 'video-node', type: 'videoGeneration', position: { x: 500, y: 200 }, data: data({ mode: 'firstLastFrame' }) },
+        { id: 'first-image', type: 'image', position: { x: 100, y: 100 }, data: { kind: 'image', label: '首帧', prompt: '', status: 'success', accent: '#f00', assetId: 'a1' } },
+        { id: 'last-image', type: 'image', position: { x: 100, y: 300 }, data: { kind: 'image', label: '尾帧', prompt: '', status: 'success', accent: '#f00', assetId: 'a2' } },
+      ],
+      edges: [
+        { id: 'e1', source: 'first-image', sourceHandle: 'image', target: 'video-node', targetHandle: 'reference', type: 'canvas', data: { portOrder: 0 } },
+        { id: 'e2', source: 'last-image', sourceHandle: 'image', target: 'video-node', targetHandle: 'reference', type: 'canvas', data: { portOrder: 1 } },
+      ],
     });
+    const pool = poolWith([
+      { number: 1, assetId: 'a1', sourceNodeId: 'first-image', sourceNodeName: '首帧图' },
+      { number: 2, assetId: 'a2', sourceNodeId: 'last-image', sourceNodeName: '尾帧图' },
+    ]);
+    submitVideoGeneration.mockResolvedValue('job-1');
 
-    render(
-      <VideoGenNode
-        id="video-node"
-        data={baseData}
-        updateNode={vi.fn()}
-        textDraft=""
-        setTextDraft={vi.fn()}
-        referencePool={emptyReferencePool}
-        deleteReference={vi.fn()}
-        draftFeedback={null}
-        setDraftFeedback={vi.fn()}
-      />,
+    renderNode(data({ mode: 'firstLastFrame' }), pool);
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }));
+
+    expect(submitVideoGeneration).toHaveBeenCalledWith(
+      '',
+      'video-node',
+      expect.any(Function),
+      expect.objectContaining({
+        sourceAssetIds: ['a1', 'a2'],
+        params: expect.objectContaining({
+          videoMode: 'firstLastFrame',
+          referenceRoles: [
+            { assetId: 'a1', role: 'FIRST_FRAME' },
+            { assetId: 'a2', role: 'LAST_FRAME' },
+          ],
+        }),
+      }),
     );
+  });
 
-    await waitFor(() => {
-      expect(useCanvasStore.getState().nodes[0].height).toBe(560);
+  it('hands reference images over as plain references in the full reference mode', () => {
+    useCanvasStore.setState({
+      nodes: [
+        { id: 'video-node', type: 'videoGeneration', position: { x: 500, y: 200 }, data: data({ mode: 'fullReference' }) },
+        { id: 'ref-image', type: 'image', position: { x: 100, y: 100 }, data: { kind: 'image', label: '参考图', prompt: '', status: 'success', accent: '#f00', assetId: 'a1' } },
+      ],
+      edges: [
+        { id: 'e1', source: 'ref-image', sourceHandle: 'image', target: 'video-node', targetHandle: 'reference', type: 'canvas', data: { portOrder: 0 } },
+      ],
     });
+    const pool = poolWith([{ number: 1, assetId: 'a1', sourceNodeId: 'ref-image', sourceNodeName: '参考图' }]);
+    submitVideoGeneration.mockResolvedValue('job-2');
+
+    renderNode(data({ mode: 'fullReference' }), pool);
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }));
+
+    expect(submitVideoGeneration).toHaveBeenCalledWith(
+      '',
+      'video-node',
+      expect.any(Function),
+      expect.objectContaining({
+        params: expect.objectContaining({
+          videoMode: 'fullReference',
+          referenceRoles: [{ assetId: 'a1', role: 'REFERENCE' }],
+        }),
+      }),
+    );
+  });
+
+  it('exposes the duration / resolution / ratio controls without output format or bitrate', () => {
+    renderNode(data({ mode: 'text2video' }));
+
+    fireEvent.click(screen.getByLabelText('参数设置'));
+
+    expect(screen.getByLabelText('时长')).toBeTruthy();
+    expect(screen.getByRole('group', { name: '分辨率' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: '宽高比' })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('参数设置'));
+    expect(screen.queryByLabelText('输出格式')).toBeNull();
+    expect(screen.queryByLabelText('码率档位')).toBeNull();
   });
 });

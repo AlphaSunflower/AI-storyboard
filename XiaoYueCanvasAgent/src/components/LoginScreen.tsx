@@ -32,14 +32,14 @@ export function LoginScreen({ onLogin, message }: { onLogin: () => void; message
     }
   };
 
-  const inputClass = 'h-10 w-full rounded-[10px] border border-[var(--border-light)] bg-[rgba(255,255,255,0.05)] px-3.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(215,255,84,0.18)]';
+  const inputClass = 'h-10 w-full rounded-[10px] border border-[var(--border-light)] bg-[rgba(255,255,255,0.05)] px-3.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(244,244,245,0.18)]';
 
   return (
     <div className="login-shell min-h-dvh flex items-center justify-center px-6"
-      style={{ background: 'radial-gradient(circle at 18% 12%, rgba(215,255,84,0.10), transparent 34%), radial-gradient(circle at 84% 88%, rgba(25,42,36,0.9), transparent 46%), var(--canvas)' }}>
+      style={{ background: 'radial-gradient(circle at 18% 12%, rgba(244,244,245,0.10), transparent 34%), radial-gradient(circle at 84% 88%, rgba(24,24,24,0.9), transparent 46%), var(--canvas)' }}>
       <div className="login-card w-full max-w-sm rounded-2xl border border-[var(--border-dark)] bg-card p-7 shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
         <span className="flex items-center gap-2 font-mono text-[11px] tracking-[0.2em] text-acid">
-          <span className="inline-block h-2 w-2 rounded-full bg-acid shadow-[0_0_8px_rgba(215,255,84,0.8)]" />
+          <span className="inline-block h-2 w-2 rounded-full bg-acid shadow-[0_0_8px_rgba(244,244,245,0.8)]" />
           MORROW 设计画布
         </span>
         <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">欢迎回来</h2>

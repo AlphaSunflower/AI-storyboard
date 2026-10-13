@@ -1,8 +1,19 @@
 import { expect, test } from '@playwright/test';
 import { showAllNodes } from './node-display';
+import { prepareCanvasApp } from './support/canvasAuth';
+
+// 这三条重活（ffmpeg wasm）在整轮 e2e 里偶发加载超时，单独跑必过；
+// 除了在 playwright.config.ts 里给它们独立的 heavy-media project（全新浏览器会话 + 180s），
+// 这里再放开一次重试兜底，避免把环境抖动当成功能回归。
+test.describe.configure({ retries: 1 });
+
+test.beforeEach(async ({ page }) => {
+  await prepareCanvasApp(page);
+});
 
 test('extracts a real tail frame with the local ffmpeg pipeline', async ({ page }, testInfo) => {
-  test.setTimeout(90_000);
+  // ffmpeg wasm 首次加载在整轮 e2e 后段会明显变慢，给足余量避免误报
+  test.setTimeout(150_000);
   const projectId = 'video-tools-project';
   const canvasId = 'video-tools-canvas';
 
@@ -145,7 +156,7 @@ test('extracts a real tail frame with the local ffmpeg pipeline', async ({ page 
   await expect(page.getByTitle('提取帧')).toBeVisible();
   await page.getByTitle('提取帧').click();
   await page.getByRole('button', { name: '尾帧' }).click();
-  await expect(page.locator('.react-flow__node')).toHaveCount(2, { timeout: 60_000 });
+  await expect(page.locator('.react-flow__node')).toHaveCount(2, { timeout: 120_000 });
   await expect(page.locator('.react-flow__node').filter({ hasText: '测试视频 · 尾帧' })).toBeVisible();
   await expect(page.getByText('尾帧', { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('video-tools-desktop.png'), fullPage: true });
@@ -270,18 +281,22 @@ test('reorders clips inside the video merge node', async ({ page }, testInfo) =>
   await showAllNodes(page);
   const mergeNode = page.locator('.react-flow__node[data-id="merge-e2e"]');
   await expect(mergeNode).toBeVisible();
-  const clips = mergeNode.locator('.video-merge-list li');
+  // 合并节点框内只剩预览面，片段列表与合并按钮挂在框下的浮动面板（选中节点后出现）
+  await expect(mergeNode.locator('.node-surface')).toHaveCount(1);
+  await mergeNode.locator('.ai-node-external-title').click();
+  const mergePanel = page.locator('.react-flow__node-toolbar[data-id="merge-e2e"]');
+  const clips = mergePanel.locator('.video-merge-list li');
   await expect(clips.nth(0)).toContainText('片段 1');
   await expect(clips.nth(1)).toContainText('片段 2');
-  await expect(mergeNode.getByRole('button', { name: '合并视频' })).toBeEnabled();
+  await expect(mergePanel.getByRole('button', { name: '合并视频' })).toBeEnabled();
 
-  await mergeNode.getByLabel('上移 片段 2').click();
+  await mergePanel.getByLabel('上移 片段 2').click();
   await expect(clips.nth(0)).toContainText('片段 2');
   await expect(clips.nth(1)).toContainText('片段 1');
-  await mergeNode.getByRole('button', { name: '合并视频' }).click();
+  await mergePanel.getByRole('button', { name: '合并视频' }).click();
   await expect(page.locator('.react-flow__node')).toHaveCount(4, { timeout: 60_000 });
   await expect(page.locator('.react-flow__node').filter({
-    has: page.locator('input[aria-label="视频节点标题"][value="视频合并 · 合并结果"]'),
+    has: page.locator('.ai-node-external-title', { hasText: '视频合并 · 合并结果' }),
   })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('video-merge-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -436,7 +451,8 @@ test('restores a 1.68x video by reprocessing its original source at 1.0x', async
   await showAllNodes(page);
   const videoNode = page.locator('.react-flow__node[data-id="speed-node"]');
   await videoNode.click();
-  await page.getByTitle('变速').click();
+  // 选中后悬浮工具条与节点工具条会同时存在，取可见的第一个
+  await page.locator('[title="变速"]:visible').first().click();
   await page.getByLabel('倍数').fill('1');
   await page.getByRole('button', { name: '覆盖原视频' }).click();
 

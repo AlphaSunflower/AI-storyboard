@@ -33,6 +33,52 @@ export interface CanvasBinding {
 
 export type CanvasModePhase = 'natural' | 'binding' | 'locked' | 'exit_pending';
 
+/** 画布 URL 携带的媒体参数：画布子站按原样透传给内嵌 Moon 对话 */
+export const CANVAS_MEDIA_PARAM = 'media';
+
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i;
+const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg)(?:[?#]|$)/i;
+
+export function mediaKindFromUrl(url: string): AgentMediaKind {
+  if (VIDEO_EXTENSIONS.test(url)) return 'video';
+  if (AUDIO_EXTENSIONS.test(url)) return 'audio';
+  return 'image';
+}
+
+/**
+ * 解析画布 URL 里的媒体参数（JSON 字符串数组，或 [{url, kind}]）。
+ * 解析不了就当作没有携带，不影响页面其余部分。
+ */
+export function parseCanvasMediaParam(raw: string | null | undefined): AgentMediaRef[] {
+  const value = raw?.trim();
+  if (!value) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const refs: AgentMediaRef[] = [];
+  for (const item of parsed) {
+    if (typeof item === 'string') {
+      const url = item.trim();
+      if (url) refs.push({ kind: mediaKindFromUrl(url), url, source: 'upload' });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as { url?: unknown; kind?: unknown };
+    const url = typeof candidate.url === 'string' ? candidate.url.trim() : '';
+    if (!url) continue;
+    const kind = typeof candidate.kind === 'string'
+      && ['image', 'video', 'audio', 'file'].includes(candidate.kind)
+      ? candidate.kind as AgentMediaKind
+      : mediaKindFromUrl(url);
+    refs.push({ kind, url, source: 'upload' });
+  }
+  return refs;
+}
+
 export interface CanvasRequestMedia {
   picUrls?: string[];
   assetIds?: string[];
@@ -84,6 +130,14 @@ export function parseCanvasEditContext(search: string): CanvasEditContext | null
     canvasId,
     mediaRefs: [],
   });
+}
+
+/**
+ * 画布编辑模式锁定标记（画布网站的 Moon 子站下发 canvasLock=1）。
+ * 锁定后该子站始终处于画布编辑模式：不渲染退出入口，上下文被清空时按 URL 目标重新置回。
+ */
+export function parseCanvasEditLock(search: string): boolean {
+  return new URLSearchParams(search).get('canvasLock') === '1';
 }
 
 export function persistCanvasEditContext(context: CanvasEditContext): void {

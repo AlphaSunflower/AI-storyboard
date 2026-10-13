@@ -138,6 +138,18 @@ describe('chat app definitions', () => {
       .toBe('/canvas/#project=project-1&canvas=canvas-1');
   });
 
+  it('carries the media of a 「去画布编辑」 jump in the canvas site url', () => {
+    expect(buildCanvasSiteUrl({
+      projectId: 'project-1',
+      canvasId: 'canvas-1',
+      media: ['/api/files/images/dragon.png'],
+    })).toBe(`/canvas/#project=project-1&canvas=canvas-1&media=${
+      encodeURIComponent(JSON.stringify(['/api/files/images/dragon.png']))}`);
+
+    expect(buildCanvasSiteUrl({ projectId: 'project-1', media: [] }))
+      .toBe('/canvas/#project=project-1');
+  });
+
   it('opens the canvas site in its own window rather than an embedded frame', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 

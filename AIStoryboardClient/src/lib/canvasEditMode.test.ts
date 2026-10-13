@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCanvasRequestContext,
   filterCanvasReferenceUrls,
+  mediaKindFromUrl,
   parseCanvasEditContext,
+  parseCanvasEditLock,
+  parseCanvasMediaParam,
   rebindCanvasEditContext,
   resolveCanvasModePhase,
   withoutCanvasMediaRef,
@@ -21,6 +24,12 @@ describe('canvas edit mode', () => {
   it('ignores query parameters that do not request canvas edit mode', () => {
     expect(parseCanvasEditContext('?embed=1&surface=chat')).toBeNull();
     expect(parseCanvasEditContext('?surface=canvas-edit&projectId=project-1')).toBeNull();
+  });
+
+  it('reads the canvas edit lock handed down by the canvas sub-site', () => {
+    expect(parseCanvasEditLock('?embed=1&surface=canvas-edit&canvasLock=1')).toBe(true);
+    expect(parseCanvasEditLock('?embed=1&surface=canvas-edit')).toBe(false);
+    expect(parseCanvasEditLock('?canvasLock=0')).toBe(false);
   });
 
   it('keeps pinned media references and adds current image and asset references', () => {
@@ -183,5 +192,31 @@ describe('canvas edit mode', () => {
     expect(filterCanvasReferenceUrls(['/api/files/images/ref.png'], legacy!)).toEqual([
       '/api/files/images/ref.png',
     ]);
+  });
+
+  it('parses the media the canvas site forwards into the embedded chat', () => {
+    // 画布子站把参数原样透传进 iframe URL，URLSearchParams 取值时已解码
+    const raw = JSON.stringify([
+      '/api/files/images/dragon.png',
+      { url: '/api/files/videos/clip.mp4', kind: 'video' },
+    ]);
+
+    expect(parseCanvasMediaParam(raw)).toEqual([
+      { kind: 'image', url: '/api/files/images/dragon.png', source: 'upload' },
+      { kind: 'video', url: '/api/files/videos/clip.mp4', source: 'upload' },
+    ]);
+  });
+
+  it('ignores malformed media parameters instead of breaking the chat boot', () => {
+    expect(parseCanvasMediaParam(null)).toEqual([]);
+    expect(parseCanvasMediaParam('not-json')).toEqual([]);
+    expect(parseCanvasMediaParam('{"url":"/a.png"}')).toEqual([]);
+    expect(parseCanvasMediaParam(JSON.stringify(['', 42, { kind: 'image' }, { url: ' ' }]))).toEqual([]);
+  });
+
+  it('infers the media kind from the file extension', () => {
+    expect(mediaKindFromUrl('/api/files/images/a.webp')).toBe('image');
+    expect(mediaKindFromUrl('/api/files/videos/a.MP4')).toBe('video');
+    expect(mediaKindFromUrl('/api/files/audio/a.mp3')).toBe('audio');
   });
 });

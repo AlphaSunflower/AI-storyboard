@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { agentChatTokens as T } from './agentChatTokens';
+import { useAbovePopoverPlacement } from './abovePopover';
 
 export interface SlashCommandItem {
   id: string;
@@ -22,12 +24,20 @@ export interface SlashCommandItem {
  * ChatComposer 在命令模式下只负责阻止 Enter 换行。
  */
 export function ChatSlashMenu({
-  items, query, onClose,
+  items, query, onClose, anchorRef,
 }: {
   items: SlashCommandItem[];
   query: string;
   onClose: () => void;
+  /** 定位锚点（输入卡）：浮层挂到 body，避免被浮窗外层 overflow 裁掉 */
+  anchorRef: RefObject<HTMLElement | null>;
 }) {
+  // 停靠态浮窗是 overflow: hidden，画在卡片里向上弹会被整条裁掉
+  const placement = useAbovePopoverPlacement(true, anchorRef, {
+    gap: 8,
+    align: 'stretch',
+    minWidth: 320,
+  });
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const available = items.filter((item) => item.visible !== false);
@@ -64,11 +74,12 @@ export function ChatSlashMenu({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [visible, active, onClose]);
 
-  if (visible.length === 0) return null;
+  if (visible.length === 0 || !placement) return null;
 
-  return (
+  return createPortal(
     <div className="chat-slash-menu" role="listbox" aria-label="命令" style={{
-      position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, right: 0,
+      position: 'fixed', bottom: placement.bottom, left: placement.left,
+      width: placement.width, maxHeight: placement.maxHeight, overflowY: 'auto',
       background: 'white', border: `1px solid ${T.border}`,
       borderRadius: 14, boxShadow: '0 8px 28px rgba(0,0,0,0.14)',
       padding: 6, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: 2,
@@ -101,6 +112,7 @@ export function ChatSlashMenu({
           </span>
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }

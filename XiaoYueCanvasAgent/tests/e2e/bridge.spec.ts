@@ -1,50 +1,89 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { expect, test } from '@playwright/test';
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
 
-// 端到端验证 CLI/MCP 通过 Bridge 读写浏览器画布。
-// 测试自管 Bridge 生命周期：beforeAll 启动，afterAll 关闭。
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
-const BRIDGE_PORT = Number(process.env.MORROW_BRIDGE_PORT ?? 18787);
-const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_TOKEN = process.env.MORROW_BRIDGE_TOKEN ?? 'morrow-bridge-e2e-token';
-const APP_PORT = Number(process.env.PLAYWRIGHT_PORT ?? 13000);
+// 端到端验证浏览器画布信箱：canvas 服务（/api/canvas/bridge）投递命令，
+// 浏览器轮询领取、在页面内执行、把结果回传。命令执行层仍在前端。
 
-let bridge: ChildProcess | null = null;
+interface BridgeCommand {
+  requestId: string;
+  method: string;
+  params: Record<string, unknown>;
+  dryRun?: boolean;
+  /** 只投给指定标签（模拟服务端的活跃标签选择），省略表示谁先轮询谁拿。 */
+  forTab?: string;
+}
 
-const waitForBridge = async () => {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    try {
-      const response = await fetch(`${BRIDGE_URL}/health`, {
-        headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
-      });
-      if (response.ok) return;
-    } catch {
-      // 继续重试
+interface BridgeMockState {
+  registered: string[];
+  unregistered: string[];
+  results: Array<Record<string, unknown>>;
+  commands: BridgeCommand[];
+  healthFailures: number;
+}
+
+const emptyState = (): BridgeMockState => ({
+  registered: [],
+  unregistered: [],
+  results: [],
+  commands: [],
+  healthFailures: 0,
+});
+
+const jsonBody = (route: Route) => route.request().postDataJSON() as Record<string, unknown>;
+const query = (route: Route, key: string) => new URL(route.request().url()).searchParams.get(key) ?? '';
+
+const mockBridge = async (page: Page, state: BridgeMockState) => {
+  await page.route('**/api/canvas/bridge/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname.replace('/api/canvas/bridge', '');
+    const method = request.method();
+
+    if (path === '/health' && method === 'GET') {
+      if (state.healthFailures > 0) {
+        state.healthFailures -= 1;
+        return route.fulfill({ status: 503, json: { message: 'not ready' } });
+      }
+      return route.fulfill({ json: { ok: true, version: 1, projects: [] } });
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error('Bridge 未在超时时间内启动');
+    if (path === '/register' && method === 'POST') {
+      state.registered.push(String(jsonBody(route).tabId));
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (path === '/unregister' && method === 'POST') {
+      state.unregistered.push(String(jsonBody(route).tabId));
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (path === '/poll' && method === 'GET') {
+      const tabId = query(route, 'tabId');
+      const index = state.commands.findIndex((entry) => !entry.forTab || entry.forTab === tabId);
+      if (index < 0) return route.fulfill({ json: {} });
+      const [command] = state.commands.splice(index, 1);
+      const { forTab: _forTab, ...payload } = command;
+      return route.fulfill({ json: { command: payload } });
+    }
+    if (path === '/result' && method === 'POST') {
+      state.results.push(jsonBody(route));
+      return route.fulfill({ json: { ok: true } });
+    }
+    return route.fulfill({ status: 404, json: { message: `unmocked ${method} ${path}` } });
+  });
 };
 
-const sendCommand = (projectId: string, method: string, params: Record<string, unknown>, canvasId?: string) =>
-  fetch(`${BRIDGE_URL}/command`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Bridge-Token': BRIDGE_TOKEN },
-    body: JSON.stringify({ version: 1, id: crypto.randomUUID(), source: 'cli', projectId, canvasId, method, params }),
-  }).then((response) => response.json());
-
-const clickNewProject = async (page: import('@playwright/test').Page) => {
-  await expect(page.getByRole('button', { name: '新建项目', exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.waitForTimeout(1_000);
-  await page.getByRole('button', { name: '新建项目', exact: true }).click({ force: true });
+const emptyGraph = {
+  schemaVersion: 2,
+  nodes: [],
+  edges: [],
+  viewport: { x: 0, y: 0, zoom: 1 },
+  generationRecords: [],
+  executions: [],
 };
 
-const mockCanvasApi = async (page: import('@playwright/test').Page) => {
+const mockCanvasApi = async (page: Page) => {
   await page.route('**/api/canvas/**', (route) => {
     const request = route.request();
-    const url = new URL(request.url());
-    const path = url.pathname.replace('/api/canvas', '');
+    const path = new URL(request.url()).pathname.replace('/api/canvas', '');
     const method = request.method();
     if (path === '/projects' && method === 'GET') return route.fulfill({ json: [] });
     if (path === '/projects' && method === 'POST') {
@@ -65,20 +104,8 @@ const mockCanvasApi = async (page: import('@playwright/test').Page) => {
     if (/^\/canvases\/[^/]+$/.test(path) && method === 'PATCH') {
       return route.fulfill({ json: { id: 'e2e-canvas', projectId: 'e2e-project', title: '画布' } });
     }
-    if (path === '/assets/upload' && method === 'POST') {
-      return route.fulfill({ json: {
-        id: 'e2e-asset',
-        canvasId: 'e2e-canvas',
-        type: 'image',
-        mimeType: 'image/png',
-        objectUrl: '/api/files/images/e2e-upload.png',
-      } });
-    }
     if (/^\/canvases\/[^/]+\/graph$/.test(path) && method === 'GET') {
-      return route.fulfill({ json: {
-        graph: { schemaVersion: 2, nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, generationRecords: [], executions: [] },
-        revision: 0,
-      } });
+      return route.fulfill({ json: { graph: emptyGraph, revision: 0 } });
     }
     if (/^\/canvases\/[^/]+\/graph$/.test(path) && method === 'PUT') {
       const body = request.postDataJSON() as { graph?: unknown };
@@ -88,247 +115,196 @@ const mockCanvasApi = async (page: import('@playwright/test').Page) => {
   });
 };
 
-const startBridge = async () => {
-  bridge = spawn(process.execPath, ['bridge/server.ts'], {
-    cwd: process.cwd(),
-    stdio: 'ignore',
-    env: {
-      ...process.env,
-      MORROW_BRIDGE_PORT: String(BRIDGE_PORT),
-      MORROW_BRIDGE_TOKEN: BRIDGE_TOKEN,
-      MORROW_BRIDGE_ORIGINS: `http://localhost:${APP_PORT}`,
-    },
-  });
-  await waitForBridge();
-};
-
-const stopBridge = async () => {
-  if (!bridge?.pid) return;
-  const pid = bridge.pid;
-  try { bridge.kill(); } catch { /* ignore */ }
-  // Windows 上 child.kill() 可能留孤儿进程，用 taskkill 兜底强杀。
-  if (process.platform === 'win32') {
-    await new Promise<void>((resolve) => {
-      const killer = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore' });
-      killer.on('exit', () => resolve());
-      killer.on('error', () => resolve());
-    });
-  }
-  bridge = null;
-};
-
-test.beforeEach(async ({ page }) => {
-  await startBridge();
+const mockAuth = async (page: Page) => {
   await page.route('**/api/auth/refresh', (route) => route.fulfill({
     json: { data: { accessToken: 'header.payload.signature', userId: 'test-user' } },
   }));
-  await mockCanvasApi(page);
-  await page.goto('/');
-  await page.evaluate(async () => {
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('morrow-creative-canvas-v1', 5);
-      request.onsuccess = () => {
-        const db = request.result;
-        const stores = Array.from(db.objectStoreNames);
-        if (!stores.length) { db.close(); resolve(); return; }
-        const transaction = db.transaction(stores, 'readwrite');
-        stores.forEach((store) => transaction.objectStore(store).clear());
-        transaction.oncomplete = () => { db.close(); resolve(); };
-        transaction.onerror = () => reject(transaction.error);
-      };
-      request.onerror = () => reject(request.error);
-    });
-    localStorage.clear(); sessionStorage.clear();
-  });
-  await page.reload();
-});
+};
 
-test.afterEach(async () => {
-  await stopBridge();
-});
-
-test('CLI 通过 Bridge 读取并写入浏览器画布', async ({ page }) => {
-  await clickNewProject(page);
+const openCanvas = async (page: Page) => {
+  await page.getByRole('button', { name: '新建项目', exact: true }).click({ force: true });
   await page.getByRole('button', { name: '新建第一个画布' }).click();
   await expect(page.getByText('空画布', { exact: true })).toBeVisible();
+  await expect.poll(() => page.locator('.react-flow__node').count()).toBe(0);
+};
 
-  const projectId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('project'));
-  const canvasId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('canvas'));
-  expect(projectId).toBeTruthy();
-  expect(canvasId).toBeTruthy();
-
-  // 等待浏览器标签页注册到 Bridge。
-  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`, {
-    headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
-  }).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
-    projects: expect.arrayContaining([expect.objectContaining({
-      projectId,
-      projectTitle: 'Untitled',
-      canvasId,
-      canvasTitle: '画布',
-    })]),
+const recordBridgeReadyEvents = async (page: Page) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __bridgeReady: unknown[] }).__bridgeReady = [];
+    window.addEventListener('morrow:canvas-bridge-ready', (event) => {
+      (window as unknown as { __bridgeReady: unknown[] }).__bridgeReady.push(
+        (event as CustomEvent).detail);
+    });
   });
+};
 
-  // 读：summary
-  const summary = await sendCommand(projectId!, 'canvas.get_summary', {}, canvasId!);
-  expect(summary.ok).toBe(true);
-  expect(summary.result.nodeCount).toBe(0);
+const bridgeReadyCount = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __bridgeReady: unknown[] }).__bridgeReady?.length ?? 0);
 
-  // 写：创建文字节点
-  const created = await sendCommand(projectId!, 'canvas.node.create_text', { label: 'CLI 创建的文字', position: { x: 420, y: 300 } }, canvasId!);
-  expect(created.ok).toBe(true);
-  expect(created.status).toBe('applied');
+const setupPage = async (context: BrowserContext, state: BridgeMockState) => {
+  const page = await context.newPage();
+  await mockAuth(page);
+  await mockCanvasApi(page);
+  await mockBridge(page, state);
+  return page;
+};
 
-  await expect(page.locator('.react-flow__node')).toHaveCount(1);
-  await expect(page.getByText('CLI 创建的文字')).toBeVisible();
-
-  // 再读：节点数应变为 1
-  const afterCreate = await sendCommand(projectId!, 'canvas.get_summary', {}, canvasId!);
-  expect(afterCreate.result.nodeCount).toBe(1);
-
-  // 未打开的项目应返回 PROJECT_NOT_OPEN
-  const missing = await sendCommand('missing-project', 'canvas.get_summary', {});
-  expect(missing.ok).toBe(false);
-  expect(missing.error.code).toBe('PROJECT_NOT_OPEN');
+test.beforeEach(async ({ page }) => {
+  await mockAuth(page);
 });
 
-test('MCP 通过 Streamable HTTP 创建节点并连接浏览器画布', async ({ page }) => {
-  const projectId = 'mcp-bridge-project';
-  const canvasId = 'mcp-bridge-canvas';
-  await page.route('**/api/canvas/**', async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname.replace('/api/canvas', '');
-    if (path === '/projects' && request.method() === 'GET') {
-      return route.fulfill({ json: [{ id: projectId, title: 'MCP 联调' }] });
-    }
-    if (path === `/projects/${projectId}` && request.method() === 'GET') {
-      return route.fulfill({ json: { id: projectId, title: 'MCP 联调' } });
-    }
-    if (path === `/projects/${projectId}/canvases` && request.method() === 'GET') {
-      return route.fulfill({ json: [{ id: canvasId, projectId, title: '默认画布' }] });
-    }
-    if (path === `/canvases/${canvasId}/graph`) {
-      const graph = request.method() === 'PUT'
-        ? (request.postDataJSON() as { graph: unknown }).graph
-        : {
-            schemaVersion: 2,
-            nodes: [{ id: 'mcp-placeholder', type: 'text', position: { x: 80, y: 80 }, data: { kind: 'text', label: '占位', prompt: '', status: 'idle', accent: '#fff' } }],
-            edges: [],
-            viewport: { x: 40, y: 40, zoom: 1 },
-            generationRecords: [],
-            executions: [],
-          };
-      return route.fulfill({ json: { graph, revision: 1 } });
-    }
-    if (path === `/canvases/${canvasId}` && request.method() === 'PATCH') {
-      return route.fulfill({ json: { id: canvasId, projectId, title: '默认画布' } });
-    }
-    return route.fulfill({ status: 404, json: { message: `unmocked ${request.method()} ${path}` } });
+test('浏览器向服务端注册标签页并回传命令执行结果', async ({ page }) => {
+  const state = emptyState();
+  state.commands.push({
+    requestId: 'req-1',
+    method: 'canvas.get_summary',
+    params: {},
+    dryRun: false,
   });
+  await mockCanvasApi(page);
+  await mockBridge(page, state);
 
-  await page.goto(`/?token=test-token&userId=test-user#project=${projectId}&canvas=${canvasId}`);
-  await expect(page.locator('.canvas-workspace')).toBeVisible();
-  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`, {
-    headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
-  }).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
-    projects: expect.arrayContaining([expect.objectContaining({
-      projectId,
-      projectTitle: 'MCP 联调',
-      canvasId,
-      canvasTitle: '画布',
-    })]),
+  await page.goto('/');
+  await openCanvas(page);
+
+  await expect.poll(() => state.registered.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect.poll(() => state.results.length, { timeout: 15_000 }).toBeGreaterThan(0);
+
+  const result = state.results[0] as { requestId?: string; response?: Record<string, unknown> };
+  expect(result.requestId).toBe('req-1');
+  expect(result.response).toMatchObject({ ok: true, id: 'req-1' });
+  expect((result.response?.result as { nodeCount?: number }).nodeCount).toBe(0);
+});
+
+test('信箱投递的写命令真的落到画布上（可见结果 + 回传 revision）', async ({ page }) => {
+  const state = emptyState();
+  state.commands.push({
+    requestId: 'req-create',
+    method: 'canvas.node.create_text',
+    params: { label: '信箱创建的文字', position: { x: 420, y: 300 } },
   });
+  await mockCanvasApi(page);
+  await mockBridge(page, state);
 
-  const client = new Client({ name: 'bridge-e2e', version: '1.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${BRIDGE_URL}/mcp`)));
+  await page.goto('/');
+  await openCanvas(page);
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.getByText('信箱创建的文字')).toBeVisible();
+  await expect.poll(() => state.results.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  expect((state.results[0] as { response?: Record<string, unknown> }).response)
+    .toMatchObject({ ok: true, status: 'applied' });
+});
+
+test('执行类命令被服务端强制预览：页面不产生落库变更', async ({ page }) => {
+  const state = emptyState();
+  state.commands.push({
+    requestId: 'req-preview',
+    method: 'canvas.graph.execute',
+    // 服务端对执行/删除类命令强制 dryRun，轮询载荷里带的就是 true
+    params: {},
+    dryRun: true,
+  });
+  await mockCanvasApi(page);
+  await mockBridge(page, state);
+
+  await page.goto('/');
+  await openCanvas(page);
+
+  await expect.poll(() => state.results.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const result = state.results[0] as { response?: Record<string, unknown> };
+  expect(result.response).toMatchObject({ ok: true, status: 'preview' });
+  await expect(page.locator('.react-flow__node')).toHaveCount(0);
+});
+
+test('同画布多标签：命令只由被投递的那个标签执行', async ({ browser }) => {
+  const state = emptyState();
+  const context = await browser.newContext();
   try {
-    const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
-      'canvas_get_context',
-      'canvas_create_node',
-      'canvas_create_edge',
-      'canvas_execute_graph',
-    ]));
+    const first = await setupPage(context, state);
+    await first.goto('/');
+    await openCanvas(first);
+    await expect.poll(() => state.registered.length, { timeout: 15_000 }).toBe(1);
 
-    const context = await client.callTool({ name: 'canvas_get_context', arguments: {} });
-    const contextText = context.content.find((item) => item.type === 'text')?.text ?? '';
-    expect(JSON.parse(contextText)).toMatchObject({
-      projectId,
-      projectTitle: 'MCP 联调',
-      canvasId,
-      canvasTitle: '画布',
-    });
-    const browserContext = await client.callTool({ name: 'canvas_get_browser_context', arguments: {} });
-    expect(JSON.parse(browserContext.content.find((item) => item.type === 'text')?.text ?? '{}')).toMatchObject({ projectId, canvasId });
+    const second = await setupPage(context, state);
+    await second.goto('/');
+    await openCanvas(second);
+    await expect.poll(() => state.registered.length, { timeout: 15_000 }).toBe(2);
 
-    const script = await client.callTool({
-      name: 'canvas_create_node',
-      arguments: { projectId, canvasId, kind: 'script', label: 'MCP 剧本', data: { scriptText: '第一幕。' } },
-    });
-    expect(script.isError, script.content.find((item) => item.type === 'text')?.text).not.toBe(true);
-    const scriptId = JSON.parse(script.content.find((item) => item.type === 'text')?.text ?? '{}').nodeId;
-    expect(scriptId).toBeTruthy();
-
-    const planner = await client.callTool({
-      name: 'canvas_create_node',
-      arguments: { projectId, canvasId, kind: 'storyboardPlanner', label: 'MCP 分镜拆解' },
-    });
-    const plannerId = JSON.parse(planner.content.find((item) => item.type === 'text')?.text ?? '{}').nodeId;
-    await client.callTool({
-      name: 'canvas_create_edge',
-      arguments: { projectId, canvasId, source: scriptId, target: plannerId },
+    const activeTab = state.registered[1];
+    state.commands.push({
+      requestId: 'req-tab-2',
+      method: 'canvas.node.create_text',
+      params: { label: '只给活跃标签' },
+      forTab: activeTab,
     });
 
-    await expect(page.locator('.react-flow__node')).toHaveCount(3);
-    await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+    await expect(second.locator('.react-flow__node')).toHaveCount(1, { timeout: 15_000 });
+    await expect(first.locator('.react-flow__node')).toHaveCount(0);
+    expect((state.results[0] as { response?: Record<string, unknown> }).response)
+      .toMatchObject({ ok: true });
   } finally {
-    await client.close();
+    await context.close();
   }
 });
 
-test('语义操作落成因果链：裁剪→切分，边带标签，节点可展开血缘', async ({ page }) => {
-  await clickNewProject(page);
-  await page.getByRole('button', { name: '新建第一个画布' }).click();
-  await expect(page.getByText('空画布', { exact: true })).toBeVisible();
-  const projectId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('project'));
-  const canvasId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('canvas'));
-  expect(projectId).toBeTruthy();
-  await expect.poll(async () => fetch(`${BRIDGE_URL}/health`, {
-    headers: { 'X-Bridge-Token': BRIDGE_TOKEN },
-  }).then((r) => r.json()), { timeout: 5000 }).toMatchObject({
-    projects: expect.arrayContaining([expect.objectContaining({ projectId, canvasId })]),
-  });
+test('跨用户隔离：一个用户的命令不会驱动另一个用户的画布', async ({ browser }) => {
+  const stateA = emptyState();
+  const stateB = emptyState();
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  try {
+    const pageA = await setupPage(contextA, stateA);
+    const pageB = await setupPage(contextB, stateB);
+    await pageA.goto('/');
+    await pageB.goto('/');
+    await openCanvas(pageA);
+    await openCanvas(pageB);
+    await expect.poll(() => stateA.registered.length, { timeout: 15_000 }).toBe(1);
+    await expect.poll(() => stateB.registered.length, { timeout: 15_000 }).toBe(1);
 
-  // 上传一张真实 PNG
-  const png = await page.evaluate(async () => {
-    const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 40;
-    const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#ff775f'; ctx.fillRect(0, 0, 40, 40);
-    ctx.fillStyle = '#d7ff54'; ctx.fillRect(4, 4, 12, 8);
-    return [...new Uint8Array(await (await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!), 'image/png'))).arrayBuffer())];
-  });
-  await page.locator('main.canvas-workspace input[type=file]').setInputFiles({ name: 'src.png', mimeType: 'image/png', buffer: Buffer.from(png) });
-  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+    stateA.commands.push({
+      requestId: 'req-user-a',
+      method: 'canvas.node.create_text',
+      params: { label: 'A 的节点' },
+    });
 
-  const list = await sendCommand(projectId!, 'canvas.list_nodes', {}, canvasId!);
-  const sourceNodeId = list.result[0].id;
-
-  // 裁剪 → 1 条"裁剪"边
-  const crop = await sendCommand(projectId!, 'canvas.image.crop', { nodeId: sourceNodeId, crop: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } }, canvasId!);
-  expect(crop.ok).toBe(true);
-  await expect(page.locator('.react-flow__node')).toHaveCount(2);
-  const cropEdges = await sendCommand(projectId!, 'canvas.list_edges', {}, canvasId!);
-  expect(cropEdges.result).toHaveLength(1);
-
-  // 对裁剪产物切分 2×2 → 4 条"切分"边
-  const split = await sendCommand(projectId!, 'canvas.image.split', { nodeId: crop.result.nodeIds[0], rows: 2, columns: 2 }, canvasId!);
-  expect(split.ok).toBe(true);
-  await expect(page.locator('.react-flow__node')).toHaveCount(6);
-  const splitEdges = await sendCommand(projectId!, 'canvas.list_edges', {}, canvasId!);
-  expect(splitEdges.result).toHaveLength(5);
-
-  // 详情面板展示完整操作记录与血缘链
-  await page.locator('.react-flow__node').last().click({ force: true });
-  await page.getByRole('button', { name: '画布设置' }).click();
-  await expect(page.getByText('操作记录')).toBeVisible();
-  await expect(page.getByText('血缘链')).toBeVisible();
+    await expect(pageA.locator('.react-flow__node')).toHaveCount(1, { timeout: 15_000 });
+    await expect(pageB.locator('.react-flow__node')).toHaveCount(0);
+    expect(stateB.commands).toHaveLength(0);
+    expect(stateB.results).toHaveLength(0);
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
 });
+
+test('就绪后派发 canvas-bridge-ready，供外部命令层等待画布可用', async ({ page }) => {
+  const state = emptyState();
+  await recordBridgeReadyEvents(page);
+  await mockCanvasApi(page);
+  await mockBridge(page, state);
+
+  await page.goto('/');
+  await openCanvas(page);
+
+  await expect.poll(() => bridgeReadyCount(page), { timeout: 15_000 }).toBeGreaterThan(0);
+  const detail = await page.evaluate(() => (window as unknown as {
+    __bridgeReady: Array<{ projectId?: string; canvasId?: string }>;
+  }).__bridgeReady[0]);
+  expect(detail.projectId).toBeTruthy();
+  expect(detail.canvasId).toBeTruthy();
+});
+
+test('画布服务未就绪时不注册，恢复后自动重连', async ({ page }) => {
+  const state = emptyState();
+  state.healthFailures = 2;
+  await mockCanvasApi(page);
+  await mockBridge(page, state);
+
+  await page.goto('/');
+  await openCanvas(page);
+
+  await expect.poll(() => state.registered.length, { timeout: 20_000 }).toBeGreaterThan(0);
+});
+

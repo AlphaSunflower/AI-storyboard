@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CanvasContextPromptBuilderTest {
 
     @Test
-    void includesScopeAndMediaReferencesForCanvasTools() {
+    void includesScopeAndCanvasFirstPriorityForCanvasTools() {
         CanvasSessionContext context = new CanvasSessionContext(
                 "canvas-edit",
                 "project-1",
@@ -22,34 +22,23 @@ class CanvasContextPromptBuilderTest {
                 )
         );
 
-        String prompt = CanvasContextPromptBuilder.build(context, List.of());
+        String prompt = CanvasContextPromptBuilder.build(context);
 
         assertThat(prompt)
                 .contains("projectId=project-1")
                 .contains("canvasId=canvas-1")
-                .contains("request_human_input")
+                .contains("canvas_create_run")
+                .contains("canvas_graph_import_media_batch")
+                .contains("生图、生视频工具保留")
+                .contains("分镜技能与分镜工具在画布模式下不加载")
                 .contains("禁止向用户展示或要求输入")
-                .contains("image")
-                .contains("/api/files/images/ref.png")
-                .contains("video-1");
+                .doesNotContain("不得切换到分镜、图片、视频或通用回答链路");
     }
 
     @Test
     void returnsEmptyPromptOutsideCanvasEditMode() {
-        assertThat(CanvasContextPromptBuilder.build(null, List.of())).isEmpty();
-    }
-
-    @Test
-    void exposesUploadedImagesEvenWhenCanvasContextIsMissing() {
-        String prompt = CanvasContextPromptBuilder.build(null, List.of(
-                "http://localhost:5173/api/files/images/one.png",
-                "http://localhost:5173/api/files/images/two.png"
-        ));
-
-        assertThat(prompt)
-                .contains("本轮上传媒体")
-                .contains("one.png")
-                .contains("two.png")
-                .contains("canvas_import_media");
+        assertThat(CanvasContextPromptBuilder.build(null)).isEmpty();
+        assertThat(CanvasContextPromptBuilder.build(new CanvasSessionContext(
+                "natural", "project-1", "canvas-1", List.of()))).isEmpty();
     }
 }

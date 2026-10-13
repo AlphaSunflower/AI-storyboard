@@ -178,14 +178,11 @@ public class AgentScopeToolkitFactory {
     }
 
     private void registerCanvasTool(Toolkit toolkit, ToolCallback callback, String group) {
-        if (callback.getToolDefinition().name().startsWith("canvas_graph_")) {
-            registerToGroup(toolkit,
-                    toolPipeline.wrapGeneric(new CanvasRunToolAdapter(callback, canvasRuns)),
-                    group);
-            return;
-        }
+        // 画布工具（canvas_graph_* 与服务端 canvas_execute_*）统一走 run 适配器：
+        // 由它注入 userId/projectId/canvasId/runId/operationKey，并提供操作幂等与进度。
         registerToGroup(toolkit,
-                toolPipeline.wrapGeneric(new SpringAiToolAdapter(callback)), group);
+                toolPipeline.wrapGeneric(new CanvasRunToolAdapter(callback, canvasRuns)),
+                group);
     }
 
     private static boolean canvasRunTool(String name) {

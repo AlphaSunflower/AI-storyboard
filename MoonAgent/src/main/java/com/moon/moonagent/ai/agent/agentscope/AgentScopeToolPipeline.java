@@ -10,6 +10,7 @@ import com.moon.moonagent.ai.agent.audit.ToolInvocationLedger;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationScope;
 import com.moon.moonagent.ai.agent.audit.ToolInvocationScopeHolder;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentToolInvocation;
 import io.agentscope.core.message.ToolResultBlock;
@@ -23,6 +24,7 @@ import reactor.core.publisher.Mono;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 @Component
@@ -30,6 +32,31 @@ import java.util.function.Supplier;
 public class AgentScopeToolPipeline {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * 画布编辑模式下不加载的分镜工具：画布回合内调用直接被拒绝，用户需要分镜时先退出画布模式。
+     */
+    private static final Set<String> STORYBOARD_TOOL_NAMES = Set.of(
+            AgentScopeStoryboardTools.START_STORYBOARD,
+            AgentScopeStoryboardTools.REVISE_STORYBOARD,
+            AgentScopeStoryboardTools.APPROVE_STORYBOARD,
+            AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGE,
+            AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES,
+            AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO,
+            AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS,
+            AgentScopeStoryboardTools.UPSERT_STORYBOARD_SHOT,
+            AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT,
+            AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD,
+            AgentScopeStoryboardTools.UPDATE_PROJECT_STORYBOARD_SHOT,
+            AgentScopeStoryboardTools.DELETE_STORYBOARD_DRAFT_SHOT,
+            AgentScopeStoryboardTools.REORDER_STORYBOARD_DRAFT,
+            AgentScopeStoryboardTools.DELETE_PROJECT_STORYBOARD_SHOT,
+            AgentScopeStoryboardTools.CLEAR_PROJECT_STORYBOARD,
+            AgentScopeVideoMergeTools.MERGE_STORYBOARD_VIDEOS);
+
+    private static final String CANVAS_MODE_STORYBOARD_MESSAGE =
+            "画布编辑模式下不加载分镜工具，也无法生成或修改分镜。"
+                    + "请改用画布节点编排完成需求；如确实需要分镜，请通过 / 菜单退出画布模式后再试。";
 
     private static final Map<String, ToolPolicy> POLICIES = Map.ofEntries(
             Map.entry(AgentScopeImageTools.GENERATE_IMAGE,
@@ -104,6 +131,8 @@ public class AgentScopeToolPipeline {
     Map<String, Object> executeMap(AgentScopeTool tool,
                                    Map<String, Object> input,
                                    ToolCallParam param) {
+        Map<String, Object> rejected = canvasModeRejection(tool.getName(), param);
+        if (rejected != null) return rejected;
         ToolInvocationContext context = context(tool, input, param);
         AgentToolInvocation record = ledger.start(context, input);
         long started = System.nanoTime();
@@ -252,6 +281,21 @@ public class AgentScopeToolPipeline {
     static AgentScopeRunContext context(ToolCallParam param) {
         return param == null || param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    /** 画布编辑回合内的分镜工具调用：返回结构化拒绝，不执行、不落审计记录。 */
+    private static Map<String, Object> canvasModeRejection(String toolName, ToolCallParam param) {
+        if (toolName == null || !STORYBOARD_TOOL_NAMES.contains(toolName)) return null;
+        AgentScopeRunContext runContext = context(param);
+        if (runContext == null || runContext.request() == null) return null;
+        CanvasSessionContext canvas = runContext.request().getCanvasContext();
+        if (canvas == null || !canvas.isCanvasEditMode()) return null;
+        Map<String, Object> rejected = new LinkedHashMap<>();
+        rejected.put("ok", false);
+        rejected.put("code", "CANVAS_MODE_STORYBOARD_UNAVAILABLE");
+        rejected.put("tool", toolName);
+        rejected.put("message", CANVAS_MODE_STORYBOARD_MESSAGE);
+        return rejected;
     }
 
     private static String toolCallId(ToolCallParam param) {

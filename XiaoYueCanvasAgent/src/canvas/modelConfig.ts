@@ -54,6 +54,8 @@ export const MODEL_CONFIG_RESERVED_KEYS = new Set([
 ]);
 
 const MODEL_CONFIG_NODE_TYPES: Record<string, 'image' | 'video'> = {
+  imageGeneration: 'image',
+  videoGeneration: 'video',
   imageGen: 'image',
   textToImage: 'image',
   imageToImage: 'image',

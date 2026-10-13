@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { migrateCanvasGraphV1ToV2 } from './graphMigration';
+import { migrateCanvasGraphV1ToV2, normalizeGenerationNodes } from './graphMigration';
+import type { CanvasGraphV2 } from './graphContracts';
 
 const legacyGraph = {
   schemaVersion: 1 as const,
@@ -45,7 +46,7 @@ describe('migrateCanvasGraphV1ToV2', () => {
       source: 'image-1',
       sourceHandle: 'image',
       target: 'gen-1',
-      targetHandle: 'source',
+      targetHandle: 'reference',
     });
     expect(invalid?.data).toMatchObject({
       migrationStatus: 'migration_invalid',
@@ -61,7 +62,53 @@ describe('migrateCanvasGraphV1ToV2', () => {
     const generator = migrated.nodes.find((node) => node.id === 'gen-1');
     const video = migrated.nodes.find((node) => node.id === 'video-gen-1');
 
-    expect(generator?.data.kind).toBe('imageToImage');
-    expect(video?.data.kind).toBe('imageToVideo');
+    // 旧 kind 全部归一为合并后的生成节点，差异只落在 mode 上
+    expect(generator?.data.kind).toBe('imageGeneration');
+    expect(generator?.data.mode).toBe('image2image');
+    expect(video?.data.kind).toBe('videoGeneration');
+    expect(video?.data.mode).toBe('fullReference');
+  });
+
+  it('normalizes already-v2 generator kinds and legacy ports', () => {
+    const graph: CanvasGraphV2 = {
+      schemaVersion: 2,
+      nodes: [
+        {
+          id: 'frames',
+          type: 'firstLastFrameToVideo',
+          position: { x: 0, y: 0 },
+          data: { kind: 'firstLastFrameToVideo', label: '首尾帧生视频', prompt: '', status: 'idle', accent: '#8f9cff', videoMode: 'firstLastFrame' },
+        },
+        {
+          id: 'first-image',
+          type: 'image',
+          position: { x: -300, y: 0 },
+          data: { kind: 'image', label: '首帧', prompt: '', status: 'success', accent: '#ff775f', assetId: 'a1' },
+        },
+        {
+          id: 'last-image',
+          type: 'image',
+          position: { x: -300, y: 200 },
+          data: { kind: 'image', label: '尾帧', prompt: '', status: 'success', accent: '#ff775f', assetId: 'a2' },
+        },
+      ],
+      edges: [
+        { id: 'edge-first', source: 'first-image', sourceHandle: 'image', target: 'frames', targetHandle: 'first', type: 'canvas' },
+        { id: 'edge-last', source: 'last-image', sourceHandle: 'image', target: 'frames', targetHandle: 'last', type: 'canvas' },
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      generationRecords: [],
+    };
+
+    const normalized = normalizeGenerationNodes(graph);
+    const generator = normalized.nodes.find((node) => node.id === 'frames');
+
+    expect(generator?.type).toBe('videoGeneration');
+    expect(generator?.data.kind).toBe('videoGeneration');
+    expect(generator?.data.mode).toBe('firstLastFrame');
+    expect(normalized.edges).toEqual([
+      expect.objectContaining({ id: 'edge-first', targetHandle: 'reference', data: { portOrder: 0 } }),
+      expect.objectContaining({ id: 'edge-last', targetHandle: 'reference', data: { portOrder: 1 } }),
+    ]);
   });
 });

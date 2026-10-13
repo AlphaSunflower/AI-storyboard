@@ -17,7 +17,7 @@ describe('batch refine submission', () => {
       batchId: 'batch-1',
       itemId: 'asset-1',
       skipSlot: true,
-      params: { actionId: 'refineBatch' },
+      params: { actionId: 'redraw' },
     });
   });
 });

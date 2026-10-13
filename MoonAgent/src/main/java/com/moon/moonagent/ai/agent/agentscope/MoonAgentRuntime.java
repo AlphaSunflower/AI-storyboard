@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.AgentConcurrencyGuard;
+import com.moon.moonagent.ai.agent.CanvasSessionContext;
+import com.moon.moonagent.ai.agent.ContextTokenEstimator;
 import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
 import com.moon.moonagent.ai.agent.creative.CreativeModelRouter;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
@@ -35,6 +37,8 @@ import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.RequireExternalExecutionEvent;
 import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultStartEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.AssistantMessage;
@@ -55,6 +59,7 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tracing.OtelTracingMiddleware;
 import io.agentscope.extensions.postgresql.PostgresDistributedStore;
 import io.agentscope.extensions.postgresql.state.PostgresAgentStateStore;
@@ -105,6 +110,8 @@ import java.util.function.Supplier;
 public class MoonAgentRuntime implements AgentRecoverySource {
 
     private static final Logger log = LoggerFactory.getLogger(MoonAgentRuntime.class);
+    /** 画布编辑模式不加载的技能：分镜生成属于画布之外的链路。 */
+    private static final String STORYBOARD_SKILL = "storyboard";
     private static final String COMPACTION_PROMPT = """
             Compress this AIGC conversation for continuation. Preserve only execution-critical
             facts and write "None" when a section has no data.
@@ -170,6 +177,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
 
     private volatile HarnessAgent agent;
     private volatile AgentStateStore stateStore;
+    /** 全局系统提示词原文，用于上下文组成估算（不随事件下发）。 */
+    private volatile String systemPromptText = "";
 
     @PostConstruct
     void init() {
@@ -210,9 +219,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             if (properties.isOtelTracingEnabled()) {
                 middlewares.add(new OtelTracingMiddleware());
             }
+            String systemPrompt = globalPromptRepository.getPrompt(java.util.Map.of());
+            this.systemPromptText = systemPrompt == null ? "" : systemPrompt;
             HarnessAgent.Builder builder = HarnessAgent.builder()
                     .name("moon-agent")
-                    .sysPrompt(globalPromptRepository.getPrompt(Map.of()))
+                    .sysPrompt(systemPrompt)
                     .model(model)
                     .fallbackModel(fallbackModel)
                     .toolkit(toolkit)
@@ -656,11 +667,19 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 .put(AgentScopeRunContext.class,
                         new AgentScopeRunContext(conversation, request, support, turnState,
                                 checkpointId, externalActions));
+        if (isCanvasEditTurn(request)) {
+            // 画布回合只保留画布链路与生图/生视频：分镜技能不在本回合加载。
+            runtimeBuilder.put(SkillFilter.class, SkillFilter.disable(STORYBOARD_SKILL));
+        }
         if (moonSandboxFilesystemSpec != null) {
             runtimeBuilder.put(SandboxContext.class,
                     moonSandboxFilesystemSpec.contextForConversation(conversation.getId()));
         }
         RuntimeContext runtime = runtimeBuilder.build();
+        // 上下文组成估算：系统提示词 + 工具定义（对话消息量在快照时取余量）
+        trace.setContextBreakdown(
+                ContextTokenEstimator.estimateTokens(systemPromptText),
+                estimateToolDefinitionTokens());
         StringBuilder finalText = new StringBuilder();
         StringBuilder visibleText = new StringBuilder();
         AgentTaskClaimGuard claimGuard = new AgentTaskClaimGuard();
@@ -686,8 +705,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         trace.recordUsage(
                                 usage.getInputTokens(),
                                 usage.getOutputTokens(),
-                                usage.getCachedTokens());
+                                usage.getCachedTokens(),
+                                Math.round(Math.max(0.0, usage.getTime()) * 1000.0));
                     }
+                } else if (event instanceof ToolResultStartEvent toolStart) {
+                    trace.beginToolCall(toolStart.getToolCallId());
+                } else if (event instanceof ToolResultEndEvent toolEnd) {
+                    trace.endToolCall(toolEnd.getToolCallId());
                 } else if (event instanceof TextBlockDeltaEvent delta) {
                     String chunk = delta.getDelta();
                     if (chunk != null && !chunk.isEmpty()) {
@@ -892,6 +916,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 stream(conversation, request, trace, List.of(resume), null, observer));
     }
 
+    /** 画布编辑回合：分镜技能与分镜工具不参与本回合。 */
+    static boolean isCanvasEditTurn(OrchestrationRequest request) {
+        if (request == null) return false;
+        CanvasSessionContext canvas = request.getCanvasContext();
+        return canvas != null && canvas.isCanvasEditMode();
+    }
+
     private static List<Map<String, Object>> canvasMediaRefs(OrchestrationRequest request) {
         if (request == null) return List.of();
         if (request.getCanvasContext() != null
@@ -951,8 +982,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         trace.recordUsage(
                                 usage.getInputTokens(),
                                 usage.getOutputTokens(),
-                                usage.getCachedTokens());
+                                usage.getCachedTokens(),
+                                Math.round(Math.max(0.0, usage.getTime()) * 1000.0));
                     }
+                } else if (event instanceof ToolResultStartEvent toolStart) {
+                    trace.beginToolCall(toolStart.getToolCallId());
+                } else if (event instanceof ToolResultEndEvent toolEnd) {
+                    trace.endToolCall(toolEnd.getToolCallId());
                 } else if (event instanceof TextBlockDeltaEvent delta) {
                     String chunk = delta.getDelta();
                     if (chunk != null && !chunk.isEmpty()) output.append(chunk);
@@ -1135,6 +1171,32 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     return tool != null && tool.isReadOnly();
                 })
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * 当前 Toolkit 的工具定义估算 token：把所有已注册工具的名称 / 描述 / 参数 schema
+     * 拼成文本后按字符估算。仅用于「上下文组成」三色明细，不做严格计量。
+     */
+    private long estimateToolDefinitionTokens() {
+        try {
+            Toolkit toolkit = toolkitFactory.activeToolkit();
+            if (toolkit == null || toolkit.getToolNames() == null) return 0L;
+            StringBuilder text = new StringBuilder();
+            for (String name : toolkit.getToolNames()) {
+                text.append(name).append(' ');
+                AgentTool tool = toolkit.getTool(name);
+                if (tool == null) continue;
+                text.append(tool.getName()).append(' ')
+                        .append(tool.getDescription() == null ? "" : tool.getDescription())
+                        .append(' ');
+                java.util.Map<String, Object> parameters = tool.getParameters();
+                if (parameters != null) text.append(parameters);
+            }
+            return ContextTokenEstimator.estimateTokens(text.toString());
+        } catch (RuntimeException exception) {
+            log.debug("[AgentScope] tool definition estimate failed: {}", exception.getMessage());
+            return 0L;
+        }
     }
 
     static AgentScopeTurnState.ReferenceInputMode classifyReferenceInput(

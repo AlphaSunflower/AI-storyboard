@@ -495,13 +495,14 @@ export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorP
       if (!targetNodeId) {
         const canvas = useCanvasStore.getState();
         const sourceWidth = node.width ?? node.measured?.width ?? 250;
-        targetNodeId = canvas.createConnectedNode(node.id, 'imageToImage', {
+        targetNodeId = canvas.createConnectedNode(node.id, 'imageGeneration', {
           x: node.position.x + sourceWidth + 160,
           y: node.position.y,
         }, undefined, {
           label: `${node.data.label} · 重绘`,
           prompt: promptWithSource,
           redraw: structuredClone(redrawDocument),
+          mode: 'image2image',
           status: 'idle',
         });
         if (!targetNodeId) throw new Error('无法创建图生图节点，请检查图片节点输出端口');

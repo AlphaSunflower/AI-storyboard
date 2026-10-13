@@ -20,7 +20,7 @@ import { HomePage } from './components/HomePage';
 import { InspectorPanel } from './components/InspectorPanel';
 import { ProjectHome } from './components/ProjectHome';
 import { exportProjectPackage, importProjectPackage } from './services/projectPackage';
-import { cleanupGenerationQueue, createCanvas, createProject, deleteCanvas, deleteProject, getAssetMetadatas, listCanvases, listProjects, loadCanvas, loadProject, projectAssetIds, saveCanvas, saveProject, scheduleAssetGarbageCollection } from './services/projectStorage';
+import { cleanupGenerationQueue, createCanvas, createProject, deleteCanvas, deleteProject, getAssetMetadatas, listCanvases, listProjects, loadCanvas, loadProject, projectAssetIds, renameProject as patchProjectTitle, saveCanvas, saveProject, scheduleAssetGarbageCollection } from './services/projectStorage';
 import { useCanvasStore } from './store/canvasStore';
 import { useMediaStore } from './store/mediaStore';
 import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary, SaveStatus } from './types';
@@ -62,6 +62,8 @@ export default function App() {
   const [panelWidth, setPanelWidth] = useState(400); // 执行服务面板宽度（可拖拽）
   const [notice, setNotice] = useState<string | null>(null);
   const [canvasInteractionLocked, setCanvasInteractionLocked] = useState(false);
+  // 聊天页「去画布编辑」带过来的媒体参数：只在本窗口内透传给内嵌 Moon 对话，用完即从 hash 抹掉
+  const [chatMediaParam, setChatMediaParam] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const canvasRef = useRef<CanvasDocumentV1 | null>(null);
@@ -400,10 +402,11 @@ export default function App() {
   }, [openCanvas, refreshProjects]);
 
   useEffect(() => {
-    const match = window.location.hash.match(/^#project=([^&]+)(?:&canvas=([^&]+))?$/);
+    const match = window.location.hash.match(/^#project=([^&]+)(?:&canvas=([^&]+))?(?:&media=(.*))?$/);
     if (!match) return;
     const projectId = decodeURIComponent(match[1]);
     const canvasId = match[2] ? decodeURIComponent(match[2]) : undefined;
+    if (match[3]) setChatMediaParam(decodeURIComponent(match[3]));
     if (canvasId) {
       void openCanvas(projectId, canvasId)
         .catch(() => window.history.replaceState(null, '', window.location.pathname));
@@ -601,6 +604,24 @@ export default function App() {
     notify('项目已从本地删除');
   }, [clearAssets, notify, project, refreshProjects]);
 
+  /** 项目切换列表里的重命名：按 id 直接改名，当前项目同步刷新标题 */
+  const renameProjectById = useCallback(async (projectId: string, title: string) => {
+    const next = title.trim();
+    if (!next) return;
+    await patchProjectTitle(projectId, next);
+    setProject((current) => (current && current.id === projectId ? { ...current, title: next } : current));
+    await refreshProjects();
+  }, [refreshProjects]);
+
+  /** 项目切换列表里的删除：删的是当前项目时同时退回项目中心 */
+  const removeProjectById = useCallback(async (projectId: string) => {
+    if (project?.id === projectId) {
+      await removeCurrentProject();
+      return;
+    }
+    await removeProject(projectId);
+  }, [project?.id, removeCurrentProject, removeProject]);
+
   if (!authed) return <LoginScreen message={authMessage} onLogin={() => { setAuthMessage(null); setAuthed(true); }} />;
 
   if (view === 'home') {
@@ -638,6 +659,8 @@ export default function App() {
         onRenameCanvas={(canvasId, title) => void renameCanvas(canvasId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名画布失败'))}
         onDeleteCanvas={(canvasId) => void deleteCanvasById(canvasId).catch((error) => notify(error instanceof Error ? error.message : '删除画布失败'))}
         onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
+        onRenameProjectById={(projectId, title) => void renameProjectById(projectId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名项目失败'))}
+        onDeleteProjectById={(projectId) => void removeProjectById(projectId).catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
         onOpenAgent={() => {
           if (!embeddedWindow && sideOpen && sideView === 'agent') {
             setSideOpen(false);
@@ -672,7 +695,11 @@ export default function App() {
           <button onClick={() => setSideOpen(false)} aria-label="收起面板"><Maximize2 size={16} /></button>
         </header>
         <div className="chat-body">
-          {!embeddedWindow && <div className="chat-view" hidden={sideView !== 'agent'}><MoonChatWindow /></div>}
+          {!embeddedWindow && (
+            <div className="chat-view" hidden={sideView !== 'agent'}>
+              <MoonChatWindow media={chatMediaParam} />
+            </div>
+          )}
           <div className="chat-view" hidden={sideView !== 'inspector'}><InspectorPanel /></div>
         </div>
       </aside>

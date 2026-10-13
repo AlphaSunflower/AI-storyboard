@@ -1,8 +1,16 @@
 import { expect, test } from '@playwright/test';
+import { mockApiFallback } from './support/canvasAuth';
+
+test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
 test('node library scrolls and the context submenu survives the hover gap', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  // 画布启动依赖 /api/auth/refresh 换 token；这里自闭环，避免依赖本机 ApiGateway。
+  await page.route('**/api/auth/refresh', (route) =>
+    route.fulfill({ json: { data: { accessToken: 'test-token', userId: 'test-user' } } }));
+  await page.route('**/api/auth/stream-ticket', (route) =>
+    route.fulfill({ json: { data: { ticket: 'test-ticket' } } }));
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api/canvas', '');
@@ -79,7 +87,12 @@ test('node library scrolls and the context submenu survives the hover gap', asyn
   await expect(libraryBody).toBeVisible();
   expect(await libraryBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await libraryBody.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect(libraryBody.getByText('参考物生视频', { exact: true })).toBeVisible();
+  // 合并后视频/图片各只剩一个生成节点
+  const presets = libraryBody.locator('.node-preset');
+  await expect(presets.filter({ hasText: '视频生成' })).toHaveCount(1);
+  await expect(presets.filter({ hasText: '图片生成' })).toHaveCount(1);
+  await expect(libraryBody.getByText('参考物生视频', { exact: true })).toHaveCount(0);
+  await expect(libraryBody.getByText('文生图', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '关闭节点库' }).click();
 
   const pane = page.locator('.react-flow__pane');
@@ -99,7 +112,7 @@ test('node library scrolls and the context submenu survives the hover gap', asyn
   await page.waitForTimeout(250);
   await expect(submenu).toBeVisible();
 
-  await submenu.getByRole('button', { name: '文生图', exact: true }).click();
+  await submenu.getByRole('button', { name: '图片生成', exact: true }).click();
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   await expect(menu).toHaveCount(0);
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
@@ -110,9 +123,9 @@ test('node library scrolls and the context submenu survives the hover gap', asyn
   await submenu.getByRole('button', { name: '文字', exact: true }).click();
   await expect(page.locator('.react-flow__node')).toHaveCount(2);
   const textNode = page.locator('.react-flow__node').filter({ hasText: '文字' });
-  const textToImageNode = page.locator('.react-flow__node').filter({ hasText: '文生图' });
+  const textToImageNode = page.locator('.react-flow__node').filter({ hasText: '图片生成' });
   const sourceHandle = textNode.locator('.react-flow__handle.source');
-  const targetHandle = textToImageNode.locator('.react-flow__handle.target');
+  const targetHandle = textToImageNode.locator('.react-flow__handle.target').first();
   const [sourceBox, targetBox] = await Promise.all([sourceHandle.boundingBox(), targetHandle.boundingBox()]);
   expect(sourceBox).not.toBeNull();
   expect(targetBox).not.toBeNull();

@@ -22,7 +22,13 @@ export const agentChatTokens = {
   /** 悬浮提示卡（深色）底 + 两级前景 */
   onDark: 'rgb(250, 249, 245)',
   onDarkSoft: 'rgb(160, 157, 150)',
+  /** 上下文组成三色：系统提示词（中性灰）/ 工具定义（紫）/ 对话消息（品牌蓝） */
+  segSystem: 'rgb(150, 154, 162)',
+  segTools: 'rgb(139, 122, 246)',
+  segMessages: 'rgb(65, 118, 230)',
   maxContent: 780,
+  /** 收缩态输入卡的最大宽度：只留一行输入时横向收窄（对齐浮窗 pill 的宽度）。 */
+  maxContentCompact: 480,
 } as const;
 
 export type AgentChatTokens = typeof agentChatTokens;

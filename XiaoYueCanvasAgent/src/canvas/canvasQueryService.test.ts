@@ -78,7 +78,7 @@ describe('canvas query media relay contract', () => {
 
     expect(result.result?.missingInputs).toEqual([
       expect.objectContaining({
-        portId: 'source',
+        portId: 'reference',
         media: 'image',
       }),
     ]);
@@ -114,7 +114,7 @@ describe('canvas query media relay contract', () => {
       expect.objectContaining({
         producerNodeId: producer.id,
         consumerNodeId: consumer.id,
-        inputPortId: 'source',
+        inputPortId: 'reference',
         kind: 'image',
       }),
     ]);

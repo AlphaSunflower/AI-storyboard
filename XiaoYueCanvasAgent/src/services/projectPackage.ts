@@ -137,6 +137,7 @@ export async function importProjectPackage(file: File) {
     'text', 'image', 'video', 'videoGen', 'script', 'note', 'prompt', 'sequence', 'storyboard', 'storyboardGen', 'imageGen',
     'storyboardPlanner', 'shot', 'textToImage', 'imageToImage', 'batchImageRefine',
     'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo',
+    'imageGeneration', 'videoGeneration',
   ]);
   if (nodeIds.size !== allNodes.length || allNodes.some((node) => !supportedNodeKinds.has(node.data.kind))) throw new Error('项目包包含无效节点');
   if (allEdges.some((edge) => !nodeIds.has(edge.source) || !nodeIds.has(edge.target))) throw new Error('项目包包含无效连线');

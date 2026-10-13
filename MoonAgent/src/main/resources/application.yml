@@ -12,7 +12,9 @@ spring:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:localhost:8848}
-        enabled: true
+        # 服务发现总开关：默认关闭（不注册、不走发现），网关按直连地址路由。
+        # 需要恢复注册发现时设 NACOS_DISCOVERY_ENABLED=true，并先起 deploy/docker/nacos。
+        enabled: ${NACOS_DISCOVERY_ENABLED:false}
   datasource:
     driver-class-name: org.postgresql.Driver
     hikari:
@@ -267,10 +269,7 @@ spring.ai.mcp.client.initialized: false
 spring.ai.mcp.client.toolcallback.enabled: true
 # 同步媒体 MCP 会等待生图完成；SDK 默认仅 20s，会导致服务端继续生成但客户端先超时。
 spring.ai.mcp.client.request-timeout: ${MCP_CLIENT_REQUEST_TIMEOUT:1800s}
-# Canvas MCP Server（Morrow Bridge，仅本机 loopback）
-spring.ai.mcp.client.streamable-http.connections.canvas.url: ${MORROW_BRIDGE_URL:http://127.0.0.1:8787}
-spring.ai.mcp.client.streamable-http.connections.canvas.endpoint: /mcp
-# Canvas Graph MCP Server（XiaoYueCanvas 服务端图命令，不依赖浏览器）
+# Canvas MCP Server（XiaoYueCanvas：服务端图命令 + 浏览器执行命令都走这一条连接）
 spring.ai.mcp.client.streamable-http.connections.canvas-server.url: ${MORROW_CANVAS_SERVER_URL:http://localhost:9090}
 spring.ai.mcp.client.streamable-http.connections.canvas-server.endpoint: /api/canvas/mcp
 # LLM Gateway media MCP（仅暴露 generate_image / generate_video）
