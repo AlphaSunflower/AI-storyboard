@@ -7,7 +7,10 @@ import com.llmgateway.entity.ModelParams;
 import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.service.ModelParamsService;
+import com.llmgateway.service.ModelRouteService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -18,10 +21,13 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ModelParamsServiceImpl implements ModelParamsService {
 
+    private static final Logger log = LoggerFactory.getLogger(ModelParamsServiceImpl.class);
+
     /** 合法模型类型（text 文本 / image 生图 / video 视频生成 / vision 图片视频理解） */
     private static final Set<String> MODEL_TYPES = Set.of("text", "image", "video", "vision");
 
     private final ModelParamsMapper modelParamsMapper;
+    private final ModelRouteService modelRouteService;
 
     /** PUT /admin/model-params：按 model_name upsert（type 空默认 text；nMin/nMax 均提供时须 nMin<=nMax） */
     @Override
@@ -45,6 +51,16 @@ public class ModelParamsServiceImpl implements ModelParamsService {
                     .eq(ModelParams::getIsDefault, true)
                     .ne(ModelParams::getModelName, req.modelName().trim())
                     .set(ModelParams::getIsDefault, false));
+        }
+        // 「默认模型」的唯一权威是路由默认：参数页这个开关必须写透过去，
+        // 否则会出现「列表标了默认、实际生成却用别的模型」。
+        if (req.isDefault() != null) {
+            boolean applied = modelRouteService.setDefaultRoute(
+                    type, req.modelName().trim(), Boolean.TRUE.equals(req.isDefault()));
+            if (!applied) {
+                log.warn("模型参数设置了默认，但该模型在 {} 类型下没有路由，默认模型未变更: {}",
+                        type, req.modelName().trim());
+            }
         }
 
         ModelParams existing = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()

@@ -29,7 +29,7 @@ import static org.mockito.Mockito.when;
 class GatewayRoutingDefaultModelTest {
 
     @Test
-    void modelListUsesModelParamsAsTheDefaultModelSource() throws Exception {
+    void modelListMarksTheRoutingDefaultEvenWhenTheParamsFlagDisagrees() throws Exception {
         ModelRouteMapper routeMapper = mock(ModelRouteMapper.class);
         ChannelMapper channelMapper = mock(ChannelMapper.class);
         ModelParamsMapper modelParamsMapper = mock(ModelParamsMapper.class);
@@ -60,8 +60,43 @@ class GatewayRoutingDefaultModelTest {
         );
 
         JsonNode data = new ObjectMapper().readTree(service.fetchModels("text")).path("data");
-        assertThat(find(data, "mimo-v2.6-pro").path("is_default").asBoolean()).isFalse();
+        // 路由默认（真正决定用哪个模型生成的开关）说了算；参数表的旧标记不再影响列表
+        assertThat(find(data, "mimo-v2.6-pro").path("is_default").asBoolean()).isTrue();
+        assertThat(find(data, "deepseek-v4-flash").path("is_default").asBoolean()).isFalse();
+    }
+
+    @Test
+    void redisDefaultWinsWhenItIsStillInTheList() throws Exception {
+        ModelRouteMapper routeMapper = mock(ModelRouteMapper.class);
+        ChannelMapper channelMapper = mock(ChannelMapper.class);
+        ModelParamsMapper modelParamsMapper = mock(ModelParamsMapper.class);
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(anyString())).thenReturn(null);
+        // Redis 里实际生效的默认模型与路由标记不一致时，以 Redis 为准（运行值优先）
+        when(valueOperations.get("gateway:default_model:text")).thenReturn("deepseek-v4-flash");
+
+        ModelRoute staleDefault = route("r1", "mimo-v2.6-pro", "c1", true);
+        ModelRoute actualDefault = route("r2", "deepseek-v4-flash", "c2", false);
+        when(routeMapper.selectList(any(Wrapper.class))).thenReturn(List.of(staleDefault, actualDefault));
+        when(routeMapper.selectList(null)).thenReturn(List.of(staleDefault, actualDefault));
+        when(channelMapper.selectList(any(Wrapper.class))).thenReturn(List.of(channel("c1"), channel("c2")));
+        when(channelMapper.selectList(null)).thenReturn(List.of(channel("c1"), channel("c2")));
+        when(modelParamsMapper.selectList(null)).thenReturn(List.of(
+                params("mimo-v2.6-pro", "text", true),
+                params("deepseek-v4-flash", "text", false)
+        ));
+
+        GatewayRoutingServiceImpl service = new GatewayRoutingServiceImpl(
+                routeMapper, channelMapper, modelParamsMapper, mock(KeyService.class),
+                mock(UpstreamClient.class), mock(RouteVendorRegistry.class),
+                mock(CallLogService.class), redisTemplate);
+
+        JsonNode data = new ObjectMapper().readTree(service.fetchModels("text")).path("data");
         assertThat(find(data, "deepseek-v4-flash").path("is_default").asBoolean()).isTrue();
+        assertThat(find(data, "mimo-v2.6-pro").path("is_default").asBoolean()).isFalse();
     }
 
     private static JsonNode find(JsonNode data, String model) {

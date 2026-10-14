@@ -3,9 +3,11 @@ package com.llmgateway.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.llmgateway.dto.admin.RouteRequest;
+import com.llmgateway.entity.ModelParams;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.ChannelMapper;
+import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.ModelRouteService;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +19,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 模型路由管理服务实现：模型名 → 渠道映射 CRUD + 默认模型 Redis 同步 */
@@ -38,12 +42,17 @@ public class ModelRouteServiceImpl implements ModelRouteService {
 
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
+    private final ModelParamsMapper modelParamsMapper;
     private final StringRedisTemplate redisTemplate;
 
-    /** 启动时将所有默认路由同步到 Redis */
+    /**
+     * 启动时将所有默认路由同步到 Redis，并把参数表的「默认」标记对齐到路由默认。
+     * 两处标记历史上可以各自修改，容易走岔（Redis 说 A、列表标 B），这里每次启动收敛一次。
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void warmRedisDefaults() {
         syncAllDefaultsToRedis();
+        reconcileParamsDefaults();
     }
 
     @Override
@@ -152,6 +161,36 @@ public class ModelRouteServiceImpl implements ModelRouteService {
         return count == null ? 0 : count;
     }
 
+    @Override
+    public boolean setDefaultRoute(String type, String modelName, boolean isDefault) {
+        if (type == null || type.isBlank() || modelName == null || modelName.isBlank()) return false;
+        String normalizedType = normalizeType(type);
+        String trimmed = modelName.trim();
+        List<ModelRoute> matches = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                .eq(ModelRoute::getType, normalizedType)
+                .eq(ModelRoute::getModelName, trimmed));
+        if (matches.isEmpty()) return false;
+
+        if (isDefault) {
+            clearDefaultForType(normalizedType);
+            for (ModelRoute route : matches) {
+                route.setIsDefault(true);
+                route.setUpdatedAt(OffsetDateTime.now());
+                routeMapper.updateById(route);
+            }
+        } else {
+            for (ModelRoute route : matches) {
+                if (!Boolean.TRUE.equals(route.getIsDefault())) continue;
+                route.setIsDefault(false);
+                route.setUpdatedAt(OffsetDateTime.now());
+                routeMapper.updateById(route);
+            }
+        }
+        syncDefaultToRedis(normalizedType, isDefault, trimmed);
+        invalidateModelsCache(normalizedType);
+        return true;
+    }
+
     /** 清除同类型所有路由的默认标记 */
     private void clearDefaultForType(String type) {
         routeMapper.update(null, new LambdaUpdateWrapper<ModelRoute>()
@@ -201,6 +240,39 @@ public class ModelRouteServiceImpl implements ModelRouteService {
             log.info("Redis 默认模型预热完成: {} 条", defaults.size());
         } catch (Exception e) {
             log.warn("Redis 默认模型预热失败（不影响启动）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 让 model_params.is_default 跟随路由默认：同一类型下只有默认模型标记为 true。
+     * 参数表的这个标记只服务于后台展示，不再决定 /v1/models 的默认；这里保证两者一致。
+     */
+    private void reconcileParamsDefaults() {
+        try {
+            List<ModelRoute> defaults = routeMapper.selectList(
+                    new LambdaQueryWrapper<ModelRoute>().eq(ModelRoute::getIsDefault, true));
+            Map<String, String> defaultByType = new LinkedHashMap<>();
+            for (ModelRoute route : defaults) {
+                if (route.getType() != null && route.getModelName() != null) {
+                    defaultByType.putIfAbsent(route.getType(), route.getModelName());
+                }
+            }
+            for (String type : ROUTE_TYPES) {
+                String model = defaultByType.get(type);
+                modelParamsMapper.update(null, new LambdaUpdateWrapper<ModelParams>()
+                        .eq(ModelParams::getType, type)
+                        .eq(ModelParams::getIsDefault, true)
+                        .ne(model != null, ModelParams::getModelName, model)
+                        .set(ModelParams::getIsDefault, false));
+                if (model == null) continue;
+                modelParamsMapper.update(null, new LambdaUpdateWrapper<ModelParams>()
+                        .eq(ModelParams::getType, type)
+                        .eq(ModelParams::getModelName, model)
+                        .set(ModelParams::getIsDefault, true));
+            }
+            log.info("模型参数默认标记已对齐路由默认: {}", defaultByType);
+        } catch (Exception e) {
+            log.warn("模型参数默认标记对齐失败（不影响启动）: {}", e.getMessage());
         }
     }
 

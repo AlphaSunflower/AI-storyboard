@@ -28,4 +28,15 @@ public interface ModelRouteService {
 
     /** 路由总数 */
     long countAll();
+
+    /**
+     * 把某模型设为 / 取消该类型的默认路由：写 model_route 默认标记、同步 Redis
+     * {@code gateway:default_model:<type>} 并清除模型列表缓存。
+     *
+     * <p>「默认模型」只有这一处权威来源（运行时时实际按它选模型）；模型参数页的
+     * 「默认」开关也走这里，避免两处标记各自为政。
+     *
+     * @return 是否存在该模型在该类型下的路由（false = 没有可设默认的路由，仅记录参数表标记）
+     */
+    boolean setDefaultRoute(String type, String modelName, boolean isDefault);
 }

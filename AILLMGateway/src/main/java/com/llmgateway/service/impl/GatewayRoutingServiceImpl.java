@@ -49,6 +49,9 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
 
     /** 模型列表缓存 key 前缀：gateway:models:{type|all} → /v1/models JSON 响应 */
     private static final String MODELS_CACHE_PREFIX = "gateway:models:";
+
+    /** 运行时默认模型 key（与 ModelRouteServiceImpl 一致）：gateway:default_model:{type} */
+    private static final String DEFAULT_MODEL_PREFIX = "gateway:default_model:";
     /** 模型列表缓存 TTL：配置变更走 DB 真源，此处只缓解 /v1/models 高频三表全扫，短 TTL 自愈 */
     private static final Duration MODELS_CACHE_TTL = Duration.ofSeconds(60);
 
@@ -268,6 +271,10 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             if (type != null && !type.isBlank() && !type.equals(t)) continue;
             modelTypeMap.putIfAbsent(r.getModelName(), t);
         }
+        // 每类型的默认模型：只认「路由默认」（Redis 运行时值优先，其次 model_route.is_default）。
+        // 参数表的 is_default 是历史遗留的第二开关，不再决定列表标记——否则两处会各自为政
+        // （Redis 按 A 生成、列表却标 B，前端就按 B 预选）。
+        Map<String, String> defaultByType = resolveDefaultByType(routes, enabledChannels, modelTypeMap);
         // 按 (model_name|type) 建索引：同一模型可 text/vision 各一套参数
         Map<String, ModelParams> paramsMap = modelParamsMapper.selectList(null).stream()
                 .collect(Collectors.toMap(p -> p.getModelName() + "|" + p.getType(), p -> p, (a, b) -> a));
@@ -278,7 +285,7 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             m.put("id", name);
             m.put("object", "model");
             m.put("type", t);
-            m.put("is_default", mp != null && Boolean.TRUE.equals(mp.getIsDefault()));
+            m.put("is_default", name.equals(defaultByType.get(t)));
             if (mp != null && mp.getContextWindow() != null) {
                 m.put("contextWindow", mp.getContextWindow());
             }
@@ -298,6 +305,42 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             return json;
         } catch (Exception e) {
             throw new RuntimeException("模型列表序列化失败", e);
+        }
+    }
+
+    /**
+     * 解析每种类型的默认模型：先取路由表 is_default（含启用渠道），再用 Redis
+     * {@code gateway:default_model:<type>} 覆盖——Redis 是运行时真正生效的值，
+     * 但只有当它确实出现在本次列表里时才采信（渠道被禁用/路由被删时不误导前端）。
+     */
+    private Map<String, String> resolveDefaultByType(List<ModelRoute> routes,
+                                                     Set<String> enabledChannels,
+                                                     Map<String, String> modelTypeMap) {
+        Map<String, String> defaults = new LinkedHashMap<>();
+        for (ModelRoute route : routes) {
+            if (route.getChannelId() == null || !enabledChannels.contains(route.getChannelId())) continue;
+            if (!Boolean.TRUE.equals(route.getIsDefault())) continue;
+            String routeType = route.getType() == null || route.getType().isBlank()
+                    ? "text" : route.getType();
+            if (!routeType.equals(modelTypeMap.get(route.getModelName()))) continue;
+            defaults.putIfAbsent(routeType, route.getModelName());
+        }
+        for (String modelType : new java.util.LinkedHashSet<>(modelTypeMap.values())) {
+            String effective = readDefaultModelFromRedis(modelType);
+            if (effective != null && modelType.equals(modelTypeMap.get(effective))) {
+                defaults.put(modelType, effective);
+            }
+        }
+        return defaults;
+    }
+
+    private String readDefaultModelFromRedis(String type) {
+        try {
+            String value = redisTemplate.opsForValue().get(DEFAULT_MODEL_PREFIX + type);
+            return value == null || value.isBlank() ? null : value;
+        } catch (Exception e) {
+            log.warn("Redis 读默认模型失败，回落路由表标记: type={}, error={}", type, e.getMessage());
+            return null;
         }
     }
 
