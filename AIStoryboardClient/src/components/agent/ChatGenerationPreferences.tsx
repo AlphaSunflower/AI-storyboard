@@ -328,7 +328,7 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
                 ariaLabel="生成模型"
                 placeholder={modelPlaceholder}
                 size="sm"
-                menuWidth={200}
+                menuWidth={252}
                 placement="top"
               />
               <GlideSelect
@@ -339,7 +339,7 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
                 ariaLabel={clarityLabel}
                 placeholder={clarityLabel}
                 size="sm"
-                menuWidth={160}
+                menuWidth={200}
                 placement="top"
                 align="right"
               />

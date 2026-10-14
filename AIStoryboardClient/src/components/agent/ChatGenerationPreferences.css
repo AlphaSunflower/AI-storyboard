@@ -120,12 +120,6 @@
   padding: 4px;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.04);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.chat-generation-prefs__ratios::-webkit-scrollbar {
-  display: none;
 }
 
 .chat-generation-prefs__ratio {
@@ -135,7 +129,8 @@
   justify-content: center;
   gap: 6px;
   flex: 1 1 0;
-  min-width: 30px;
+  /* 不设最小宽度：多少个比例都挤在同一行里，永远不出现滚动条 */
+  min-width: 0;
   padding: 9px 2px 7px;
   border: none;
   border-radius: 8px;
@@ -179,12 +174,22 @@
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-generation-prefs__selects {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+/* 下拉根节点默认 inline-block 会按内容撑宽、压住旁边的控件：这里占满整列，超长名走省略 */
+.chat-generation-prefs__selects > .glide-select {
+  display: block;
+  width: 100%;
+  min-width: 0;
 }
 
 .chat-generation-prefs__hint {

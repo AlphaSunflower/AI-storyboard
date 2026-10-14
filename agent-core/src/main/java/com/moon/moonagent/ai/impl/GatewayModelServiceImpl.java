@@ -46,7 +46,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
 
     /** 网关不可达时的兜底默认模型（每类型一个） */
     private static final Map<String, String> FALLBACK_DEFAULTS = Map.of(
-            "image", "gpt-image-2",
+            "image", "doubao-seedream-4-0-250828",
             "video", "MiniMax-H3",
             "vision", "gemini-3-flash-preview");
 

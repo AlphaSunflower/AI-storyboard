@@ -74,7 +74,7 @@ ai:
   gateway:
     fallback-text-model: deepseek-v4-flash
     fallback-text-api-key: ${LLM_GATEWAY_API_KEY:}
-    fallback-image-model: gpt-image-2
+    fallback-image-model: doubao-seedream-4-0-250828
     fallback-video-model: MiniMax-H3
     fallback-vision-model: gemini-3-flash-preview
 

@@ -93,8 +93,8 @@ export interface ModelOption {
 }
 
 export const IMAGE_MODELS = [
-  { value: 'gpt-image-2', label: 'GPT Image 2' },
   { value: 'doubao-seedream-4-0-250828', label: 'Doubao Seedream 4.0' },
+  { value: 'gpt-image-2', label: 'GPT Image 2' },
   { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image' },
   { value: 'dall-e-3', label: 'DALL·E 3' },
   { value: 'sdxl', label: 'Stable Diffusion XL' },

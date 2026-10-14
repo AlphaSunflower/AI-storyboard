@@ -108,8 +108,10 @@
 .glide-select__menu {
   position: absolute;
   z-index: 20;
-  width: var(--gs-menu-w);
+  /* 宽度随内容自适应（长模型名完整显示），上限由 menuWidth 决定，超出时行内省略 */
+  width: max-content;
   min-width: 100%;
+  max-width: var(--gs-menu-w);
   padding: 4px;
   border: 1px solid var(--color-hairline, rgba(0, 0, 0, 0.08));
   border-radius: var(--gs-radius);
@@ -154,7 +156,9 @@
   display: grid;
   gap: 1px;
   max-height: 240px;
+  /* 只允许纵向滚动：横向由自适应宽度消化，避免出现横向滚动条 */
   overflow-y: auto;
+  overflow-x: hidden;
   touch-action: none;
 }
 

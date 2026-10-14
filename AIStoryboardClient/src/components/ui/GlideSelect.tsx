@@ -28,6 +28,7 @@ export interface GlideSelectProps {
   textColor?: string;
   size?: 'sm' | 'md' | 'lg';
   radius?: number;
+  /** 菜单最大宽度（px）：内容窄时按内容收缩，长选项完整显示、超长才省略 */
   menuWidth?: number;
   placement?: 'top' | 'bottom';
   align?: 'left' | 'right';
@@ -308,7 +309,13 @@ const GlideSelect = ({
         }}
         onKeyDown={onTriggerKey}
       >
-        <span className="glide-select__label" key={current} data-empty={selected < 0 ? '' : undefined}>
+        {/* 长模型名截断时用 title 交代完整值，避免“看到一半” */}
+        <span
+          className="glide-select__label"
+          key={current}
+          data-empty={selected < 0 ? '' : undefined}
+          title={selected >= 0 ? textOf(items[selected]) : undefined}
+        >
           {selected >= 0 ? items[selected].label : placeholder}
         </span>
         <span className="glide-select__chevron" aria-hidden="true">
@@ -343,7 +350,7 @@ const GlideSelect = ({
                 data-index={i}
                 className="glide-select__option"
               >
-                <span className="glide-select__name">{it.label}</span>
+                <span className="glide-select__name" title={textOf(it)}>{it.label}</span>
                 {showTags && it.tag ? <span className="glide-select__tag">{it.tag}</span> : null}
                 <span className="glide-select__check" data-on={i === selected ? '' : undefined} aria-hidden="true">
                   <HugeiconsIcon icon={Tick02Icon} size={13} strokeWidth={2.5} />
