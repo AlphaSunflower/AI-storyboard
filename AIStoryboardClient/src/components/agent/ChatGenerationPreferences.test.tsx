@@ -2,72 +2,107 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGenerationPreferences } from './ChatGenerationPreferences';
 import { useAgentStore } from '../../stores/agentStore';
-import { useProjectStore } from '../../stores/projectStore';
 import { aiApi } from '../../api/ai';
+import type { GatewayModelOption } from '../../api/ai';
 import {
   GENERATION_PREFERENCES_STORAGE_KEY,
   defaultGenerationPreferences,
 } from '../../lib/generationPreferences';
-import type { ModelOption } from '../../config';
 
 afterEach(cleanup);
 
-const imageModels: ModelOption[] = [
-  {
-    value: 'doubao-seedream-4-0-250828',
-    label: 'Seedream 4.0',
-    default: 'true',
-    params: { sizes: ['1K', '2K', '4K'], sizeDefault: '2K', aspectRatios: ['16:9', '1:1'] },
-  },
-];
+/** 网关下发的图片模型（params 为 JSON 字符串，能力块由后端归一化） */
+const imageModel = (): GatewayModelOption => ({
+  value: 'doubao-seedream-4-0-250828',
+  label: 'Seedream 4.0',
+  default: 'true',
+  params: JSON.stringify({ sizes: ['1K', '2K', '4K'], sizeDefault: '2K', aspectRatios: ['16:9', '1:1'] }),
+});
 
-const videoModels: ModelOption[] = [
+const videoModelList = (): GatewayModelOption[] => [
   {
     value: 'doubao-seedance-1-0',
     label: 'Seedance 1.0',
     default: 'true',
-    params: { resolutions: ['720P', '1080P'], resolutionDefault: '720P', aspectRatios: ['16:9'] },
+    params: JSON.stringify({ resolutions: ['720P', '1080P'], resolutionDefault: '720P', aspectRatios: ['16:9'] }),
   },
-  { value: 'doubao-seedance-2-0', label: 'Seedance 2.0', params: { resolutions: ['720P'] } },
+  {
+    value: 'doubao-seedance-2-0',
+    label: 'Seedance 2.0',
+    params: JSON.stringify({ resolutions: ['720P'] }),
+  },
 ];
+
+const mockGatewayModels = (imageModels: GatewayModelOption[] = [imageModel()]) =>
+  vi.spyOn(aiApi, 'aiModels').mockResolvedValue({
+    data: { data: { imageModels, videoModels: videoModelList() } },
+  } as never);
 
 beforeEach(() => {
   window.localStorage.clear();
   useAgentStore.setState({ generationPreferences: defaultGenerationPreferences() });
-  useProjectStore.setState({ imageModelOptions: imageModels, videoModelOptions: videoModels });
+  mockGatewayModels();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const open = () => fireEvent.click(screen.getByRole('button', { name: /生成偏好/ }));
 
 describe('ChatGenerationPreferences', () => {
-  it('默认显示「自动」，面板按模型能力渲染比例与清晰度', () => {
+  it('默认显示「自动」，面板按网关模型能力渲染比例与清晰度', async () => {
     render(<ChatGenerationPreferences />);
     expect(screen.getByRole('button', { name: '生成偏好：自动' })).toBeTruthy();
 
     open();
     expect(screen.getByRole('dialog', { name: '生成偏好' })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('Seedream 4.0');
+    });
     expect(screen.getByRole('button', { name: '智能比例' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '比例 16:9' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '比例 1:1' })).toBeTruthy();
     // 自动态：比例按钮置灰，清晰度显示模型默认值
     expect((screen.getByRole('button', { name: '比例 16:9' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('combobox', { name: '清晰度' }).textContent).toContain('2K');
-    expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('Seedream 4.0');
   });
 
-  it('模型没声明比例时只剩「智能」可选', () => {
-    useProjectStore.setState({
-      imageModelOptions: [{ value: 'plain', label: 'Plain', default: 'true', params: { sizes: ['2K'] } }],
-    });
+  it('模型没声明比例时只剩「智能」可选', async () => {
+    mockGatewayModels([{
+      value: 'plain',
+      label: 'Plain',
+      default: 'true',
+      params: JSON.stringify({ sizes: ['2K'] }),
+    }]);
     render(<ChatGenerationPreferences />);
     open();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('Plain');
+    });
     expect(screen.getByRole('button', { name: '智能比例' })).toBeTruthy();
     expect(document.querySelectorAll('.chat-generation-prefs__ratio')).toHaveLength(1);
   });
 
-  it('关掉自动后 chip 变「自定义」，选择比例写入本地存储', () => {
+  it('网关没有可用图片模型时不拿静态兜底冒充', async () => {
+    mockGatewayModels([]);
     render(<ChatGenerationPreferences />);
     open();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('暂无可用模型');
+    });
+    // 只剩「智能」，没有从 config.ts 兜底列表来的比例
+    expect(document.querySelectorAll('.chat-generation-prefs__ratio')).toHaveLength(1);
+    expect((screen.getByRole('combobox', { name: '生成模型' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('combobox', { name: '清晰度' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('关掉自动后 chip 变「自定义」，选择比例写入本地存储', async () => {
+    render(<ChatGenerationPreferences />);
+    open();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '比例 16:9' })).toBeTruthy();
+    });
     fireEvent.click(screen.getByRole('switch', { name: '自动生成偏好' }));
 
     expect(screen.getByRole('button', { name: '生成偏好：自定义' })).toBeTruthy();
@@ -81,9 +116,12 @@ describe('ChatGenerationPreferences', () => {
     expect(stored.image.aspectRatio).toBe('16:9');
   });
 
-  it('切换图片 / 视频标签各自独立保存偏好', () => {
+  it('切换图片 / 视频标签各自独立保存偏好', async () => {
     render(<ChatGenerationPreferences />);
     open();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('Seedream 4.0');
+    });
     fireEvent.click(screen.getByRole('switch', { name: '自动生成偏好' }));
     fireEvent.click(screen.getByRole('tab', { name: '视频' }));
 
@@ -119,29 +157,21 @@ describe('ChatGenerationPreferences', () => {
     expect(screen.queryByRole('dialog', { name: '生成偏好' })).toBeNull();
   });
 
-  it('打开面板时拉网关模型（真实模型 + 能力），网关不可达则回落 store 兜底', async () => {
-    vi.spyOn(aiApi, 'aiModels').mockResolvedValue({
-      data: {
-        data: {
-          imageModels: [{
-            value: 'doubao-seedream-4-5-251128',
-            label: 'Seedream 4.5',
-            params: JSON.stringify({ sizes: ['2K', '4K'], sizeDefault: '4K' }),
-            preferences: {
-              ratioOptions: ['21:9', '16:9'],
-              ratioDefault: '16:9',
-              clarity: { label: '清晰度', param: 'size', options: ['2K', '4K'], default: '4K' },
-            },
-          }],
-          videoModels: [],
-        },
+  it('后端归一化的能力块优先（比例与清晰度都按后端下发）', async () => {
+    mockGatewayModels([{
+      value: 'doubao-seedream-4-5-251128',
+      label: 'Seedream 4.5',
+      params: JSON.stringify({ sizes: ['2K', '4K'], sizeDefault: '4K' }),
+      preferences: {
+        ratioOptions: ['21:9', '16:9'],
+        ratioDefault: '16:9',
+        clarity: { label: '清晰度', param: 'size', options: ['2K', '4K'], default: '4K' },
       },
-    } as never);
+    }]);
 
     render(<ChatGenerationPreferences />);
     open();
 
-    expect(await screen.findByRole('combobox', { name: '生成模型' })).toBeTruthy();
     await waitFor(() => {
       expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('Seedream 4.5');
     });

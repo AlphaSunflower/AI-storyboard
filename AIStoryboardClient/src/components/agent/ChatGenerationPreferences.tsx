@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Sparkles, SlidersHorizontal } from 'lucide-react';
 import { useAgentStore } from '../../stores/agentStore';
-import { useProjectStore } from '../../stores/projectStore';
 import { aiApi, type GatewayModelOption } from '../../api/ai';
 import type { ModelOption } from '../../config';
 import {
@@ -30,14 +29,15 @@ function isDefaultModel(model: ModelOption): boolean {
 
 export function ChatGenerationPreferences({ disabled = false }: { disabled?: boolean }) {
   const { generationPreferences, updateGenerationPreferences } = useAgentStore();
-  // store 里的列表是 config.ts 静态兜底（编辑器页拉过网关才会被替换）：这里自己拉一次网关，
-  // 既拿到真实模型与能力，又不去改共享 store（否则会顺带改掉编辑器里已选的模型）。
-  const storedImageModels = useProjectStore((state) => state.imageModelOptions);
-  const storedVideoModels = useProjectStore((state) => state.videoModelOptions);
+  /**
+   * 模型列表只认网关：store 里的 imageModelOptions 是 config.ts 的静态兜底（/chat 不调
+   * fetchAiModels），拿它渲染会显示根本不存在的模型，所以这里自己拉、失败就留空。
+   */
   const [gatewayModels, setGatewayModels] = useState<{
     image: ModelOption[];
     video: ModelOption[];
   } | null>(null);
+  const [modelsState, setModelsState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<MediaKind>('image');
   const rootRef = useRef<HTMLDivElement>(null);
@@ -72,17 +72,24 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setModelsState('loading');
     void (async () => {
       try {
         const res = await aiApi.aiModels();
         const data = res.data.data;
-        if (cancelled || !data) return;
-        const image = (data.imageModels ?? []) as GatewayModelOption[];
-        const video = (data.videoModels ?? []) as GatewayModelOption[];
-        if (image.length === 0 && video.length === 0) return;
-        setGatewayModels({ image: image as ModelOption[], video: video as ModelOption[] });
+        if (cancelled) return;
+        if (!data) {
+          setModelsState('failed');
+          return;
+        }
+        setGatewayModels({
+          image: (data.imageModels ?? []) as GatewayModelOption[] as ModelOption[],
+          video: (data.videoModels ?? []) as GatewayModelOption[] as ModelOption[],
+        });
+        setModelsState('ready');
       } catch {
-        // 网关不可达：保持 store 的兜底列表，偏好面板照常可用
+        // 网关不可达：列表留空，不拿静态兜底冒充真实模型
+        if (!cancelled) setModelsState('failed');
       }
     })();
     return () => {
@@ -90,10 +97,11 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
     };
   }, [open]);
 
-  const imageModels = gatewayModels?.image ?? storedImageModels;
-  const videoModels = gatewayModels?.video ?? storedVideoModels;
-  const models = tab === 'image' ? imageModels : videoModels;
+  const models = (tab === 'image' ? gatewayModels?.image : gatewayModels?.video) ?? [];
   const preference = tab === 'image' ? generationPreferences.image : generationPreferences.video;
+  const modelPlaceholder = modelsState === 'loading' ? '加载中…'
+    : modelsState === 'failed' ? '模型列表加载失败'
+      : '暂无可用模型';
 
   const modelOptions = useMemo(
     () =>
@@ -282,7 +290,7 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
                 onChange={setModel}
                 disabled={locked || modelOptions.length === 0}
                 ariaLabel="生成模型"
-                placeholder="默认模型"
+                placeholder={modelPlaceholder}
                 size="sm"
                 menuWidth={200}
                 placement="top"

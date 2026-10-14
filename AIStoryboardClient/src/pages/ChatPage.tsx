@@ -1726,7 +1726,7 @@ export function ChatPage() {
                 </button>
               )}
               <div className="chat-composer-dock" style={{
-                padding: '8px 16px 16px',
+                padding: '8px 16px 10px',
                 paddingRight: dockPadRight,
                 background: 'transparent',
                 transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',

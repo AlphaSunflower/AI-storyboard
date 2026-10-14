@@ -737,7 +737,7 @@ export function ChatComposer({
       style={{
       width: '100%', maxWidth: collapsed ? DS.maxContentCompact : DS.maxContent, margin: '0 auto',
       border: `1px solid ${dropActive ? DS.brand : focused ? 'rgba(65,118,230,0.45)' : DS.border}`,
-      borderRadius: collapsed ? 18 : 22,
+      borderRadius: 18,
       background: dropActive
         ? 'rgba(65,118,230,0.035)'
         : collapsed ? 'rgba(255, 255, 255, 0.62)' : 'white',
@@ -748,7 +748,7 @@ export function ChatComposer({
         : focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)'
           : collapsed ? '0 10px 26px -14px rgba(20, 20, 19, 0.35)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
       transition: 'border-color 0.2s, box-shadow 0.2s, background-color 240ms ease, padding 240ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 240ms ease, max-width 260ms cubic-bezier(0.22, 1, 0.36, 1)',
-      padding: collapsed ? '4px 6px 4px 12px' : '10px 14px 12px',
+      padding: collapsed ? '4px 6px 4px 12px' : '10px 14px 7px',
       display: 'flex',
       // 收缩态：输入框与发送按钮并排一行
       flexDirection: collapsed ? 'row' : 'column',

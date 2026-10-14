@@ -7,7 +7,7 @@
   /* 宽度贴合可见内容：浮层按本元素的 rect 定位，整列宽会把卡片甩到屏幕边缘 */
   width: fit-content;
   max-width: 100%;
-  margin: 8px auto 0;
+  margin: 4px auto 0;
   min-height: 18px;
   font-size: 11px;
   line-height: 1.4;
