@@ -113,9 +113,19 @@
 }
 
 .chat-generation-prefs__ratios {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  /* 单行自适应：等分整行宽度，格子随面板宽度伸缩，不用固定像素 */
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-generation-prefs__ratios::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-generation-prefs__ratio {
@@ -123,36 +133,52 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  height: 52px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 30px;
+  padding: 9px 2px 7px;
+  border: none;
+  border-radius: 8px;
   background: transparent;
   color: var(--color-muted);
-  font-size: 11px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .chat-generation-prefs__ratio:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--color-ink);
 }
 
 .chat-generation-prefs__ratio[data-active] {
-  border-color: rgba(65, 118, 230, 0.5);
-  background: rgba(65, 118, 230, 0.08);
-  color: var(--color-primary);
+  background: #ffffff;
+  color: var(--color-ink);
+  box-shadow: 0 1px 2px rgba(15, 17, 21, 0.12);
 }
 
 .chat-generation-prefs__ratio:disabled {
   cursor: not-allowed;
 }
 
-.chat-generation-prefs__ratio-shape {
+/* 矢量比例图：宽度跟随格子，最大不超过 22px，形状由 viewBox 内的矩形决定 */
+.chat-generation-prefs__ratio-glyph {
   display: block;
-  border: 1.5px solid currentColor;
-  border-radius: 3px;
+  width: 100%;
+  max-width: 24px;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.chat-generation-prefs__ratio-glyph--smart {
+  max-width: 18px;
+}
+
+.chat-generation-prefs__ratio-label {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .chat-generation-prefs__selects {

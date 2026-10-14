@@ -27,6 +27,37 @@ function isDefaultModel(model: ModelOption): boolean {
   return model.default === true || model.default === 'true';
 }
 
+/**
+ * 比例缩略图：统一画布内按真实比例画圆角矩形描边（矢量，随格子宽度缩放，不用固定像素）。
+ * 短边固定、长边按比例撑开，所以 1:1 / 16:9 / 21:9 视觉重量一致。
+ */
+function RatioGlyph({ ratio }: { ratio: string }) {
+  const [w, h] = ratio.split(':').map((part) => Number(part));
+  const valid = Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0;
+  // 画布 24x18、留 1.5 边距：按比例整体缩放贴合，长边贴边、短边随之收窄
+  const boxW = 21;
+  const boxH = 15;
+  const scale = valid ? Math.min(boxW / w, boxH / h) : 1;
+  const width = valid ? w * scale : boxW;
+  const height = valid ? h * scale : boxH;
+  const x = (24 - width) / 2;
+  const y = (18 - height) / 2;
+  return (
+    <svg className="chat-generation-prefs__ratio-glyph" viewBox="0 0 24 18" role="presentation" aria-hidden="true">
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={2.5}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.6}
+      />
+    </svg>
+  );
+}
+
 export function ChatGenerationPreferences({ disabled = false }: { disabled?: boolean }) {
   const { generationPreferences, updateGenerationPreferences } = useAgentStore();
   /**
@@ -261,31 +292,28 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
                 aria-label="智能比例"
                 onClick={() => setRatio('')}
               >
-                <Sparkles size={16} strokeWidth={1.8} />
-                <span>智能</span>
+                <Sparkles
+                  className="chat-generation-prefs__ratio-glyph chat-generation-prefs__ratio-glyph--smart"
+                  size={18}
+                  strokeWidth={1.6}
+                  aria-hidden="true"
+                />
+                <span className="chat-generation-prefs__ratio-label">智能</span>
               </button>
-              {ratioOptions.map((ratio) => {
-                const [w, h] = ratio.split(':').map((part) => Number(part));
-                const scale = w > 0 && h > 0 ? Math.min(1, 1 / Math.max(w / h, h / w)) : 1;
-                return (
-                  <button
-                    key={ratio}
-                    type="button"
-                    className="chat-generation-prefs__ratio"
-                    data-active={effectiveRatio === ratio ? '' : undefined}
-                    disabled={locked}
-                    aria-label={`比例 ${ratio}`}
-                    onClick={() => setRatio(ratio)}
-                  >
-                    <span
-                      className="chat-generation-prefs__ratio-shape"
-                      style={w > 0 && h > 0 ? { width: Math.round(20 * w * scale), height: Math.round(20 * h * scale) } : undefined}
-                      aria-hidden="true"
-                    />
-                    <span>{ratio}</span>
-                  </button>
-                );
-              })}
+              {ratioOptions.map((ratio) => (
+                <button
+                  key={ratio}
+                  type="button"
+                  className="chat-generation-prefs__ratio"
+                  data-active={effectiveRatio === ratio ? '' : undefined}
+                  disabled={locked}
+                  aria-label={`比例 ${ratio}`}
+                  onClick={() => setRatio(ratio)}
+                >
+                  <RatioGlyph ratio={ratio} />
+                  <span className="chat-generation-prefs__ratio-label">{ratio}</span>
+                </button>
+              ))}
             </div>
           </div>
 
