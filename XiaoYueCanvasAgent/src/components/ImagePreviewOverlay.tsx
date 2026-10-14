@@ -12,9 +12,11 @@ export type ImagePreviewTarget = {
 export function ImagePreviewOverlay({
   target,
   onClose,
+  present = true,
 }: {
   target: ImagePreviewTarget;
   onClose: () => void;
+  present?: boolean;
 }) {
   const asset = useMediaStore((state) => state.assets[target.assetId]);
   const url = useObjectUrl(asset?.originalBlob ?? asset?.previewBlob);
@@ -29,7 +31,8 @@ export function ImagePreviewOverlay({
 
   return createPortal(
     <div
-      className="image-fullscreen record-image-preview"
+      className="image-fullscreen record-image-preview motion-fade"
+      data-present={present}
       role="dialog"
       aria-modal="true"
       aria-label="图片预览"

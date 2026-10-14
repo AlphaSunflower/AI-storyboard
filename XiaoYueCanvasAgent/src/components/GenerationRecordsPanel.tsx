@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -307,9 +307,10 @@ function RecordDetail({
   );
 }
 
-export function GenerationRecordsPanel({ onClose }: { onClose: () => void }) {
+export function GenerationRecordsPanel({ onClose, present = true }: { onClose: () => void; present?: boolean }) {
   const records = useCanvasStore((state) => state.generationRecords);
   const nodes = useCanvasStore((state) => state.nodes);
+  const rootRef = useRef<HTMLElement>(null);
   const [status, setStatus] = useState('all');
   const [kind, setKind] = useState('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -326,9 +327,27 @@ export function GenerationRecordsPanel({ onClose }: { onClose: () => void }) {
     if (selectedId && !records.some((record) => record.id === selectedId)) setSelectedId(null);
   }, [records, selectedId]);
 
+  /**
+   * 点抽屉以外的任何地方都收起它——包括右上角并排的「任务队列」：
+   * 两个入口共用一条工具带，开着溯源的抽屉再点任务队列时必须让位。
+   * 例外：右上角「生成记录」入口自己负责开/关（否则 pointerdown 先关、click 又开，永远关不掉）；
+   * 图片全屏预览是 portal 到 body 的，它属于抽屉内部，不能被当成「外面」。
+   */
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (rootRef.current?.contains(target)) return;
+      if (target.closest('.generation-records-trigger, .record-image-preview')) return;
+      onClose();
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  }, [onClose]);
+
   return (
     <>
-      <aside className={`floating-drawer generation-records-panel ${selected ? 'is-detail-open' : ''}`}>
+      <aside ref={rootRef} className={`floating-drawer generation-records-panel motion-presence ${selected ? 'is-detail-open' : ''}`} data-present={present}>
         <div className="drawer-heading">
           <div><span className="eyebrow">PROVENANCE</span><h2>生成记录</h2></div>
           <button className="icon-button" onClick={onClose} aria-label="关闭生成记录"><X size={17} /></button>

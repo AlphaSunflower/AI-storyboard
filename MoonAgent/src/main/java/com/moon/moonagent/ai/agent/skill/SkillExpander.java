@@ -30,7 +30,7 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
-public class SkillExpander {
+public class SkillExpander implements ToolAvailability {
 
     private static final Logger log = LoggerFactory.getLogger(SkillExpander.class);
 
@@ -75,6 +75,7 @@ public class SkillExpander {
         return toolByName.keySet();
     }
 
+    @Override
     public boolean hasTool(String name) {
         return name != null && toolByName.containsKey(name);
     }

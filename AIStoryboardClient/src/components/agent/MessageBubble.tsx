@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Download, FileAudio, FileText, FileVideo,
-  Check, ImagePlus, Images, Library, LoaderCircle, MessageSquarePlus, PanelRightOpen, Pencil, Play, Trash2,
+  Check, ImagePlus, Images, Library, MessageSquarePlus, PanelRightOpen, Pencil, Play, Trash2,
 } from 'lucide-react';
 import { assetUrl } from '../../config';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -28,12 +28,14 @@ import {
   ANNOTATION_POPOVER_WIDTH, popoverPosition, toAnchorRect, type AnchorRect,
 } from './annotationPopover';
 import { ReasoningPanel } from './ReasoningPanel';
+import { ConfirmResultActions } from './ConfirmResultActions';
 import { SuggestedActions } from './SuggestedActions';
 import { HumanInputCard } from './HumanInputCard';
 import { VideoPlanCard } from './VideoPlanCard';
-import { AgentTaskCard } from './AgentTaskCard';
 import { StoryboardResultActions } from './StoryboardResultActions';
 import { CanvasRunCard } from './CanvasRunCard';
+import { StandaloneTaskCards, ToolResultBlocks } from './ToolDraftList';
+import { attachmentKey, dedupeAttachments } from '../../lib/attachmentDedupe';
 import { ContextMenu } from '../common/ContextMenu';
 import { ChatBlockActions } from './ChatBlockActions';
 import { ChatMediaActions } from './ChatMediaActions';
@@ -260,7 +262,8 @@ function MessageAttachmentStrip({
         const Chip = fileChip ? 'button' : 'span';
         return (
           <ContextMenu
-            key={`${attachment.url}-${index}`}
+            // 幂等 key：assetId 优先（避免重放/刷新时 url-index 变位导致卡片重复或换位）
+            key={attachmentKey(attachment, index)}
             items={[
               {
                 label: '下载',
@@ -1449,7 +1452,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     ? hitlFromMetadata(metadata)
     : null;
   const submittedActionId = hitlMeta?.selectedActionId;
-  const sandboxAttachments = metadata?.sandboxAttachments ?? [];
+  const sandboxAttachments = dedupeAttachments(metadata?.sandboxAttachments ?? []);
   const metrics = !isUser ? metadata?.metrics : undefined;
   const metricsTitle = metrics
     ? [
@@ -1589,6 +1592,36 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     );
   }, { scope: bubbleRef });
 
+  /**
+   * 助手消息的「产物层」：生成结果预置位条 + 沙箱产物文件卡 + 结果确认动作。
+   *
+   * 过去只有正文分支渲染它们，`video-plan` / `hitl` 两条卡片分支提前 return 时整层缺失，
+   * 于是「消息一带卡片，图片和产物文件就凭空消失」，而正文里的 markdown 图片又已被
+   * `stripTaskMediaMarkdown` 剥掉（它假定位条会承载）。三条路径共用这一份，卡片只额外多渲染自己。
+   */
+  const assistantResultBlocks = !isUser ? (
+    <>
+      <GenerationSlotStrip
+        taskIds={mediaTaskIds}
+        onOpen={onOpenGenerationCenter}
+        onOpenMedia={(url) => openPreview(url, 'image')}
+      />
+      <MessageAttachmentStrip
+        attachments={sandboxAttachments}
+        onPreview={openAttachmentPreview}
+        {...attachmentStripProps}
+      />
+      {metadata?.confirmResult && (
+        <ConfirmResultActions info={metadata.confirmResult} messageId={messageId} />
+      )}
+    </>
+  ) : null;
+
+  /** 后台任务卡：卡片分支同样必须渲染，否则任务进度/重试入口随卡片消失。 */
+  const assistantTaskCards = !isUser
+    ? <StandaloneTaskCards cards={metadata?.taskCards} metadata={metadata} messageId={messageId} />
+    : null;
+
   // HITL 卡片消息：渲染确认卡片（选择后高亮 + 禁用），不单独渲染 content 文本避免重复
   if (videoPlanInfo) {
     return (
@@ -1597,6 +1630,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
         ) : null}
         {hitlPlanContent}
+        <ToolResultBlocks metadata={metadata} messageId={messageId} />
+        {assistantResultBlocks}
         <VideoPlanCard
           info={videoPlanInfo}
           submitted
@@ -1604,6 +1639,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           submittedActionId={metadata?.hitl?.selectedActionId}
           submittedActionTitle={metadata?.hitl?.selectedActionTitle}
         />
+        {assistantTaskCards}
       </div>
     );
   }
@@ -1615,6 +1651,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
         ) : null}
         {hitlPlanContent}
+        <ToolResultBlocks metadata={metadata} messageId={messageId} />
+        {assistantResultBlocks}
         <HumanInputCard
           info={hitlInfo}
           archived={archivedConversation}
@@ -1624,6 +1662,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           params={hitlMeta?.params ?? hitlMeta?.selectedParams}
           assetIds={hitlMeta?.assetIds ?? hitlMeta?.selectedAssetIds}
         />
+        {assistantTaskCards}
       </div>
     );
   }
@@ -1638,6 +1677,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
       {!isUser && (metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
         <ReasoningPanel reasoning={metadata?.reasoning} agentTrace={metadata?.agentTrace} streaming={streaming} />
       )}
+      {/* 工具输出（直播 generating.toolDrafts / 重放 metadata.toolDrafts + render 块） */}
+      {!isUser && <ToolResultBlocks metadata={metadata} messageId={messageId} />}
       <div
         ref={contentRef}
         onMouseUp={handleAnnotationSelection}
@@ -1743,16 +1784,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                       streaming={streaming}
                     />
                   )}
-                  <GenerationSlotStrip
-                    taskIds={mediaTaskIds}
-                    onOpen={onOpenGenerationCenter}
-                    onOpenMedia={(url) => openPreview(url, 'image')}
-                  />
-                  <MessageAttachmentStrip
-                    attachments={sandboxAttachments}
-                    onPreview={openAttachmentPreview}
-                    {...attachmentStripProps}
-                  />
+                  {assistantResultBlocks}
                 </>
               )
               : (
@@ -1807,9 +1839,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           <style>{`::highlight(${selectionHighlightName}) { background-color: rgba(65, 118, 230, 0.32); }`}</style>
         )}
       </div>
-      {!isUser && metadata?.taskCards?.map((task) => (
-        <AgentTaskCard key={task.taskId} taskId={task.taskId} />
-      ))}
+      {/* 任务卡：带 parentToolCallId 的旅程任务已折到上方工具卡下，这里只渲染其余任务 */}
+      {assistantTaskCards}
       {!isUser && storyboardResultReady && (
         <StoryboardResultActions />
       )}
@@ -1864,39 +1895,6 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
             >
               <Pencil size={12} strokeWidth={1.8} />
               编辑
-            </button>
-            </Tooltip>
-          )}
-          {!isUser && messageMedia.length > 0 && (
-            <Tooltip label={currentProject?.id ? '导入素材库' : '请先选择项目'}>
-            <button
-              onClick={() => void handleImportMedia(messageMedia)}
-              disabled={importDisabled || projectImportState === 'importing'}
-              onMouseEnter={(e) => {
-                if (importDisabled || projectImportState === 'importing') return;
-                const el = e.currentTarget;
-                el.style.background = 'rgba(0,0,0,0.05)';
-                el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)';
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget;
-                el.style.background = 'transparent';
-                el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)';
-              }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                border: 'none', background: 'transparent', cursor: importDisabled ? 'not-allowed' : 'pointer',
-                fontSize: ds ? 12 : 11, padding: '1px 4px', borderRadius: 6,
-                color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)',
-                opacity: importDisabled ? 0.55 : 1,
-              }}
-            >
-              {projectImportState === 'importing'
-                ? <LoaderCircle size={12} className="is-spinning" />
-                : <Library size={12} strokeWidth={1.8} />}
-              {projectImportState === 'done'
-                ? '已导入素材库'
-                : projectImportState === 'error' ? '重试导入素材库' : '导入素材库'}
             </button>
             </Tooltip>
           )}

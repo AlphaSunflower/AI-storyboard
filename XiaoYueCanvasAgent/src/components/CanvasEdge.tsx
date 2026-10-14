@@ -85,7 +85,7 @@ function CanvasEdgeComponent({
         <animateMotion dur="2.5s" repeatCount="indefinite" path={path} />
       </circle>
       {/* 流动光点 2 */}
-      <circle r="2.8" fill="#fff9d6" opacity="0.72" style={{ pointerEvents: 'none' }}>
+      <circle r="2.8" fill="#f8f8f8" opacity="0.72" style={{ pointerEvents: 'none' }}>
         <animateMotion dur="2.5s" repeatCount="indefinite" path={path} begin="1.25s" />
       </circle>
 
@@ -95,12 +95,12 @@ function CanvasEdgeComponent({
           y={labelY}
           label={label}
           labelStyle={{
-            fill: isCropLabel ? '#f2f0e8' : '#e6e3da',
+            fill: isCropLabel ? '#f0f0f0' : '#e3e3e3',
             fontSize: isCropLabel ? 17 : 11,
             fontWeight: isCropLabel ? 700 : 400,
           }}
           labelShowBg
-          labelBgStyle={{ fill: isCropLabel ? 'rgba(25,27,32,.94)' : 'rgba(30,32,38,.85)' }}
+          labelBgStyle={{ fill: isCropLabel ? 'rgba(27,27,27,.94)' : 'rgba(32,32,32,.85)' }}
           labelBgPadding={isCropLabel ? [9, 6] : [6, 4]}
           labelBgBorderRadius={isCropLabel ? 7 : 5}
         />

@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 深墨绿 / acid 荧光绿 主题（tailwind/shadcn 用）。palette 值复用 styles.css 的 --canvas/--card/--acid/--ink 等，
-   这里只补语义别名与圆角，不重定义 --card 等会与 styles.css 冲突的名字。 */
+/* 画布子站只有白灰阶：这里只补语义别名与圆角。
+   颜色一律复用 styles.css 的 --n-*/--line/--text/--solid，避免再出现第二套色值。 */
 :root {
   --radius: 0.625rem;
 }
@@ -22,12 +22,12 @@
   textarea,
   input,
   select {
-    background-color: rgba(19, 34, 30, 0.55);
-    color: #eef0df;
-    border-color: rgba(215, 255, 84, 0.14);
+    background-color: rgba(255,255,255,0.05);
+    color: var(--text);
+    border-color: var(--line);
   }
   textarea::placeholder,
   input::placeholder {
-    color: rgba(238, 240, 223, 0.5);
+    color: rgba(244,244,245,0.4);
   }
 }

@@ -41,6 +41,8 @@ export function HumanInputCard({
   const submitHumanInput = useAgentStore((s) => s.submitHumanInput);
   const skipCurrentHITL = useAgentStore((s) => s.skipCurrentHITL);
   const streaming = useAgentStore((s) => s.streaming);
+  // 空/空白 formToken 的历史卡片：只读回显，绝不触发提交（重放复活点击是事故点）。
+  const inert = !!info.inactive;
   // 生成偏好（自动时不预选，自定义时按偏好预选；见 计划卡预选）
   const generationPreferences = useAgentStore((s) => s.generationPreferences);
   const imagePrefill = useMemo(
@@ -79,7 +81,7 @@ export function HumanInputCard({
   const [selectedActionId, setSelectedActionId] = useState<string | null>(submittedActionId || null);
   
   const handleActionClick = (a: { id: string; title: string }) => {
-    if (archived) return;
+    if (archived || inert) return;
     if (a.id === "custom") {
       setCustomOpen(true);
       return;
@@ -179,6 +181,18 @@ export function HumanInputCard({
       <div style={{ fontSize: 15, color: "var(--color-ink)", lineHeight: 1.7, marginBottom: 12, whiteSpace: "pre-wrap" }}>
         {info.formContent || "请确认是否继续？"}
       </div>
+      {inert && (
+        <div
+          data-hitl-inactive=""
+          role="note"
+          style={{
+            fontSize: 12, color: "var(--color-muted)", marginBottom: 10,
+            background: "var(--color-surface-soft)", borderRadius: 8, padding: "6px 10px",
+          }}
+        >
+          该确认卡片缺少表单令牌（formToken），已不可提交；请重新发起一轮对话。
+        </div>
+      )}
       {/* 已提交信息：自定义文本 / 勾选资产 / 参数摘要 */}
       {submittedActionId && (
         <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -267,6 +281,35 @@ export function HumanInputCard({
       
       {expired ? (
         <div style={{ fontSize: 14, color: "var(--color-warning)" }}>确认已过期，请重新发起对话</div>
+      ) : inert ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {info.actions.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              disabled
+              data-hitl-inactive-action={a.id}
+              style={{
+                padding: "10px 18px", border: "none", borderRadius: "var(--rounded-md)",
+                background: "var(--color-canvas)", color: "var(--color-muted)",
+                fontSize: 15, width: "100%", textAlign: "center", cursor: "not-allowed", opacity: 0.6,
+              }}
+            >
+              {a.title}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={skipCurrentHITL}
+            style={{
+              padding: "6px 12px", border: "none", borderRadius: "var(--rounded-md)",
+              background: "transparent", color: "var(--color-muted)", fontSize: 12,
+              cursor: "pointer", width: "100%", textAlign: "center",
+            }}
+          >
+            跳过，换个话题
+          </button>
+        </div>
       ) : customOpen ? (
         <div>
           <input

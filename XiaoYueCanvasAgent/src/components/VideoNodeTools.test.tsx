@@ -15,6 +15,8 @@ import { getAsset } from '../services/projectStorage';
 vi.mock('@xyflow/react', () => ({
   NodeToolbar: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>,
   Position: { Top: 'top', Bottom: 'bottom' },
+  useStore: (selector: (state: { nodes: unknown }) => unknown) =>
+    selector({ nodes: { find: () => ({ id: 'node', selected: true }), filter: () => [{}] } }),
 }));
 
 vi.mock('../services/videoProcessingService', () => ({

@@ -55,7 +55,7 @@ public class AgentAssetGenerationRecordWriter implements GenerationRecordWriter 
     public void update(String recordId, GenerationRecordUpdate update) {
         if (recordId == null || recordId.isBlank()) return;
         AgentAsset record = assetMapper.selectById(recordId);
-        if (record == null) return;
+        if (record == null || isDeleted(record)) return;
         apply(record, update);
         assetMapper.updateById(record);
         assetOutputOutboxService.enqueue(record);
@@ -80,9 +80,18 @@ public class AgentAssetGenerationRecordWriter implements GenerationRecordWriter 
                         .last("LIMIT 1"));
         if (records == null || records.isEmpty()) return;
         AgentAsset record = records.getFirst();
+        if (isDeleted(record)) return;
         apply(record, update);
         assetMapper.updateById(record);
         assetOutputOutboxService.enqueue(record);
+    }
+
+    /**
+     * 用户删除素材后，仍在飞行中的生成任务会带着新结果回来覆写这一行。
+     * 软删除必须对异步写回是终态，否则删掉的图会带着新 URL 重新出现在会话资产里。
+     */
+    static boolean isDeleted(AgentAsset record) {
+        return record != null && AgentAsset.STATUS_DELETED.equals(record.getStatus());
     }
 
     private void apply(AgentAsset record, GenerationRecordUpdate update) {

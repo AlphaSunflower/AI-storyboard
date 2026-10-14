@@ -6,6 +6,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
+import com.moon.moonagent.ai.agent.sandbox.MoonSandboxClient;
+import com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher;
+import com.moon.moonagent.ai.agent.sandbox.SandboxExecutionResult;
+import com.moon.moonagent.ai.agent.sandbox.SandboxOutputReconciler;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.task.AgentTaskView;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
@@ -40,9 +44,11 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -548,6 +554,53 @@ class AgentScopeAsyncTaskServiceTest {
         assertThat(timestampValues).isGreaterThanOrEqualTo(2);
     }
 
+    /**
+     * 任务推送失败必须被降级为告警，不能逃逸出终态收口。
+     *
+     * <p>复现的是排障时真实见过的形态：{@code AgentTaskEventHub.publish} 因 key 为空抛 NPE。
+     * 在修复前，{@code fail(...)} 里的 {@code publish(...)} 会抛出这第二个异常，
+     * 把最初的任务失败原因整个顶掉（日志里只剩 NPE），而且 {@code updateTask} 的每次进度回调
+     * 都会带着这条推送路径，足以打断整条生成链。
+     */
+    @Test
+    void taskPushFailureDoesNotEscapeTheTerminalTransition() {
+        AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentGenerationService generationService = mock(AgentGenerationService.class);
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        StoryboardProductionService productionService = mock(StoryboardProductionService.class);
+        AgentTaskEventHub taskEvents = mock(AgentTaskEventHub.class);
+        doThrow(new NullPointerException("key is null")).when(taskEvents).publish(any(), any());
+        AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
+                taskMapper, conversationMapper, messageMapper, generationService,
+                support, new AgentScopeProperties(), productionService, taskEvents,
+                mock(AgentScopeMessageBus.class));
+
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setProjectId("project-1");
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setId("task-1");
+        task.setConversationId("conversation-1");
+        task.setUserId("user-1");
+        task.setStatus("queued");
+        when(taskMapper.selectById("task-1")).thenReturn(task);
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        when(taskMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+
+        assertThatCode(() -> service.cancelTask("user-1", "task-1"))
+                .doesNotThrowAnyException();
+
+        // 推送确实被尝试过（不是被跳过），但终态写入照样完成
+        verify(taskEvents).publish(any(), any());
+        ArgumentCaptor<UpdateWrapper<AgentAsyncTask>> captor =
+                ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(taskMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs()).containsValue("cancelled");
+    }
+
     @Test
     void taskListCountQueryDoesNotCarryOrderByClause() {
         AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
@@ -914,6 +967,81 @@ class AgentScopeAsyncTaskServiceTest {
         assertThat(candidates)
                 .extracting(candidate -> candidate.resourceId())
                 .contains("revision-queued");
+    }
+
+    /**
+     * 回归守卫：异步沙箱任务收口前必须对 {@code output/} 做一次「只取新建」的补扫。
+     *
+     * <p>修复前的缺陷：产物只由回合末的 {@code SandboxOutputReconciler} 扫描一次，
+     * 而脚本可能在那次扫描之后才落盘，于是产物要等到更晚的回合才出现（甚至永不出现）。
+     *
+     * <p>本用例**走服务自己的入队方法** {@code startSandboxScriptTask}（而不是手工 new 一个 task）：
+     * 入队路径会补齐 userId/toolCallId/toolName/kind/stage 等字段，
+     * 缺了它们 {@code AgentTaskEventHub.publish} 会因为 key 为 null 抛 NPE（已实测踩过）。
+     */
+    @Test
+    void sandboxScriptTaskSweepsOutputForArtifactsWrittenAfterTheTurnEndScan() throws Exception {
+        AgentAsyncTaskMapper taskMapper = mock(AgentAsyncTaskMapper.class);
+        AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
+        AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
+        AgentScopeAsyncTaskService service = new AgentScopeAsyncTaskService(
+                taskMapper, conversationMapper, messageMapper, mock(AgentGenerationService.class),
+                mock(AgentRuntimeSupport.class), new AgentScopeProperties(),
+                mock(StoryboardProductionService.class), new AgentTaskEventHub(),
+                mock(AgentScopeMessageBus.class));
+
+        MoonSandboxClient client = mock(MoonSandboxClient.class);
+        SandboxArtifactPublisher publisher = mock(SandboxArtifactPublisher.class);
+        SandboxOutputReconciler reconciler = mock(SandboxOutputReconciler.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sandboxClient", client);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "sandboxPublisher", publisher);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "sandboxOutputReconciler", reconciler);
+
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("conversation-1");
+        conversation.setUserId("user-1");
+        conversation.setProjectId("project-1");
+        when(conversationMapper.selectById("conversation-1")).thenReturn(conversation);
+        when(taskMapper.selectOne(any())).thenReturn(null);
+
+        AtomicReference<AgentAsyncTask> persisted = new AtomicReference<>();
+        when(taskMapper.insert(any(AgentAsyncTask.class))).thenAnswer(invocation -> {
+            AgentAsyncTask inserted = invocation.getArgument(0);
+            inserted.setId("task-1");
+            persisted.set(inserted);
+            return 1;
+        });
+        when(taskMapper.selectById("task-1")).thenAnswer(invocation -> persisted.get());
+        when(taskMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
+        when(taskMapper.updateById(any(AgentAsyncTask.class))).thenAnswer(invocation -> {
+            persisted.set(invocation.getArgument(0));
+            return 1;
+        });
+        when(messageMapper.insert(any(AgentMessage.class))).thenAnswer(invocation -> {
+            AgentMessage message = invocation.getArgument(0);
+            message.setId("message-1");
+            return 1;
+        });
+
+        when(client.enabled()).thenReturn(true);
+        when(client.execute(eq("conversation-1"), any(), any(),
+                org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(new SandboxExecutionResult(
+                        0, "done", "", false, false, false, 7, List.of()));
+        when(publisher.publish(eq(conversation), eq("task-1"), any()))
+                .thenReturn(new SandboxArtifactPublisher.PublishedArtifacts(
+                        List.of("asset-direct"), List.of("/direct")));
+        when(reconciler.reconcileNew(conversation, "task-1"))
+                .thenReturn(new SandboxArtifactPublisher.PublishedArtifacts(
+                        List.of("asset-late"), List.of("/late")));
+
+        service.startSandboxScriptTask(conversation, "print(1)", List.of(), 60, "call-1");
+        awaitStatus(persisted, "completed");
+
+        // 竞态修复的接线点：任务收口前必须补扫一次 output/（只取新建，避免重复挂历史产物）。
+        verify(reconciler).reconcileNew(conversation, "task-1");
+        verify(publisher).publish(eq(conversation), eq("task-1"), any());
     }
 
     private static void awaitStatus(AtomicReference<AgentAsyncTask> taskRef, String status)

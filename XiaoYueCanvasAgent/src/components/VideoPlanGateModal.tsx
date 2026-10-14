@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CircleCheck, Clock, Zap } from 'lucide-react';
+import { usePresence } from '../hooks/usePresence';
 
 interface GateOption {
   id: 'auto' | 'plan' | 'confirm';
@@ -23,10 +24,11 @@ export function VideoPlanGateModal({ open, count, onClose, onConfirm }: {
   onConfirm: (mode: 'auto') => void;
 }) {
   const [mode, setMode] = useState<'auto' | 'plan' | 'confirm'>('auto');
-  if (!open) return null;
+  const presence = usePresence(open);
+  if (!presence.mounted) return null;
 
   return (
-    <div className="video-gate-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="video-gate-backdrop motion-fade" data-present={presence.present} role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="video-gate" role="dialog" aria-modal="true" aria-labelledby="video-gate-title">
         <header className="video-gate__head">
           <strong id="video-gate-title">生成视频计划</strong>

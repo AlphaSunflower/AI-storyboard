@@ -13,8 +13,9 @@ public class SandboxExceptionHandler {
 
     @ExceptionHandler(SandboxPathException.class)
     public ResponseEntity<Map<String, String>> handleSandboxError(SandboxPathException error) {
+        // 只有容量耗尽才是限流；用完整短语匹配，避免执行失败的 cause 里带 "full" 被误判成 429
         HttpStatus status = error.getMessage() != null
-                && error.getMessage().contains("full")
+                && error.getMessage().contains("capacity is full")
                 ? HttpStatus.TOO_MANY_REQUESTS
                 : HttpStatus.BAD_REQUEST;
         return ResponseEntity.status(status).body(Map.of(

@@ -29,7 +29,19 @@ describe('MessageBubble project library import', () => {
     vi.unstubAllGlobals();
   });
 
-  it('imports generated images from the message action row into the current project', async () => {
+  it('keeps 导入素材库 out of the message meta row', () => {
+    // 常显的 meta 行只留 时间 / 复制（+ 用户消息的编辑），导入入口收进右键菜单。
+    render(
+      <MessageBubble
+        role="assistant"
+        content="![生成图片](/api/files/images/generated.png)"
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '导入素材库' })).toBeNull();
+  });
+
+  it('imports a generated image from the media context menu into the current project', async () => {
     const register = vi.spyOn(libraryApi, 'registerGeneratedOutput').mockResolvedValue({
       data: {
         code: 0,
@@ -67,6 +79,7 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
+    fireEvent.contextMenu(screen.getByRole('img'));
     fireEvent.click(screen.getByRole('button', { name: '导入素材库' }));
 
     await waitFor(() => {
@@ -521,6 +534,194 @@ describe('MessageBubble project library import', () => {
     expect(openSideChat).toHaveBeenCalledWith('c1', undefined);
 
     openSideChat.mockRestore();
+  });
+});
+
+describe('MessageBubble 工具输出与渲染意图', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    useProjectStore.setState({ currentProject: null });
+    useAgentStore.setState({ activeConversationId: 'c-tools', generating: {}, messages: [], streaming: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    useAgentStore.setState({ activeConversationId: null, generating: {}, messages: [], streaming: false });
+  });
+
+  it('重放路径（metadata.toolDrafts）也能看到工具输出', () => {
+    render(
+      <MessageBubble
+        messageId="m-tool-replay"
+        conversationId="c-tools"
+        role="assistant"
+        content="已经跑完脚本"
+        metadata={{
+          kind: 'assistant-reply',
+          toolDrafts: {
+            'call-replay': {
+              name: 'run_python_script',
+              text: 'stdout: 42',
+              input: '{"code":"print(42)"}',
+              status: 'node_completed',
+              seq: 3,
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('工具调用（1）')).toBeDefined();
+    expect(screen.getByText('run_python_script')).toBeDefined();
+    expect(screen.getByText('已完成')).toBeDefined();
+  });
+
+  it('直播路径读 generating.toolDrafts，与重放共用同一渲染', () => {
+    useAgentStore.setState({
+      activeConversationId: 'c-tools',
+      generating: {
+        'c-tools': {
+          hint: '',
+          turnId: 'turn-live',
+          assistantId: 'm-tool-live',
+          finished: false,
+          toolDrafts: {
+            'call-live': {
+              name: 'write_file',
+              text: '写入完成',
+              input: '',
+              status: 'node_running',
+              seq: 2,
+            },
+          },
+        },
+      },
+      messages: [{
+        id: 'm-tool-live',
+        conversationId: 'c-tools',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    });
+
+    render(
+      <MessageBubble
+        messageId="m-tool-live"
+        conversationId="c-tools"
+        role="assistant"
+        content=""
+        streaming
+      />,
+    );
+
+    expect(screen.getByText('write_file')).toBeDefined();
+    expect(screen.getByText('执行中')).toBeDefined();
+  });
+
+  it('metadata.renders 的未知 kind 走兜底卡片而不是崩溃', () => {
+    render(
+      <MessageBubble
+        messageId="m-render"
+        conversationId="c-tools"
+        role="assistant"
+        content="结果如下"
+        metadata={{
+          kind: 'assistant-reply',
+          renders: [{ kind: 'timeline-future', id: 'r-1', status: 'completed', items: ['未来块'] }],
+        }}
+      />,
+    );
+
+    expect(document.querySelector('[data-render-kind="timeline-future"]')).not.toBeNull();
+    expect(screen.getByText('通用展示')).toBeDefined();
+    expect(screen.getByText('未来块')).toBeDefined();
+  });
+
+  it('空 formToken 的 HITL 卡片渲染为只读，动作按钮不可点击', () => {
+    const submitHumanInput = vi.fn();
+    useAgentStore.setState({ submitHumanInput });
+
+    render(
+      <MessageBubble
+        messageId="m-hitl-inactive"
+        conversationId="c-tools"
+        role="assistant"
+        content="请确认是否继续"
+        metadata={{
+          kind: 'hitl',
+          hitl: {
+            formToken: '',
+            formContent: '请确认是否继续',
+            actions: [{ id: 'approve', title: '批准' }],
+            pending: false,
+            inactive: true,
+          },
+        }}
+      />,
+    );
+
+    expect(document.querySelector('[data-hitl-inactive]')).not.toBeNull();
+    const approve = document.querySelector('[data-hitl-inactive-action="approve"]') as HTMLButtonElement;
+    expect(approve).not.toBeNull();
+    expect(approve.disabled).toBe(true);
+
+    fireEvent.click(approve);
+    expect(submitHumanInput).not.toHaveBeenCalled();
+  });
+
+  it('有 formToken 的 HITL 卡片仍可点击（零回归）', () => {
+    const submitHumanInput = vi.fn();
+    useAgentStore.setState({ submitHumanInput });
+
+    render(
+      <MessageBubble
+        messageId="m-hitl-active"
+        conversationId="c-tools"
+        role="assistant"
+        content="请确认是否继续"
+        metadata={{
+          kind: 'hitl',
+          hitl: {
+            formToken: 'form-live',
+            formContent: '请确认是否继续',
+            actions: [{ id: 'approve', title: '批准' }],
+            pending: false,
+          },
+        }}
+      />,
+    );
+
+    expect(document.querySelector('[data-hitl-inactive]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '批准' }));
+    expect(submitHumanInput).toHaveBeenCalledWith('approve', undefined, {});
+  });
+
+  it('产物卡片按 assetId 去重，重复资产只渲染一张', () => {
+    render(
+      <MessageBubble
+        messageId="m-attachments"
+        conversationId="c-tools"
+        role="assistant"
+        content="产物已经交付"
+        metadata={{
+          sandboxAttachments: [
+            { url: '/api/files/a.png', name: 'a.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-1' },
+            { url: '/api/files/a-signed.png', name: 'a.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-1' },
+            { url: '/api/files/b.md', name: 'b.md', mimeType: 'text/markdown', kind: 'file', assetId: 'asset-2' },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { name: '打开文档 b.md' })).toHaveLength(1);
+    // 同一 assetId 的两条 url 只留第一张卡
+    expect(document.querySelectorAll('.chat-message-attachments > *')).toHaveLength(2);
   });
 });
 

@@ -26,6 +26,7 @@ import {
   getVideoNodeSize,
 } from '../utils/mediaPipeline';
 import { useObjectUrl } from '../hooks/useObjectUrl';
+import { usePresence } from '../hooks/usePresence';
 import { createId } from '../utils/id';
 import {
   EMPTY_VIDEO_COLOR_PARAMS,
@@ -95,15 +96,20 @@ function ToolRange({
   );
 }
 
-export function VideoNodeTools({ node }: { node: CanvasNode }) {
+export function VideoNodeTools({ node, present = true }: { node: CanvasNode; present?: boolean }) {
   const asset = useMediaStore((state) => node.data.assetId ? state.assets[node.data.assetId] : undefined);
   const attachAssetToNode = useCanvasStore((state) => state.attachAssetToNode);
   const createDerivedNodes = useCanvasStore((state) => state.createDerivedNodes);
   const [activeTool, setActiveTool] = useState<VideoTool | null>(null);
+  // 显示/隐藏动效：工具条随选中态进出场，三个参数面板与进度条各自进退场
+  const framePanel = usePresence(activeTool === 'frame');
+  const colorPanel = usePresence(activeTool === 'color');
+  const speedPanel = usePresence(activeTool === 'speed');
   const [frameTime, setFrameTime] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const feedbackBar = usePresence(Boolean(processing || feedback), { duration: 140 });
   const [fullscreen, setFullscreen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const lastColor = asset?.operation?.type === 'videoColor' ? asset.operation.params : undefined;
@@ -268,7 +274,8 @@ export function VideoNodeTools({ node }: { node: CanvasNode }) {
         position={Position.Top}
         align="center"
         offset={12}
-        className="image-result-toolbar video-result-toolbar nodrag nowheel"
+        className="image-result-toolbar video-result-toolbar motion-presence nodrag nowheel"
+        data-present={present}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <button className={activeTool === 'frame' ? 'is-active' : ''} disabled={processing} title="提取帧" onClick={openFrameTool}><Film size={19} /></button>
@@ -281,16 +288,16 @@ export function VideoNodeTools({ node }: { node: CanvasNode }) {
         <button disabled={processing} title="全屏查看" onClick={() => setFullscreen(true)}><Maximize2 size={19} /></button>
       </NodeToolbar>
 
-      {(processing || feedback) && (
-        <NodeToolbar nodeId={node.id} isVisible position={Position.Top} align="center" offset={52} className="image-tool-feedback video-tool-feedback" role="status">
+      {feedbackBar.mounted && (
+        <NodeToolbar nodeId={node.id} isVisible position={Position.Top} align="center" offset={52} className="image-tool-feedback video-tool-feedback motion-presence" data-present={feedbackBar.present} role="status">
           {processing && <LoaderCircle className="video-tool-spinner" size={14} />}
           <span>{processing ? `处理中 ${Math.round(progress * 100)}%` : feedback}</span>
           {processing && <button className="nodrag" onClick={() => abortRef.current?.abort()}>取消处理</button>}
         </NodeToolbar>
       )}
 
-      {activeTool === 'frame' && (
-        <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel video-frame-panel nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}>
+      {framePanel.mounted && (
+        <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel video-frame-panel motion-presence nodrag nowheel" data-present={framePanel.present} onPointerDown={(event) => event.stopPropagation()}>
           <header><div><Film size={15} /><strong>提取视频帧</strong><small>输出全分辨率 PNG</small></div><button onClick={() => setActiveTool(null)}><X size={16} /></button></header>
           <div className="video-frame-actions">
             <button disabled={processing} onClick={() => void extractFrame({ kind: 'first' }, '首帧')}>首帧</button>
@@ -322,8 +329,8 @@ export function VideoNodeTools({ node }: { node: CanvasNode }) {
         </NodeToolbar>
       )}
 
-      {activeTool === 'color' && (
-        <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel image-edit-panel--pixels video-color-panel nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}>
+      {colorPanel.mounted && (
+        <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel image-edit-panel--pixels video-color-panel motion-presence nodrag nowheel" data-present={colorPanel.present} onPointerDown={(event) => event.stopPropagation()}>
           <header><div><Palette size={15} /><strong>颜色调整</strong><small>预览后覆盖当前视频</small></div><button onClick={() => setActiveTool(null)}><X size={16} /></button></header>
           <div className="pixel-controls">
             <ToolRange label="亮度" value={color.brightness} min={-100} max={100} onChange={(value) => setColor((current) => ({ ...current, brightness: value }))} />
@@ -346,8 +353,8 @@ export function VideoNodeTools({ node }: { node: CanvasNode }) {
         </NodeToolbar>
       )}
 
-      {activeTool === 'speed' && (
-        <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel video-speed-panel nodrag nowheel" onPointerDown={(event) => event.stopPropagation()}>
+      {speedPanel.mounted && (
+        <NodeToolbar nodeId={node.id} isVisible position={Position.Bottom} align="center" offset={12} className="image-edit-panel video-speed-panel motion-presence nodrag nowheel" data-present={speedPanel.present} onPointerDown={(event) => event.stopPropagation()}>
           <header><div><Gauge size={15} /><strong>视频变速</strong><small>画面与声音同步，保持音调</small></div><button onClick={() => setActiveTool(null)}><X size={16} /></button></header>
           <div className="pixel-controls">
             <ToolRange label="倍数" value={speed} min={0.5} max={2} step={0.01} suffix="×" onChange={setSpeed} />

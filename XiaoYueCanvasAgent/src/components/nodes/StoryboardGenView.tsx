@@ -64,7 +64,7 @@ export const StoryboardGenView = memo(function StoryboardGenView({ node, updateN
                 <figure key={i} className="storyboard-frame" style={{ '--gen-cols': cols, '--gen-rows': rows } as React.CSSProperties}>
                   <div className="storyboard-frame__thumb">
                     {imgSrc ? <img src={imgSrc} alt={`镜头${i + 1}`} /> : (
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(238,240,223,.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(238,238,238,.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
                       </svg>
                     )}

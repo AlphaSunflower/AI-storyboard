@@ -5,6 +5,7 @@ import { useMediaStore } from '../../store/mediaStore';
 import { getAssetMetadata, getAssetVariant } from '../../services/projectStorage';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { useViewportVisibility } from '../../hooks/useViewportVisibility';
+import { usePresence } from '../../hooks/usePresence';
 import type { CanvasNode } from '../../types';
 import { getMediaNodeSize } from '../../utils/mediaPipeline';
 import { ImageNodeTools } from '../ImageNodeTools';
@@ -27,6 +28,8 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
   const quality = useMediaStore((state) => state.quality);
   const metadata = useMediaStore((state) => data.assetId ? state.metadata[data.assetId] : undefined);
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
+  // 图片工具条挂在选中态上：取消选中时先退场再卸载，不再瞬间消失
+  const imageTools = usePresence(Boolean(selected && asset && data.kind === 'image' && data.assetId), { duration: 130 });
   const visibility = useViewportVisibility<HTMLDivElement>(id, selected);
   const [lazyVariant, setLazyVariant] = useState<{ key: string; blob: Blob } | null>(null);
   const desiredVariant = quality === 'preview' ? 'preview' : 'thumbnail';
@@ -90,7 +93,7 @@ function MediaAssetNodeComponent({ id, data, selected, node }: {
           <p className="node-panel-status">选中节点后可使用本地编辑工具</p>
         )}
       </NodeFloatPanel>
-      {selected && asset && (data.kind === 'image' && data.assetId ? <ImageNodeTools node={node} /> : null)}
+      {imageTools.mounted && (data.kind === 'image' && data.assetId ? <ImageNodeTools node={node} present={imageTools.present} /> : null)}
     </div>
   );
 }

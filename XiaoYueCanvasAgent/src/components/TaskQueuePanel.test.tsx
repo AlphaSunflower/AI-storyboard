@@ -71,4 +71,19 @@ describe('TaskQueuePanel', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '任务队列' })).toBeNull());
   });
+
+  it('开合都带动效状态：展开即在场，关闭先退场再卸载', async () => {
+    render(<TaskQueuePanel />);
+    fireEvent.click(screen.getByRole('button', { name: '任务队列' }));
+
+    const panel = () => document.querySelector<HTMLElement>('.task-queue-panel');
+    expect(panel()?.className).toContain('motion-presence');
+    expect(panel()?.dataset.present).toBe('true');
+
+    fireEvent.pointerDown(document.body);
+
+    // 先退场：元素还在，只是切到退场态
+    expect(panel()?.dataset.present).toBe('false');
+    await waitFor(() => expect(panel()).toBeNull());
+  });
 });

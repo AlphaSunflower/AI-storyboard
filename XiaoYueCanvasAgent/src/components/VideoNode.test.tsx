@@ -14,6 +14,7 @@ vi.mock('@xyflow/react', () => ({
   Position: { Left: 'left', Right: 'right' },
   useStore: (selector: (state: { transform: [number, number, number]; width: number; height: number }) => unknown) =>
     selector({ transform: [0, 0, 1], width: 900, height: 700 }),
+  useReactFlow: () => ({ screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }) }),
 }));
 
 const videoAsset: PersistedAsset = {

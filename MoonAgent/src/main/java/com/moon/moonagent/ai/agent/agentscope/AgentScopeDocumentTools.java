@@ -25,8 +25,13 @@ public class AgentScopeDocumentTools {
     private final DocumentProperties properties;
 
     public List<AgentScopeTool> tools() {
-        if (!properties.isEnabled()) return List.of();
+        if (!enabled()) return List.of();
         return List.of(listDocuments(), readDocument());
+    }
+
+    /** 文档解析是否启用；能力声明块据此判断 {@code read_document} 是否真的可用。 */
+    public boolean enabled() {
+        return properties.isEnabled();
     }
 
     private AgentScopeTool listDocuments() {

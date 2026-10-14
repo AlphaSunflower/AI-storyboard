@@ -84,8 +84,8 @@
 
 .reference-role-selector__option:hover,
 .reference-role-selector__option.is-hovered {
-  background: var(--color-primary-bg, #1a3a5c);
-  border-color: var(--color-primary, #4a9eff);
+  background: var(--color-primary-bg, #363636);
+  border-color: var(--color-primary, #939393);
 }
 
 .reference-role-selector__option-icon {

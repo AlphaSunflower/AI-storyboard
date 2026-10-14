@@ -5,6 +5,12 @@ import com.moon.moonagent.ai.agent.AgentTraceEvent;
 import com.moon.moonagent.ai.agent.AgentTurnMetrics;
 import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.SuggestedAction;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.ToolCallDeltaEvent;
+import io.agentscope.core.event.ToolCallStartEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultStartEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.metadata.Usage;
@@ -14,6 +20,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -47,6 +54,13 @@ public class AgentTraceAccumulator {
     private volatile List<SuggestedAction> suggestedActions = List.of();
     private volatile Consumer<AgentTraceEvent> eventSink;
     private final StringBuilder thinkingDetails = new StringBuilder();
+    /**
+     * 本轮工具调用草稿：key = toolCallId，与前端 `generating.toolDrafts` 同构。
+     *
+     * <p>用 {@link LinkedHashMap} 保住首次出现顺序——前端 `orderedToolDrafts` 在缺 `seq` 时
+     * 正是回落到插入顺序，因此落库后刷新渲染的顺序与直播一致。
+     */
+    private final Map<String, Map<String, Object>> toolDrafts = new LinkedHashMap<>();
     private volatile OffsetDateTime thinkingStartedAt;
     private volatile OffsetDateTime thinkingEndedAt;
     private final AgentUsageAccumulator usage = new AgentUsageAccumulator();
@@ -163,6 +177,80 @@ public class AgentTraceAccumulator {
         long durationMs = thinkingStartedAt == null
                 ? 0L : Math.max(0L, Duration.between(thinkingStartedAt, endedAt).toMillis());
         return new AgentReasoningSnapshot(summary, details, durationMs, "agentscope");
+    }
+
+    /**
+     * 记录一条 AgentScope 工具事件，累积成本轮的工具调用草稿。
+     *
+     * <p>为什么后端也要累积：`TOOL_*` 事件目前只由前端从原生 `agent_event` 派生，
+     * 后端从不落库 `toolDrafts`（只有 `sandboxAttachments` 会写 metadata），
+     * 于是刷新后工具调用明细必然消失（前端 `ToolResultBlocks` 只有直播态 `generating.toolDrafts` 可读）。
+     * 这里按与前端**完全相同的字段语义**累积，由调用方并进 `AgentTurnResult.metadata()`，
+     * 前端既有的 `metadata.toolDrafts` 回放路径即可零改动生效。
+     *
+     * <p>字段语义对齐前端 `toolStatus()`：TOOL_CALL_START→node_started、
+     * TOOL_RESULT_START→node_running、TOOL_RESULT_END 按 state 判 node_completed/node_failed。
+     */
+    public void recordToolEvent(AgentEvent event) {
+        if (event == null) return;
+        if (event instanceof ToolCallStartEvent value) {
+            update(value.getToolCallId(), value.getToolCallName(), null, null, "node_started");
+        } else if (event instanceof ToolCallDeltaEvent value) {
+            update(value.getToolCallId(), value.getToolCallName(), value.getDelta(), null, "node_running");
+        } else if (event instanceof ToolResultStartEvent value) {
+            update(value.getToolCallId(), value.getToolCallName(), null, null, "node_running");
+        } else if (event instanceof ToolResultTextDeltaEvent value) {
+            update(value.getToolCallId(), value.getToolCallName(), null, value.getDelta(), "node_running");
+        } else if (event instanceof ToolResultEndEvent value) {
+            String state = value.getState() == null ? "" : value.getState().name().toUpperCase(java.util.Locale.ROOT);
+            String status = failedToolState(state) ? "node_failed" : "node_completed";
+            update(value.getToolCallId(), value.getToolCallName(), null, null, status);
+        }
+    }
+
+    /**
+     * 终态是否算失败——与前端 `toolStatus()` 同一口径。
+     *
+     * <p>{@code ToolResultState} 的真实取值是 {@code SUCCESS / ERROR / INTERRUPTED / DENIED / RUNNING}，
+     * 只判 {@code FAIL}/{@code DENIED} 会把 {@code ERROR} 记成 {@code node_completed}（失败显示成"已完成"）。
+     */
+    private static boolean failedToolState(String state) {
+        return state.contains("FAIL") || state.contains("ERROR")
+                || state.contains("DENIED") || state.contains("INTERRUPT");
+    }
+
+    /** 本轮工具草稿快照（无工具调用时返回空 Map，调用方据此决定是否写 metadata）。 */
+    public Map<String, Object> toolDrafts() {
+        synchronized (toolDrafts) {
+            return toolDrafts.isEmpty() ? Map.of() : new LinkedHashMap<>(toolDrafts);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void update(String toolCallId, String toolName, String inputDelta,
+                        String textDelta, String status) {
+        if (toolCallId == null || toolCallId.isBlank()) return;
+        synchronized (toolDrafts) {
+            Map<String, Object> draft = (Map<String, Object>) toolDrafts.get(toolCallId);
+            if (draft == null) {
+                draft = new LinkedHashMap<>();
+                draft.put("name", toolName == null ? "" : toolName);
+                draft.put("text", "");
+                draft.put("input", "");
+                draft.put("status", status);
+                // 前端用 startedAt 只做 UI 排序，这里给同一语义的毫秒时间戳
+                draft.put("startedAt", System.currentTimeMillis());
+                toolDrafts.put(toolCallId, draft);
+            }
+            if (toolName != null && !toolName.isBlank()) draft.put("name", toolName);
+            if (inputDelta != null && !inputDelta.isEmpty()) {
+                draft.put("input", String.valueOf(draft.get("input")) + inputDelta);
+            }
+            if (textDelta != null && !textDelta.isEmpty()) {
+                draft.put("text", String.valueOf(draft.get("text")) + textDelta);
+            }
+            draft.put("status", status);
+        }
     }
 
     public void setTurnMetadata(Map<String, Object> turnMetadata) {

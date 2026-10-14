@@ -59,15 +59,19 @@ test('dismisses canvas overlays outside and toggles the execution panel', async 
   await page.mouse.click(blankCanvasPoint.x, blankCanvasPoint.y);
   await expect(page.getByRole('dialog', { name: '切换画布' })).toHaveCount(0);
 
-  await page.getByRole('button', { name: '帮助' }).click();
-  await expect(page.getByText('双击空白处创建文字节点；拖入图片可直接导入')).toHaveCount(1);
+  // 生成记录抽屉：点空白处收起
+  await page.getByRole('button', { name: '生成记录' }).click();
+  await expect(page.getByRole('heading', { name: '生成记录' })).toBeVisible();
+  await page.mouse.click(blankCanvasPoint.x, blankCanvasPoint.y);
+  await expect(page.locator('.generation-records-panel')).toHaveCount(0);
 
-  const agentButton = page.getByRole('button', { name: '执行服务', exact: true });
-  await expect(agentButton).toHaveAttribute('aria-pressed', 'true');
-  await agentButton.click();
-  await expect(agentButton).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.getByRole('button', { name: '打开执行服务' })).toBeVisible();
-  await agentButton.click();
-  await expect(agentButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: '打开执行服务' })).toHaveCount(0);
+  // 再打开后点右上角「任务队列」：两个入口并排，抽屉必须让位给队列
+  await page.getByRole('button', { name: '生成记录' }).click();
+  await expect(page.locator('.generation-records-panel')).toBeVisible();
+  await page.getByRole('button', { name: '任务队列' }).click();
+  await expect(page.locator('.generation-records-panel')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: '任务队列' })).toBeVisible();
+
+  // 「帮助」按钮与左侧工具岛的「执行服务」按钮已下架，原先针对这两个按钮的断言随之移除；
+  // 保留下来的右下角入口是「打开执行服务」，其存在性由 canvas-controls.spec.ts 覆盖。
 });

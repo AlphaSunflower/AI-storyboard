@@ -9,11 +9,12 @@ import java.util.Locale;
 
 @Component
 @RequiredArgsConstructor
-public class CreativeModelRouter {
+public class CreativeModelRouter implements CreativeModelRoles {
 
     private final AgentScopeProperties properties;
     private final GatewayModelService gatewayModelService;
 
+    @Override
     public String resolve(String role) {
         String normalized = role == null ? "" : role.trim().toLowerCase(Locale.ROOT);
         AgentScopeProperties.Models models = properties.getModels();
@@ -32,6 +33,7 @@ public class CreativeModelRouter {
         };
     }
 
+    @Override
     public String resolveOrNull(String role) {
         String value = resolve(role);
         return value == null || value.isBlank() ? null : value;

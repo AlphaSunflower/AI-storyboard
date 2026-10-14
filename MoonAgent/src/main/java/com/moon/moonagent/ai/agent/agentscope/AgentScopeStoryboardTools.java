@@ -1148,12 +1148,28 @@ public class AgentScopeStoryboardTools {
         }
     }
 
+    /**
+     * 工具成功返回 Map 时直接摊平返回（保留内层 {@code ok}，内层 {@code ok=false} 时外层同样为 false），
+     * 只有非 Map 返回值才包一层 {@code result}；这样 {@code ok:false} 不会被
+     * {@code {ok:true, result:{ok:false}}} 伪装成成功。
+     */
     private static Map<String, Object> guard(java.util.concurrent.Callable<Object> callable) {
         try {
-            return Map.of("ok", true, "result", callable.call());
+            Object value = callable.call();
+            Map<String, Object> out = new LinkedHashMap<>();
+            if (value instanceof Map<?, ?> map) {
+                map.forEach((key, item) -> out.put(String.valueOf(key), item));
+                return out;
+            }
+            out.put("ok", true);
+            out.put("result", value);
+            return out;
         } catch (Exception e) {
-            return Map.of("ok", false, "message",
+            Map<String, Object> failed = new LinkedHashMap<>();
+            failed.put("ok", false);
+            failed.put("message",
                     e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            return failed;
         }
     }
 

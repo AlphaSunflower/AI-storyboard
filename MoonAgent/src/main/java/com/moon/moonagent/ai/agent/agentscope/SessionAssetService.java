@@ -31,6 +31,8 @@ public class SessionAssetService {
         int limit = normalizeLimit(requestedLimit);
         LambdaQueryWrapper<AgentAsset> query = new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getConversationId, conversationId)
+                // 已软删除的素材 MinIO 对象已经没了，不能再让智能体把它当成可用素材引用。
+                .ne(AgentAsset::getStatus, AgentAsset.STATUS_DELETED)
                 .orderByDesc(AgentAsset::getCreatedAt)
                 .last("LIMIT " + Math.max(limit, 12));
         if (type != null && !type.isBlank()) {
@@ -88,6 +90,7 @@ public class SessionAssetService {
         List<AgentAsset> rows = assetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getConversationId, conversationId)
                 .in(AgentAsset::getId, ids)
+                .ne(AgentAsset::getStatus, AgentAsset.STATUS_DELETED)
                 .orderByDesc(AgentAsset::getCreatedAt));
         if (rows == null || rows.isEmpty()) return List.of();
         return rows.stream()
@@ -105,7 +108,8 @@ public class SessionAssetService {
         Set<String> ids = new HashSet<>(assetIds);
         List<AgentAsset> rows = assetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getConversationId, conversationId)
-                .in(AgentAsset::getId, ids));
+                .in(AgentAsset::getId, ids)
+                .ne(AgentAsset::getStatus, AgentAsset.STATUS_DELETED));
         if (rows == null || rows.isEmpty()) return Set.of();
         return rows.stream().map(AgentAsset::getId).collect(java.util.stream.Collectors.toSet());
     }

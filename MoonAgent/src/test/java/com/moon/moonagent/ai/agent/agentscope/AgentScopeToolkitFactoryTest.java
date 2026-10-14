@@ -154,6 +154,8 @@ class AgentScopeToolkitFactoryTest {
         AgentScopeAssetGroupTools assetGroups = mock(AgentScopeAssetGroupTools.class);
         AgentScopeImageTools images = mock(AgentScopeImageTools.class);
         AgentScopeVideoTools videos = mock(AgentScopeVideoTools.class);
+        AgentScopeJourneyTools journeys = mock(AgentScopeJourneyTools.class);
+        when(journeys.tool()).thenReturn(tool(AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY));
         AgentScopeStoryboardTools storyboards = mock(AgentScopeStoryboardTools.class);
         AgentScopeWorkflowTools workflows = mock(AgentScopeWorkflowTools.class);
         AgentScopeVideoMergeTools videoMerge = mock(AgentScopeVideoMergeTools.class);
@@ -183,7 +185,7 @@ class AgentScopeToolkitFactoryTest {
                         ((io.agentscope.core.tool.ToolBase) invocation.getArgument(0)).getName()));
 
         return new AgentScopeToolkitFactory(
-                session, interaction, structured, assetGroups, images, videos,
+                session, interaction, structured, assetGroups, images, videos, journeys,
                 storyboards, workflows, videoMerge, creative, canvasTools, runTools,
                 documentTools, mock(AgentCanvasRunService.class), pipeline, expander);
     }

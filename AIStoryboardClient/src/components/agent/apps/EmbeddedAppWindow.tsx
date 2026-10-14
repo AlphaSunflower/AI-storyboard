@@ -94,6 +94,8 @@ export function EmbeddedAppWindow({
   const [loadedUrls, setLoadedUrls] = useState<Record<string, string>>({});
   const [refreshTokens, setRefreshTokens] = useState<Record<string, number>>({});
   const [closingWindow, setClosingWindow] = useState(false);
+  /** 拖拽拉伸中：iframe（画布 / 编辑器子站）要先让出指针事件，否则光标进子站就收不到 pointermove */
+  const [resizing, setResizing] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const canvasLocked = tabs.some((tab) => tab.key === 'canvas' && tab.canvasMode);
@@ -185,6 +187,7 @@ export function EmbeddedAppWindow({
     let allowSidebarCollapse = !sidebarCollapsed;
     let allowDockedWidth = docked;
     let maxSplitWidth = sidebarCollapsed ? expandedSplitMaxWidth : splitMaxWidth;
+    setResizing(true);
     document.body.style.cursor = 'nesw-resize';
     document.body.style.userSelect = 'none';
 
@@ -212,6 +215,7 @@ export function EmbeddedAppWindow({
     const onUp = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
       resizeTarget.releasePointerCapture?.(pointerId);
+      setResizing(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('pointermove', onMove);
@@ -260,6 +264,7 @@ export function EmbeddedAppWindow({
         'embedded-app-window',
         fullscreen ? 'is-fullscreen' : '',
         closingWindow ? 'is-closing' : '',
+        resizing ? 'is-resizing' : '',
         minimized ? 'is-minimized' : '',
       ].filter(Boolean).join(' ')}
       style={fullscreen ? undefined : { width, height }}

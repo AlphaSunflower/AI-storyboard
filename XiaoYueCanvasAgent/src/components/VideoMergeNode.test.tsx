@@ -15,6 +15,8 @@ import { createVideoAsset } from '../utils/mediaPipeline';
 vi.mock('@xyflow/react', () => ({
   NodeToolbar: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   Position: { Bottom: 'bottom', Left: 'left', Right: 'right', Top: 'top' },
+  useStore: (selector: (state: { nodes: unknown }) => unknown) =>
+    selector({ nodes: { find: () => ({ id: 'node', selected: true }), filter: () => [{}] } }),
 }));
 
 vi.mock('../services/canvasMedia', () => ({

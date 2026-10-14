@@ -130,6 +130,18 @@
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
+            <!--
+              JDK 25 下 Byte Buddy 无法自附加，Mockito inline mock maker 初始化失败会让本模块
+              所有 Mockito 测试报 MockMaker 错误。显式给 fork 的测试 JVM 挂 byte-buddy-agent。
+              与 MoonAgent/pom.xml 保持一致的修复。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-javaagent:${maven.repo.local}/net/bytebuddy/byte-buddy-agent/1.18.11/byte-buddy-agent-1.18.11.jar</argLine>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>

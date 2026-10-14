@@ -11,6 +11,7 @@ final class AgentScopeToolLabels {
             case AgentScopeImageTools.GENERATE_IMAGE -> "生成图片";
             case AgentScopeImageTools.GENERATE_IMAGE_BATCH -> "批量生成图片";
             case AgentScopeVideoTools.GENERATE_VIDEO -> "生成视频";
+            case AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY -> "一键成片（生图 → 视频 / 分镜全流程）";
             case "refineImage" -> "完善图片";
             case AgentScopeInteractionTools.REQUEST_HUMAN_INPUT -> "请求用户补充信息";
             case AgentScopeCanvasTools.PREPARE_CANVAS_SESSION -> "准备并打开画布";

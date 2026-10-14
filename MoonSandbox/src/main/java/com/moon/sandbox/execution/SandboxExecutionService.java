@@ -118,7 +118,8 @@ public class SandboxExecutionService {
                     timedOut,
                     Duration.ofNanos(System.nanoTime() - started).toMillis());
         } catch (IOException error) {
-            throw new SandboxPathException("unable to execute shell command", error);
+            throw new SandboxPathException(
+                    "unable to execute shell command: " + error.getMessage(), error);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new SandboxPathException("shell execution interrupted", error);
@@ -177,7 +178,8 @@ public class SandboxExecutionService {
                     Duration.ofNanos(System.nanoTime() - started).toMillis(),
                     files(conversationId));
         } catch (IOException error) {
-            throw new SandboxPathException("unable to execute python script", error);
+            throw new SandboxPathException(
+                    "unable to execute python script: " + error.getMessage(), error);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new SandboxPathException("python execution interrupted", error);

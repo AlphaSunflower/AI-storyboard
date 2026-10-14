@@ -1,16 +1,19 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
+import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { Pause, Play, Upload, Volume2, VolumeX } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
 import { getAssetMetadata, getAssetVariant } from '../services/projectStorage';
 import { useObjectUrl } from '../hooks/useObjectUrl';
 import { useViewportVisibility } from '../hooks/useViewportVisibility';
+import { usePresence } from '../hooks/usePresence';
 import type { CanvasNode, VideoGenerationParams } from '../types';
 import { getVideoNodeSize } from '../utils/mediaPipeline';
+import { getNodeDefinition } from '../canvas/graphContracts';
 import { createPersistedCanvasAsset } from '../services/canvasMedia';
 import { VideoNodeTools } from './VideoNodeTools';
 import { NodeExternalTitle } from './nodes/NodeExternalTitle';
+import { NodePortHandles } from './nodes/NodePortHandles';
 import { NodeFloatPanel, NodeSurface, NodeSurfaceEmpty } from './nodes/nodePanel';
 
 const defaultParams: VideoGenerationParams = { model: 'Seedance 2.0 Mini', mode: '全能参考', aspectRatio: '16:9', resolution: '1080p', durationSeconds: 12, variations: 1 };
@@ -20,6 +23,8 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
   const updateNodeGeometry = useCanvasStore((state) => state.updateNodeGeometry);
   const asset = useMediaStore((state) => data.assetId ? state.assets[data.assetId] : undefined);
   const metadata = useMediaStore((state) => data.assetId ? state.metadata[data.assetId] : undefined);
+  // 视频工具条挂在选中态上：取消选中时先退场再卸载
+  const videoTools = usePresence(Boolean(selected && asset), { duration: 130 });
   const upsertAsset = useMediaStore((state) => state.upsertAsset);
   const upsertMetadata = useMediaStore((state) => state.upsertMetadata);
   const visibility = useViewportVisibility<HTMLElement>(id, selected);
@@ -85,7 +90,7 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
       {!metadata && <p className="node-panel-status">支持 mp4 / webm / mov，全部在本地处理</p>}
       {selected && asset && <p className="node-panel-status">选中后可用节点上方工具条提取帧、调色、变速</p>}
     </NodeFloatPanel>
-    {selected && asset && (
+    {videoTools.mounted && asset && (
       <VideoNodeTools node={{
         id,
         type: 'video',
@@ -93,9 +98,9 @@ function VideoNodeComponent({ id, data, selected, width, height, positionAbsolut
         width,
         height,
         data,
-      }} />
+      }} present={videoTools.present} />
     )}
-    <Handle className="node-handle" id="origin" type="target" position={Position.Left} /><Handle className="node-handle" id="video" type="source" position={Position.Right} />
+    <NodePortHandles nodeId={id} nodeKind={data.kind} definition={getNodeDefinition(data.kind)} />
     <NodeResizer
       nodeId={id}
       isVisible={selected}

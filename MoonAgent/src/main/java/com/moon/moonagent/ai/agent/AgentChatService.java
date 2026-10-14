@@ -83,8 +83,23 @@ public interface AgentChatService {
      */
     AgentConversation updateApprovalMode(String userId, String conversationId, String approvalMode);
 
-    /** 删除资产（仅限归属本人会话的资产；未归属资产拒绝 40401）。 */
+    /**
+     * 删除整条资产（仅限归属本人会话的资产；未归属资产拒绝 40401）。
+     *
+     * <p>软删除：MinIO 对象进清理队列，数据库行保留并把 status 置为 deleted。
+     * 提示词、参数和结果 URL 因此可以继续在「生成记录」里查阅，只是标记为已删除。
+     */
     void deleteAsset(String userId, String assetId);
+
+    /**
+     * 删除一条资产中的某一张结果（按 {@code resultIndex}，索引口径与前端 {@code assetUrls} 一致）。
+     *
+     * <p>只清理这一张的 MinIO 对象并从结果里摘掉；还有剩图时资产保持原状态，
+     * 摘到一张不剩时才整体转成 deleted。
+     *
+     * @throws BusinessException 40001 索引越界；40401 资产不存在或无权访问
+     */
+    void deleteAssetResult(String userId, String assetId, int resultIndex);
 
     /**
      * 会话资产列表（分页）。

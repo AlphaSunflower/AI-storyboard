@@ -130,6 +130,38 @@ export interface SuggestedAction {
   routingHint: string;
 }
 
+/** 可渲染意图的固定 kind 集合；未知 kind 走通用兜底渲染。 */
+export const RENDER_INTENT_KINDS = [
+  'table', 'list', 'gallery', 'progress', 'diff', 'form', 'preview',
+] as const;
+
+export type RenderIntentKind = (typeof RENDER_INTENT_KINDS)[number];
+
+/** 工具结果 / 结果 metadata 上的渲染意图块：`{kind, id, status, items, version}`。 */
+export interface ToolRenderIntent {
+  /** 已知 kind 收敛为字面量；服务端新增的未知 kind 原样保留，交给兜底渲染。 */
+  kind: RenderIntentKind | (string & {});
+  id?: string;
+  status?: string;
+  items?: unknown[];
+  version?: number;
+  /** 未知 kind / 额外字段原样保留，便于兜底渲染展示。 */
+  [key: string]: unknown;
+}
+
+/** 单个工具调用的流式草稿（generating.toolDrafts / metadata.toolDrafts）。 */
+export interface AgentToolDraft {
+  name: string;
+  text: string;
+  input: string;
+  status: string;
+  /** 工具结果携带的渲染意图（服务端开始下发后才有）。 */
+  render?: ToolRenderIntent;
+  /** 工具调用开始的时刻（毫秒），仅用于 UI 排序，不参与协议。 */
+  startedAt?: number;
+  seq?: number;
+}
+
 /** HITL 卡片信息（metadata.hitl） */
 export interface AgentMessageHitl {
   formContent: string;
@@ -146,6 +178,12 @@ export interface AgentMessageHitl {
   assetIds?: string[];
   selectedAssetIds?: string[];
   messageId?: string;
+  /**
+   * 卡片不可交互（只读回显）。
+   * 典型场景：`formToken` 为空/空白的历史卡片 —— 提交必然失败，
+   * 且空 token 会让「已提交回执」幂等判定失效，重放时会再次出现可点击卡片。
+   */
+  inactive?: boolean;
 }
 
 /** 图生视频方案卡片（metadata.videoPlan；刷新后恢复 VideoPlanCard） */
@@ -163,6 +201,18 @@ export interface AgentMessageVideoPlan {
 
 /** 消息元数据 */
 export type AgentCanvasRunStatus = 'queued' | 'planning' | 'running' | 'writing' | 'completed' | 'failed';
+
+/** 生成结果确认信息（看图确认卡片：继续完善 / 满意完成） */
+export interface ConfirmResultInfo {
+  kind: 'script' | 'image' | 'video';
+  url: string;
+  assetId?: string;
+  /** 多图结果（n>1 时后端下发全部 URL；未下发则回退单 url） */
+  urls?: string[];
+  assetIds?: string[];
+  sceneCount?: number;
+  actions: { id: string; title: string }[];
+}
 
 export interface AgentMessageMetadata {
   kind?: 'hitl' | 'assistant-reply' | 'video-plan' | 'storyboard-review' | 'canvas-run';
@@ -196,6 +246,17 @@ export interface AgentMessageMetadata {
   agentTrace?: AgentTraceEvent[];
   suggestedActions?: SuggestedAction[];
   sandboxAttachments?: AgentAttachment[];
+  /**
+   * 结果确认动作（继续完善 / 满意完成）。
+   *
+   * 挂在**产生结果的那条助手消息**上，不再是全局单槽——否则同一会话里两个结果
+   * 会互相顶掉，而卡片一旦被收起，只存在于卡片里的图片就再也回不来。
+   */
+  confirmResult?: ConfirmResultInfo;
+  /** 工具调用草稿快照：turn_completed.payload.metadata 回放后仍能渲染工具输出。 */
+  toolDrafts?: Record<string, AgentToolDraft>;
+  /** 本轮工具结果的渲染意图，按 id 去重后的稳定顺序。 */
+  renders?: ToolRenderIntent[];
   orchestrationMode?: 'LEGACY' | 'UNIFIED_LOOP' | 'AGENTSCOPE';
   engineVersion?: string;
   checkpointOwner?: string;
@@ -329,6 +390,11 @@ export interface AgentTaskView {
   resultSummary: string;
   error: string;
   parentTaskId: string;
+  /**
+   * 工具卡归属：复合旅程父任务为自身 `toolCallId`，复合旅程子任务为父任务的
+   * `toolCallId`。缺省/空串表示不属于任何工具卡（非旅程任务），前端按既有独立卡片渲染。
+   */
+  parentToolCallId?: string;
   anchorMessageId: string;
   version: number;
   createdAt: string;
@@ -892,8 +958,14 @@ export const agentApi = {
       { params: { afterSeq } },
     ),
 
-  deleteAsset: (assetId: string) =>
-    client.delete(`/agent/assets/${assetId}`),
+  /**
+   * 删除资产。不带 resultIndex 删整条，带上则只删该条结果里的第 N 张；
+   * 两种都是软删除：后端清 MinIO 对象并置 status=deleted，行保留给生成记录查。
+   */
+  deleteAsset: (assetId: string, resultIndex?: number) =>
+    client.delete(`/agent/assets/${assetId}`, {
+      params: resultIndex === undefined ? {} : { resultIndex },
+    }),
 
   // ── 生成记录 ──────────────────────────────
   listGenerationRecords: (params: {

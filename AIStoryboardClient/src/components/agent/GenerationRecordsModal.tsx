@@ -42,6 +42,8 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string }> 
   completed: { label: '成功', color: '#16a34a', bg: 'rgba(22,163,74,0.1)' },
   succeeded: { label: '成功', color: '#16a34a', bg: 'rgba(22,163,74,0.1)' },
   failed: { label: '失败', color: '#d92d20', bg: 'rgba(217,45,32,0.1)' },
+  // 用户在会话资产里删掉了这条素材：MinIO 对象已清理，行保留下来给生成记录留痕。
+  deleted: { label: '已删除', color: '#6b7280', bg: 'rgba(107,114,128,0.12)' },
 };
 
 function genTypeLabel(t?: string | null): string {
@@ -537,6 +539,7 @@ function RecordCard({
   const kind = resultKind(record);
   const primary = results[0];
   const firstRef = refs[0]?.url;
+  const isDeleted = record.status === 'deleted';
   const preview = (url: string, type: 'image' | 'video') => (e: React.MouseEvent) => {
     e.stopPropagation();
     onPreviewMedia(url, type);
@@ -557,7 +560,13 @@ function RecordCard({
     >
       {/* 缩略图区 */}
       <div style={{ flexShrink: 0, width: 96, height: 72, display: 'flex', alignItems: 'center', gap: 4 }}>
-        {kind === 'file' ? (
+        {isDeleted ? (
+          // 软删除保留了 resultUrls（提示词/参数要留痕），但 MinIO 对象已经删了，
+          // 直接渲染就是碎图 —— 所以这里必须按状态显式出占位，不能靠 primary 是否为空判断。
+          <div style={{ width: 96, height: 72 }}>
+            <div style={thumbPlaceholder}>已删除</div>
+          </div>
+        ) : kind === 'file' ? (
           <div style={{ width: 96, height: 72 }}>
             {primary
               ? <FileThumb name={resultFileName(record, primary)} />
@@ -731,13 +740,19 @@ function GenContent({
   onPreviewMedia: (url: string, type: 'image' | 'video') => void;
   onPreviewFile: (name: string, url: string, mimeType?: string | null) => void;
 }) {
+  const isDeleted = record.status === 'deleted';
   return (
     <div style={{
       border: '1px solid var(--color-hairline)', borderRadius: 12, padding: 12,
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-muted)' }}>生成状况</span>
-      {kind === 'file' ? (
+      {isDeleted ? (
+        // 结果文件已从存储中删除，缩略图只会是碎图；这里明说发生了什么，别让用户以为是加载失败。
+        <span style={{ fontSize: 13, color: 'var(--color-muted)' }}>
+          该素材已删除，生成结果文件已从存储中移除；提示词与参数仍保留在此处。
+        </span>
+      ) : kind === 'file' ? (
         <FileStrip
           title={`生成结果（${results.length}）`}
           mimeType={record.mimeType}

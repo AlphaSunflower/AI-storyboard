@@ -620,9 +620,9 @@ test('matches the canvas, image, text, and edge context menu behavior', async ({
 test('keeps video controls and screen chrome inside responsive viewports', async ({ page }) => {
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
   await page.getByRole('button', { name: '新建第一个画布' }).click();
-  await page.getByRole('button', { name: '添加节点' }).click();
-  await page.locator('.node-preset')
-    .filter({ has: page.getByText('视频', { exact: true }) }).first().click();
+  // 节点库抽屉已下架，视频节点直接从左侧工具栏落下来。
+  // name 默认是「不区分大小写的子串匹配」，不加 exact 会同时命中「视频生成」「视频合并」。
+  await page.getByRole('button', { name: '视频', exact: true }).click();
   await expect(page.locator('.video-editor-panel')).toHaveCount(0);
   await expect(page.locator('.node-upload')).toBeVisible();
 

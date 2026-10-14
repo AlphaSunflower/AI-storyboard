@@ -8,7 +8,6 @@ import { AgentTaskDrawer } from '../components/agent/AgentTaskDrawer';
 
 
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
-import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { HitlPromptCard } from '../components/agent/HitlPromptCard';
 import {
   GENERATION_CENTER_WIDTH,
@@ -53,6 +52,10 @@ import { X, FolderKanban, PanelLeftClose, ChevronDown, ChevronsDown, Info, User,
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePresence } from '../hooks/usePresence';
+import {
+  resolveSidebarLeftEdge,
+  useAgentAssetDragOutsideSidebar,
+} from '../hooks/useAgentAssetDragOutsideSidebar';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
@@ -138,7 +141,7 @@ export function ChatPage() {
   const newConversation = useAgentStore((s) => s.newConversation);
   const {
     messages, messageHasMore, loadOlderMessages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
-    confirmResult, conversations, activeConversationId,
+    conversations, activeConversationId,
     renameConversation, editAndResend,
   } = useAgentStore();
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
@@ -622,6 +625,18 @@ export function ChatPage() {
   const sideChatCommandEnabled = !showMobile && !embed && !sideChatMode
     && canvasPhase === 'natural';
 
+  // 从生成中心往聊天区拖素材时，指针一旦越过侧边栏左边缘就把收缩的输入框还原，
+  // 否则 380px 的侧边栏旁边只剩一条细输入框，拖过来的图没有落点。
+  // 窄屏侧边栏是全宽覆盖抽屉，不存在「绕过去」这条路径，直接关掉。
+  const dragOutsideSidebar = useAgentAssetDragOutsideSidebar(
+    generationCenterOpen && !showMobile,
+    resolveSidebarLeftEdge(
+      typeof window === 'undefined' ? 0 : window.innerWidth,
+      GENERATION_CENTER_WIDTH,
+      appWindowReserve,
+    ),
+  );
+
   /** 行边栏数据：每条用户消息一项，第二行取该轮回复最后一段 */
   const railItems = useMemo(() => buildChatRailItems(messages), [messages]);
   // 行边栏自己占掉 44px，判定必须换算成"不含行边栏"的宽度：
@@ -819,9 +834,12 @@ export function ChatPage() {
   const dockPadRight = !embed ? desktopRightReserve + 16 : 16;
   /** 输入卡宽度：收缩态横向收窄，「回到底部」跟着卡片右边缘走 */
   const composerCardMax = composerCollapsed ? DS.maxContentCompact : DS.maxContent;
-  /** 消息列底部留白：输入卡 + 底部状态栏是覆盖层，留够高度让最后一条能完整滚出来；小窗收紧一些 */
-  const stageBottomPad = embed ? 150 : 176;
-  const mobileStageBottomPad = 164;
+  /**
+   * 消息列底部留白：输入卡 + 底部状态栏是覆盖层，既要留够高度让最后一条能完整滚出来，
+   * 又要在「刚好够用」之上再留一档呼吸空间，否则最后一条会贴着输入卡顶边。小窗收紧一些。
+   */
+  const stageBottomPad = embed ? 190 : 216;
+  const mobileStageBottomPad = 200;
   const scrollToBottomRight = (padLeft: number, padRight: number, cardMax: number = DS.maxContent) =>
     `calc(${padRight}px + max(0px, (100% - ${padLeft}px - ${padRight}px - ${cardMax}px) / 2))`;
 
@@ -1067,7 +1085,6 @@ export function ChatPage() {
                 {waitingVideoPlan && (
                   <VideoPlanCard info={waitingVideoPlan} archived={activeConversation?.status === 'archived'} />
                 )}
-                {confirmResult && <ConfirmResultCard />}
                 {streamError && (
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1667,7 +1684,6 @@ export function ChatPage() {
                 {waitingVideoPlan && (
                   <VideoPlanCard info={waitingVideoPlan} archived={activeConversation?.status === 'archived'} />
                 )}
-                {confirmResult && <ConfirmResultCard />}
                 {streamError && (
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1742,6 +1758,7 @@ export function ChatPage() {
                   enableSideChat={sideChatCommandEnabled}
                   canvasModeCommand={canvasModeCommand}
                   compact={compactComposer}
+                  forceExpanded={dragOutsideSidebar}
                   onCollapsedChange={setComposerCollapsed}
                   docked={dockMode === 'docked'}
                   onViewConversation={dockMode === 'docked'

@@ -515,10 +515,20 @@ public class AgentConversationController {
                 auth.getName(), id, request.approvalMode())));
     }
 
-    /** 删除资产（仅限归属本人会话；未归属资产拒绝） */
+    /**
+     * 删除资产（仅限归属本人会话；未归属资产拒绝）。
+     *
+     * <p>不带 {@code resultIndex} 时删除整条；带上时只删该条结果里的第 N 张，
+     * 索引口径与前端会话资产网格一致（见 AgentChatService#deleteAssetResult）。
+     */
     @DeleteMapping("/assets/{id}")
-    public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id) {
-        chatService.deleteAsset(auth.getName(), id);
+    public ApiResponse<Void> deleteAsset(Authentication auth, @PathVariable String id,
+                                         @RequestParam(required = false) Integer resultIndex) {
+        if (resultIndex == null) {
+            chatService.deleteAsset(auth.getName(), id);
+        } else {
+            chatService.deleteAssetResult(auth.getName(), id, resultIndex);
+        }
         return ApiResponse.ok("删除成功", null);
     }
 

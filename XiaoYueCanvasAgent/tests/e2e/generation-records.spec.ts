@@ -131,6 +131,15 @@ test('keeps active work in the queue and exposes provenance in generation record
 
   await page.getByRole('button', { name: '生成记录' }).click();
   await expect(page.getByRole('heading', { name: '生成记录' })).toBeVisible();
+  // 入口在右上角（与任务队列并排）：抽屉必须挂在入口正下方、右边缘对齐，不能跑到画布左边
+  const anchorBox = await page.locator('.canvas-quick-actions').boundingBox();
+  const desktopPanelBox = await page.locator('.generation-records-panel').boundingBox();
+  expect(anchorBox).not.toBeNull();
+  expect(desktopPanelBox).not.toBeNull();
+  expect(Math.abs((desktopPanelBox!.x + desktopPanelBox!.width) - (anchorBox!.x + anchorBox!.width)))
+    .toBeLessThanOrEqual(8);
+  expect(desktopPanelBox!.y).toBeGreaterThanOrEqual(anchorBox!.y + anchorBox!.height);
+  expect(desktopPanelBox!.x).toBeGreaterThan(anchorBox!.x - desktopPanelBox!.width);
   await page.getByRole('button', { name: /生成图片/ }).click();
   await expect(page.getByText('生成链路')).toBeVisible();
   await expect(page.getByText('来源素材 1')).toBeVisible();

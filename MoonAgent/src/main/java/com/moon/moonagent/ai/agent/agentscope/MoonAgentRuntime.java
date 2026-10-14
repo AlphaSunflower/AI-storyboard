@@ -153,6 +153,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final ConstraintExtractionService constraintExtraction;
     private final AgentDocumentService documentService;
     private final CreativeModelRouter modelRouter;
+    private final TurnCapabilityReporter turnCapabilityReporter;
     private final AgentConcurrencyGuard concurrencyGuard;
 
     @Autowired(required = false)
@@ -209,7 +210,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     new ArrayList<>(List.of(
                             new TurnContextMiddleware(
                                     workflowService, creativeContext, constraintExtraction,
-                                    documentService),
+                                    documentService, turnCapabilityReporter),
                             toolCallContentMiddleware != null
                                     ? toolCallContentMiddleware
                                     : new ToolCallContentMiddleware(),

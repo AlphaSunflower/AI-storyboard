@@ -90,6 +90,21 @@ public final class AgentTurnEventPublisher implements Consumer<AgentEvent>, Auto
         write(List.of(new AgentTurnEventStore.EventDraft(type, payload)));
     }
 
+    /**
+     * 发布一个已经构造好的 turn 事件（生命周期与结构事件，例如 turn_started、turn_paused、
+     * turn_completed、turn_failed、canvas_*）。
+     *
+     * <p>这是 turn 事件的唯一写入 + 推送入口：先 flush 尚未落库的 delta 批次，再在同一序号序列里
+     * 立即持久化并交给 emitter，因此调用方不得再自行调用 {@code AgentTurnEventStore.append(...)}
+     * 或自行发送 SSE 帧（否则会重复推送并绕开批次顺序）。</p>
+     *
+     * <p>序号仍由 {@link AgentTurnEventStore} 统一分配；持久化失败会打开失败闩锁，后续写入静默跳过，
+     * 由 {@link #close()} 显式抛出，绝不静默跳号继续。</p>
+     */
+    public synchronized void publish(String type, Object payload) {
+        publishRaw(type, payload);
+    }
+
     private static boolean isCoalescible(AgentEvent event) {
         return event instanceof TextBlockDeltaEvent
                 || event instanceof ThinkingBlockDeltaEvent

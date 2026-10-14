@@ -209,15 +209,34 @@ export const canConnectToPort = (targetKind: MediaKind, targetHandle: string, so
     && targetPort.acceptsKinds.includes(sourceKind as never)));
 };
 
+/**
+ * 单侧只保留一个可见连接点后，拖拽/菜单给到的端口未必是对侧真正能接的那个
+ * （例如「视频生成」左侧可见点挂在 prompt 上，但拖过来的是图片节点）。
+ * 给定端口兼容就用它，否则按媒体在该侧找第一个可用端口；都找不到才返回 undefined。
+ */
+const resolveOutputPort = (sourceKind: MediaKind, targetKind: MediaKind, preferred?: string): NodePort | undefined => {
+  const outputs = getNodeDefinition(sourceKind)?.outputs ?? [];
+  const named = preferred ? outputs.find((port) => port.id === preferred) : undefined;
+  if (named && canConnectFromPort(sourceKind, named.id, targetKind)) return named;
+  return outputs.find((port) => canConnectFromPort(sourceKind, port.id, targetKind));
+};
+
+const resolveInputPort = (sourceKind: MediaKind, targetKind: MediaKind, preferred?: string): NodePort | undefined => {
+  const inputs = getNodeDefinition(targetKind)?.inputs ?? [];
+  const named = preferred ? inputs.find((port) => port.id === preferred) : undefined;
+  if (named && canConnectToPort(targetKind, named.id, sourceKind)) return named;
+  return inputs.find((port) => canConnectToPort(targetKind, port.id, sourceKind));
+};
+
 const normalizeHandle = (
   handle: string | null | undefined,
   side: 'source' | 'target',
   sourceKind: MediaKind,
   targetKind: MediaKind,
 ) => {
-  if (handle && handle !== 'right' && handle !== 'left') return handle;
-  if (side === 'source') return getNodeDefinition(sourceKind)?.outputs[0]?.id;
-  return compatibleTargetPort(sourceKind, targetKind)?.id;
+  const preferred = handle && handle !== 'right' && handle !== 'left' ? handle : undefined;
+  if (side === 'source') return resolveOutputPort(sourceKind, targetKind, preferred)?.id;
+  return resolveInputPort(sourceKind, targetKind, preferred)?.id;
 };
 
 const nextPortOrder = (edges: CanvasEdge[], targetId: string, targetHandle: string): number => {
@@ -625,9 +644,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     createConnectedNode: (sourceId, kind, position, sourceHandle, overrides) => {
       const source = get().nodes.find((n) => n.id === sourceId);
       if (!source) return null;
-      const sourcePort = sourceHandle
-        ? getNodeDefinition(source.data.kind)?.outputs.find((port) => port.id === sourceHandle)
-        : getNodeDefinition(source.data.kind)?.outputs[0];
+      const sourcePort = resolveOutputPort(source.data.kind, kind, sourceHandle);
       const targetPort = sourcePort
         ? getNodeDefinition(kind)?.inputs.find((port) =>
           port.media === sourcePort.media && port.acceptsKinds.includes(source.data.kind as never))
@@ -655,9 +672,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     createNodeBefore: (targetId, kind, position, targetHandle) => {
       const target = get().nodes.find((n) => n.id === targetId);
       if (!target) return null;
-      const targetPort = targetHandle
-        ? getNodeDefinition(target.data.kind)?.inputs.find((port) => port.id === targetHandle)
-        : compatibleTargetPort(kind, target.data.kind);
+      const targetPort = resolveInputPort(kind, target.data.kind, targetHandle);
       const sourcePort = targetPort
         ? getNodeDefinition(kind)?.outputs.find((port) =>
           port.media === targetPort.media && targetPort.acceptsKinds.includes(kind as never))
@@ -757,7 +772,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           label: request.label,
           prompt: '',
           status: 'success' as const,
-          accent: request.kind === 'video' ? '#8f9cff' : '#ff775f',
+          accent: request.kind === 'video' ? '#a0a0a0' : '#929292',
           assetId: request.assetId,
           mediaLoadState: 'ready' as const,
           derivedFrom: producer?.id,

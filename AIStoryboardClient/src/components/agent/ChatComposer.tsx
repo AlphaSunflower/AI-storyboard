@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAgentStore } from '../../stores/agentStore';
 import { notify } from '../../stores/toastStore';
@@ -18,7 +18,7 @@ import {
 import { FileText, Paperclip } from 'lucide-react';
 import {
   PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X,
-  Minimize2, Info, PanelRightOpen, Frame, MessagesSquare,
+  Minimize2, Info, PanelRightOpen, Frame, MessagesSquare, ArrowUp,
 } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType } from '../../api/assets';
@@ -34,6 +34,7 @@ import { filterCanvasReferenceUrls } from '../../lib/canvasEditMode';
 import { usePresence } from '../../hooks/usePresence';
 import { useAutoGrowTextarea } from '../../hooks/useAutoGrowTextarea';
 import { isComposerCollapsed } from '../../lib/chatScrollState';
+import { AGENT_ASSET_DRAG_MIME, parseAgentAssetDragPayload } from '../../lib/agentAssetDrag';
 import './ChatComposer.css';
 import { ApprovalModeSelector } from './ApprovalModeSelector';
 import { ChatGenerationPreferences } from './ChatGenerationPreferences';
@@ -42,8 +43,9 @@ import { SideChatContextChip } from './SideChatContextChip';
 import { ChatStatusBar } from './ChatStatusBar';
 import { ChatSlashMenu, type SlashCommandItem } from './ChatSlashMenu';
 import { ConversationStatusCard } from './ConversationStatusCard';
+import { summarizeConversationStatus } from './contextStatus';
 import { agentChatTokens, type AgentChatTokens } from './agentChatTokens';
-import { DEFAULT_CONTEXT_WINDOW_TOKENS, contextWindowTokensFor } from './contextWindow';
+import { formatApproxTokenCount } from './contextWindow';
 import {
   PROJECT_LIBRARY_DRAG_MIME,
   parseProjectLibraryDragPayload,
@@ -57,6 +59,15 @@ const ASSET_TYPE_LABEL: Record<AssetType, string> = { character: '人物', prop:
 export const DS: AgentChatTokens = agentChatTokens;
 
 const REFERENCE_PREVIEW_LIMIT = 5;
+
+/**
+ * 底部行（方案批准 / 生成偏好 / 上传 … 麦克风 / 发送）的窄栏阈值。
+ * 低于它时：「发送」「停止生成」收成图标按钮、生成偏好文字缩成「自定」，
+ * 保证每一行的文字都不会被挤成两行（画布 /canvas 的「执行服务」小窗就卡在这个宽度）。
+ */
+const COMPOSER_NARROW_ROW_MAX_WIDTH = 460;
+/** 极窄栏阈值：图标 + 短标签也排不下时，生成偏好只留图标 */
+const COMPOSER_TINY_ROW_MAX_WIDTH = 300;
 
 /**
  * DeepSeek 风格输入卡（780px 悬浮胶囊）：/chat 页 hero 居中与底部输入共用。
@@ -78,11 +89,14 @@ export function ChatComposer({
   onCollapsedChange,
   docked = false,
   onViewConversation,
+  forceExpanded = false,
 }: {
   enableSideChat?: boolean;
   canvasModeCommand?: CanvasModeCommand;
   /** 消息区离开底部时的收缩态：只留一行输入框 + 发送按钮，聚焦输入框立即还原 */
   compact?: boolean;
+  /** 外部强制展开：从生成中心拖素材过来时，收缩的输入框要还原成完整态才放得下 */
+  forceExpanded?: boolean;
   /** 收缩态变化回调：供页面把「回到底部」等外部元素对齐到输入卡当前右边缘 */
   onCollapsedChange?: (collapsed: boolean) => void;
   /** 智能体被挤成右下角浮窗输入框：收起计数器，并把「查看当前对话」挂进工具栏 */
@@ -134,7 +148,7 @@ export function ChatComposer({
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const [dropActive, setDropActive] = useState(false);
-  const [dragKind, setDragKind] = useState<'file' | 'scene' | 'library' | null>(null);
+  const [dragKind, setDragKind] = useState<'file' | 'scene' | 'library' | 'asset' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -147,32 +161,11 @@ export function ChatComposer({
   const legacyOrchestration = activeConversation?.orchestrationMode === 'LEGACY';
   const approvalMode = activeConversation?.approvalMode ?? pendingApprovalMode ?? DEFAULT_AGENT_APPROVAL_MODE;
   const readOnly = archived || legacyOrchestration;
-  // 上下文占用：优先后端权威值（末次模型调用 input + 模型窗口）；
-  // 后端未升级（缺 contextTokens）时回退到旧的 inputTokens 估算。
   const messages = useAgentStore((s) => s.messages);
   const activeUsageDraft = useAgentStore((s) => s.generating[activeConversationId ?? '']?.usageDraft);
   const activeTurnContextWindow = useAgentStore(
     (s) => s.generating[activeConversationId ?? '']?.contextWindowTokens,
   );
-  const contextBaseline = useMemo(
-    () => [...messages].reverse().find((message) => message.metadata?.metrics)?.metadata?.metrics,
-    [messages],
-  );
-  const contextUsageTokens = useMemo(() => {
-    const live = activeUsageDraft?.contextTokens ?? 0;
-    const base = contextBaseline?.contextTokens ?? 0;
-    if (live || base) return Math.max(live, base);
-    // 兼容旧后端：无 contextTokens 时退回累加口径
-    return (contextBaseline?.inputTokens ?? 0) + (activeUsageDraft?.inputTokens ?? 0);
-  }, [activeUsageDraft, contextBaseline]);
-  const contextLimitTokens = useMemo(() => {
-    const window = activeUsageDraft?.contextWindowTokens
-      || activeTurnContextWindow
-      || contextBaseline?.contextWindowTokens;
-    return window || contextWindowTokensFor() || DEFAULT_CONTEXT_WINDOW_TOKENS;
-  }, [activeTurnContextWindow, activeUsageDraft, contextBaseline]);
-  // 尚无任何真实上下文数据（新会话、未发生模型调用）时不显示圆圈，避免误显静态默认窗口
-  const hasContextData = !!activeUsageDraft || !!contextBaseline;
   /** 只读原因不同提示分开：旧编排会话并未归档，不能一律说「已归档」 */
   const readOnlyHint = archived
     ? '该会话已归档，仅可查看历史记录，请新建会话后继续。'
@@ -184,6 +177,25 @@ export function ChatComposer({
     async () => undefined,
   );
   useAutoGrowTextarea(inputRef, text);
+
+  // 输入卡实测宽度：决定底部行走常规文字按钮，还是窄栏的图标按钮 + 短标签。
+  // 测不到宽度（首帧、jsdom）时按 0 处理即常规渲染，不会先闪一版图标按钮。
+  const [cardWidth, setCardWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return undefined;
+    const measure = () => setCardWidth(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const narrowRow = cardWidth > 0 && cardWidth < COMPOSER_NARROW_ROW_MAX_WIDTH;
+  const tinyRow = cardWidth > 0 && cardWidth < COMPOSER_TINY_ROW_MAX_WIDTH;
 
   // partial（预览全文）→ 显示「已确认 + 新片段」临时预览（新片段会随识别修正变化）
   const handleSttPartial = useCallback((t: string) => {
@@ -375,6 +387,32 @@ export function ChatComposer({
     }
   };
 
+  /**
+   * 会话级用量聚合。与底部状态栏（ChatStatusBar）共用同一份口径，
+   * 不再各自按消息求和 —— 否则「轮数」这类定义会两边漂移。
+   */
+  const conversationStatus = useMemo(
+    () => summarizeConversationStatus(messages, {
+      metrics: activeUsageDraft,
+      contextWindowTokens: activeTurnContextWindow,
+    }),
+    [messages, activeUsageDraft, activeTurnContextWindow],
+  );
+
+  /** 「/ 状态」这一项的行内摘要：不点开也知道这个会话跑了多少、花了多少缓存。 */
+  const statusSlashDescription = useMemo(() => {
+    if (!conversationStatus.hasData) return '显示会话 ID、背景信息与额度';
+    const percent = conversationStatus.contextWindowTokens > 0
+      ? `${Math.round((conversationStatus.contextTokens / conversationStatus.contextWindowTokens) * 100)}%`
+      : formatApproxTokenCount(conversationStatus.contextTokens);
+    return [
+      `上下文 ${percent}`,
+      `缓存命中 ${Math.round(conversationStatus.cacheHitRatio * 100)}%`,
+      `运行 ${conversationStatus.rounds} 轮 ${conversationStatus.steps} 步`,
+      `输出 ${Math.round(conversationStatus.tokensPerSecond)} tok/s`,
+    ].join(' · ');
+  }, [conversationStatus]);
+
   const slashItems: SlashCommandItem[] = [
     {
       id: 'compress',
@@ -389,7 +427,7 @@ export function ChatComposer({
       id: 'status',
       icon: <Info size={16} strokeWidth={2} />,
       title: '状态',
-      description: '显示会话 ID、背景信息与额度',
+      description: statusSlashDescription,
       run: () => { setText(''); setStatusOpen(true); },
     },
     {
@@ -501,23 +539,28 @@ export function ChatComposer({
     closeUploadDrafts();
   };
 
+  /** 生成中心会话资产拖进来的素材，与文件/分镜/项目库三者并列。 */
+  const hasAssetDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(AGENT_ASSET_DRAG_MIME);
+
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     if (readOnly) return;
     const hasFiles = e.dataTransfer.types.includes('Files');
     const hasScenes = e.dataTransfer.types.includes(SCENE_DRAG_MIME);
     const hasLibrary = e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME);
-    if (!hasFiles && !hasScenes && !hasLibrary) return;
+    const hasAsset = hasAssetDrag(e);
+    if (!hasFiles && !hasScenes && !hasLibrary && !hasAsset) return;
     e.preventDefault();
     dragDepthRef.current += 1;
     setDropActive(true);
-    setDragKind(hasScenes ? 'scene' : hasLibrary ? 'library' : 'file');
+    setDragKind(hasScenes ? 'scene' : hasLibrary ? 'library' : hasAsset ? 'asset' : 'file');
   }, [readOnly]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     if (readOnly) return;
     if (!e.dataTransfer.types.includes('Files')
         && !e.dataTransfer.types.includes(SCENE_DRAG_MIME)
-        && !e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME)) return;
+        && !e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME)
+        && !hasAssetDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }, [readOnly]);
@@ -536,6 +579,24 @@ export function ChatComposer({
     dragDepthRef.current = 0;
     setDropActive(false);
     setDragKind(null);
+    // 素材分支必须排在分镜/纯文本兜底之前：素材拖拽同样会写 text/plain，
+    // 落到兜底里会被当成分镜引用去解析。
+    if (hasAssetDrag(e)) {
+      const asset = parseAgentAssetDragPayload(e.dataTransfer.getData(AGENT_ASSET_DRAG_MIME));
+      if (asset) {
+        if (asset.kind === 'video') {
+          setPickedReferenceMedia(
+            [...new Set([...pickedReferenceVideos, asset.url])],
+            pickedReferenceAudios,
+          );
+          notify({ title: '已加入参考视频', description: asset.name, variant: 'info' });
+        } else {
+          addRefImageUrls([asset.url]);
+          notify({ title: '已加入参考图', description: asset.name, variant: 'info' });
+        }
+        return;
+      }
+    }
     const libraryPayload = parseProjectLibraryDragPayload(
       e.dataTransfer.getData(PROJECT_LIBRARY_DRAG_MIME),
     );
@@ -555,7 +616,7 @@ export function ChatComposer({
     }
     const files = Array.from(e.dataTransfer.files ?? []);
     if (files.length > 0) void uploadRefImages(files);
-  }, [readOnly, sendMessage, uploadRefImages]);
+  }, [readOnly, sendMessage, uploadRefImages, addRefImageUrls, pickedReferenceVideos, pickedReferenceAudios, setPickedReferenceMedia]);
 
   const openMenu = () => {
     if (readOnly) return;
@@ -716,6 +777,9 @@ export function ChatComposer({
     || hasAttachmentRow || pendingPicUrls.length > 0 || canvasBinding || canvasExitPending || readOnly
   );
   const collapsed = isComposerCollapsed(compact, focused || engaged)
+    // 从生成中心往输入框拖素材时，收缩态会让图无处可放：只要拖拽已经进入聊天区就展开，
+    // 让用户看得见落点。forceExpanded 由页面按「指针是否离开侧边栏」给出。
+    && !forceExpanded
     && !menuOpen && !removeModalOpen && !sceneModalOpen && !projectLibraryOpen && !canvasMediaOpen
     && !slashMenuVisible && !statusOpen;
 
@@ -738,8 +802,11 @@ export function ChatComposer({
       width: '100%', maxWidth: collapsed ? DS.maxContentCompact : DS.maxContent, margin: '0 auto',
       border: `1px solid ${dropActive ? DS.brand : focused ? 'rgba(65,118,230,0.45)' : DS.border}`,
       borderRadius: 18,
+      // 输入卡是绝对定位盖在消息流上的，拖拽高亮不能靠「加一点蓝的透明色」——
+      // 那样背后只要有图，整张卡就直接透出来，看起来像坏了。落点提示交给边框和光晕，
+      // 底色保持不透明（只做一点点蓝调）。
       background: dropActive
-        ? 'rgba(65,118,230,0.035)'
+        ? '#f2f6ff'
         : collapsed ? 'rgba(255, 255, 255, 0.62)' : 'white',
       backdropFilter: collapsed ? 'blur(10px)' : undefined,
       WebkitBackdropFilter: collapsed ? 'blur(10px)' : undefined,
@@ -768,9 +835,7 @@ export function ChatComposer({
       {statusOpen && (
         <ConversationStatusCard
           conversationId={activeConversationId ?? null}
-          usedTokens={contextUsageTokens}
-          limitTokens={contextLimitTokens}
-          hasContextData={hasContextData}
+          status={conversationStatus}
           onClose={() => setStatusOpen(false)}
         />
       )}
@@ -1053,7 +1118,7 @@ export function ChatComposer({
           if (e.nativeEvent.isComposing) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
+        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
         disabled={readOnly || (busy && !canInterruptSend)}
         rows={collapsed ? 1 : 2}
         style={{
@@ -1072,7 +1137,7 @@ export function ChatComposer({
         }}
       >
         <div className={`chat-composer-extra chat-composer-extra--inline${collapsed ? ' is-collapsed' : ''}`}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: narrowRow ? 4 : 6, minWidth: 0 }}>
           {/* 浮窗（智能体被挤成一个输入框）时，工具栏里保留「查看当前对话」入口 */}
           {onViewConversation && (
             <Tooltip label="查看当前对话">
@@ -1100,7 +1165,7 @@ export function ChatComposer({
             onChange={(mode, options) => { void setApprovalMode(mode, options); }}
           />
           {/* 生成偏好：自动 / 自定义 + 忽略对话中的生成方案（本地记住，随每轮请求下发） */}
-          <ChatGenerationPreferences disabled={readOnly} />
+          <ChatGenerationPreferences disabled={readOnly} compactLabel={narrowRow} iconOnly={tinyRow} />
           <div style={{ position: 'relative' }}>
             <Tooltip label="上传素材">
             <button
@@ -1108,11 +1173,12 @@ export function ChatComposer({
               onClick={attachLocked ? undefined : openMenu}
               disabled={attachLocked}
               aria-label="上传"
+              title="上传素材"
               className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
               onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
               style={{
-                width: 36, height: 36, borderRadius: 10, border: 'none', background: 'transparent',
+                width: 36, height: 36, flex: '0 0 36px', borderRadius: 10, border: 'none', background: 'transparent',
                 fontSize: 17, cursor: attachLocked ? 'not-allowed' : 'pointer', color: DS.textSecondary, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 opacity: attachLocked ? 0.45 : 1,
@@ -1141,7 +1207,7 @@ export function ChatComposer({
         </div>
         </div>
         {/* 右侧：麦克风 + 发送，紧贴排列 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0 }}>
           <span className={`chat-composer-extra chat-composer-extra--inline${collapsed ? ' is-collapsed' : ''}`}>
           <MicButton
             onToggle={handleMicToggle}
@@ -1153,29 +1219,40 @@ export function ChatComposer({
           {streaming && !agentVideoTask && !canSend ? (
             <button
               onClick={stopGeneration}
+              title="停止生成"
+              aria-label="停止生成"
               style={{
-                height: 38, padding: '0 16px', borderRadius: 12, border: 'none',
+                height: 38, width: narrowRow ? 38 : undefined,
+                padding: narrowRow ? 0 : '0 16px', borderRadius: 12, border: 'none',
                 background: 'rgba(217, 45, 32, 0.9)', color: 'white', fontSize: 14, fontWeight: 500,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                flexShrink: 0,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'rgb(217, 45, 32)'; }}
-              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'rgba(217, 45, 32, 0.9)'; }}
-            ><span style={{ width: 9, height: 9, borderRadius: 2, background: 'white', display: 'inline-block' }} />停止生成</button>
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgb(217, 45, 32)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(217, 45, 32, 0.9)'; }}
+            ><span style={{ width: 9, height: 9, borderRadius: 2, background: 'white', display: 'inline-block' }} />{!narrowRow && '停止生成'}</button>
           ) : (
             <button
               onClick={handleSend}
               disabled={!canSend}
+              title={canInterruptSend ? '停止并发送' : '发送'}
+              aria-label={canInterruptSend ? '停止并发送' : '发送'}
               style={{
-                height: 38, padding: '0 22px', borderRadius: 12, border: 'none',
+                height: 38, width: narrowRow ? 38 : undefined,
+                padding: narrowRow ? 0 : '0 22px', borderRadius: 12, border: 'none',
                 background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
                 cursor: canSend ? 'pointer' : 'not-allowed',
                 opacity: canSend ? 1 : 0.45,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { if (canSend) (e.target as HTMLElement).style.background = DS.brandHover; }}
-              onMouseLeave={(e) => { (e.target as HTMLElement).style.background = DS.brand; }}
-            >{canInterruptSend ? '停止并发送' : '发送'}</button>
+              onMouseEnter={(e) => { if (canSend) e.currentTarget.style.background = DS.brandHover; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = DS.brand; }}
+            >{narrowRow
+              ? <ArrowUp size={18} strokeWidth={2.2} aria-hidden="true" />
+              : (canInterruptSend ? '停止并发送' : '发送')}</button>
           )}
         </div>
       </div>

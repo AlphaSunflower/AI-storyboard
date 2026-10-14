@@ -13,7 +13,9 @@ import {
   type AgentMessagePage,
   type AgentCanvasRunStatus,
   type AgentAttachment, type AgentAttachmentKind, type AgentActiveTurn,
+  type AgentToolDraft,
   type CanvasSessionInfo,
+  type ConfirmResultInfo,
   DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
@@ -46,6 +48,8 @@ import {
   toGenerationPreferencesPayload,
   type GenerationPreferences,
 } from '../lib/generationPreferences';
+import { collectDraftRenderIntents, renderIntentFromEventData } from '../lib/renderIntent';
+import { isMediaTask } from '../lib/mediaTaskSlots';
 
 let conversationLoadEpoch = 0;
 let conversationListEpoch = 0;
@@ -213,6 +217,21 @@ export class AgentTurnEventSequencer {
     return ready;
   }
 
+  /** 该 turn 是否有等待缺口的乱序事件（不猜序号，只报告事实）。 */
+  hasGap(turnId: string): boolean {
+    return (this.pendingByTurn.get(turnId)?.size ?? 0) > 0;
+  }
+
+  /** 等待缺口的乱序事件条数。 */
+  pendingCount(turnId: string): number {
+    return this.pendingByTurn.get(turnId)?.size ?? 0;
+  }
+
+  /** 缺口后的下一个期望序号（= last + 1）。 */
+  expectedSeq(turnId: string): number {
+    return this.lastSeq(turnId) + 1;
+  }
+
   lastSeq(turnId: string): number {
     return this.lastSeqByTurn.get(turnId) ?? 0;
   }
@@ -231,16 +250,99 @@ export class AgentTurnEventSequencer {
   }
 }
 
-export interface AgentScopeTimelineEntry {
-  id: string;
-  turnId: string;
-  seq: number;
-  kind: 'plan' | 'subagent' | 'artifact';
-  title: string;
-  status: string;
-  summary?: string;
-  agent?: string;
+/**
+ * 缺口恢复：`seq` 缺口超过 `turnGapTimeoutForAttempt(attempt)` 仍未补齐时，
+ * 主动用既有 replay 能力（`?afterSeq=lastSeq`）补一次事件。
+ *
+ * 红线约束：
+ * - 只补一次、带退避、有上限，绝不轮询死循环；
+ * - 绝不猜测 / 重排序号：补回来的事件仍走同一个 sequencer 归并；
+ * - 正常到达（无缺口）时这里完全不会被调用，直播行为零变化。
+ */
+export const TURN_GAP_TIMEOUT_MS = 2_500;
+export const TURN_GAP_MAX_ATTEMPTS = 3;
+export const TURN_GAP_BACKOFF_FACTOR = 2;
+
+/** 第 n 次（从 0 计）缺口恢复的等待时长：2500 → 5000 → 10000 ms。 */
+export function turnGapTimeoutForAttempt(attempt: number): number {
+  const safeAttempt = Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : 0;
+  return TURN_GAP_TIMEOUT_MS * TURN_GAP_BACKOFF_FACTOR ** Math.min(safeAttempt, 6);
 }
+
+type TurnGapRecoveryState = {
+  attempts: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  conversationId: string;
+  assistantId: string;
+};
+
+const turnGapRecovery = new Map<string, TurnGapRecoveryState>();
+
+/**
+ * 记录一次缺口并安排一次补偿拉取；已排期 / 已达上限时是空操作。
+ * @returns 本次是否新排期了补偿拉取（供测试与诊断使用）。
+ */
+export function scheduleTurnGapRecovery(
+  turnId: string,
+  conversationId: string,
+  assistantId: string,
+): boolean {
+  if (!turnId || !conversationId) return false;
+  const current = turnGapRecovery.get(turnId);
+  if (current?.timer) return false;
+  const attempts = current?.attempts ?? 0;
+  if (attempts >= TURN_GAP_MAX_ATTEMPTS) return false;
+
+  const state: TurnGapRecoveryState = {
+    attempts,
+    timer: null,
+    conversationId,
+    assistantId,
+  };
+  const delay = turnGapTimeoutForAttempt(attempts);
+  state.timer = setTimeout(() => {
+    const live = turnGapRecovery.get(turnId);
+    if (!live || live.timer !== state.timer) return;
+    live.timer = null;
+    live.attempts += 1;
+    void useAgentStore.getState()
+      .replayTurnEvents(live.conversationId, turnId)
+      .catch(() => undefined);
+  }, delay);
+  turnGapRecovery.set(turnId, state);
+  return true;
+}
+
+/** 缺口补齐（或 turn 终态 / 复位）后回收补偿状态，避免跨轮次残留计数。 */
+export function clearTurnGapRecovery(turnId?: string) {
+  const clear = (key: string, state: TurnGapRecoveryState) => {
+    if (state.timer) clearTimeout(state.timer);
+    turnGapRecovery.delete(key);
+  };
+  if (turnId) {
+    const state = turnGapRecovery.get(turnId);
+    if (state) clear(turnId, state);
+    return;
+  }
+  for (const [key, state] of Array.from(turnGapRecovery.entries())) clear(key, state);
+}
+
+/** 测试 / 诊断用：当前排期的缺口恢复快照。 */
+export function turnGapRecoverySnapshot(turnId: string): { attempts: number; scheduled: boolean } {
+  const state = turnGapRecovery.get(turnId);
+  return { attempts: state?.attempts ?? 0, scheduled: !!state?.timer };
+}
+
+/** 已有缺口时补一次排期；无缺口则回收计数（正常到达的事件让缺口消失 → 不再补偿）。 */
+function trackTurnGap(turnId: string, conversationId: string, assistantId: string) {
+  if (!turnId) return;
+  if (turnEventSequencer.hasGap(turnId)) {
+    scheduleTurnGapRecovery(turnId, conversationId, assistantId);
+    return;
+  }
+  clearTurnGapRecovery(turnId);
+}
+
 
 const turnEventSequencer = new AgentTurnEventSequencer();
 
@@ -252,7 +354,7 @@ type GenerationSnapshot = {
   reasoningDraft?: AgentReasoning;
   traceDraft?: AgentTraceEvent[];
   usageDraft?: AgentTurnMetrics;
-  toolDrafts?: Record<string, { name: string; text: string; input: string; status: string }>;
+  toolDrafts?: Record<string, AgentToolDraft>;
   assistantMessageMetadata?: AgentMessageMetadata;
   /** 本轮模型上下文窗口（turn_started 提前下发，不等 usage 事件）。 */
   contextWindowTokens?: number;
@@ -477,6 +579,8 @@ export interface HumanInputInfo {
   reasons?: Record<string, string>;
   // 资产选择卡片：可勾选的资产清单（后端 human_input 事件下发；缺失时不渲染勾选）
   assets?: AssetOption[];
+  /** 卡片不可交互（只读回显）：formToken 为空/空白时置位，重放不得再触发提交。 */
+  inactive?: boolean;
 }
 
 export interface SideChatUiState {
@@ -490,17 +594,8 @@ export interface SideChatUiState {
   error: string | null;
 }
 
-/** 生成完成后的看图确认卡片（后端 confirm_result 事件） */
-export interface ConfirmResultInfo {
-  kind: 'script' | 'image' | 'video';
-  url: string;
-  assetId?: string;
-  /** 多图结果（n>1 时后端下发全部 URL；未下发则回退单 url） */
-  urls?: string[];
-  assetIds?: string[];
-  sceneCount?: number;
-  actions: { id: string; title: string }[];
-}
+/** 生成结果确认信息：定义在 api/agent（它是消息 metadata 的一部分），此处转发以兼容既有引用。 */
+export type { ConfirmResultInfo } from '../api/agent';
 
 /** 图生视频方案确认卡片（后端 video_plan 事件）：视觉模型看图设计的方案，确认后生成 */
 export interface VideoPlanInfo {
@@ -583,15 +678,12 @@ interface AgentState {
   messageHasMore: boolean;
   loadOlderMessages: () => Promise<void>;
   streaming: boolean;
-  /** AgentScope plan/subagent/artifact timeline, scoped by conversation. */
-  timelineByConversation: Record<string, AgentScopeTimelineEntry[]>;
   /** Replay durable turn events after a known sequence, then reduce them in order. */
   replayTurnEvents: (conversationId: string, turnId: string, afterSeq?: number) => Promise<void>;
   /** 会话级进行中生成状态（key=conversationId）：切走保留、切回恢复；streaming/workflowHint 由此派生 */
   generating: Record<string, GenerationSnapshot>;
   waitingHumanInput: HumanInputInfo | null;
   streamError: string | null;
-  confirmResult: ConfirmResultInfo | null;
   // 当前运行阶段提示（workflow 事件标题 / 视频异步生成进度；渲染在聊天窗口「正在生成」行）
   workflowHint: string;
   setWorkflowHint: (v: string) => void;
@@ -711,9 +803,11 @@ interface AgentState {
   cancelStoryboardImageQueue: (queueId: string) => Promise<void>;
   // 停止当前会话生成（「停止生成」按钮）：中断 SSE 流 + 后端协作式取消 + 复位视图
   stopGeneration: () => void;
-  // 看图确认卡片（confirm_result 事件）：继续完善 / 满意完成
-  refineAsset: () => void;
-  dismissConfirm: () => void;
+  // 结果确认动作（挂在产生结果的那条助手消息 metadata.confirmResult 上）：继续完善 / 满意完成
+  refineAsset: (info: ConfirmResultInfo, messageId?: string) => void;
+  dismissConfirm: (messageId?: string) => void;
+  /** 收起某条消息上的结果确认动作；只影响动作，不影响结果图（图在消息附件/位条里）。 */
+  clearMessageConfirmResult: (messageId: string) => void;
   // 继续完善参考图：点"继续完善"后不自动发送，暂存 PicUrls 等待用户输入完善需求（随下一条消息发送并消费）
   pendingPicUrls: string[];
   cancelRefine: () => void;
@@ -972,6 +1066,59 @@ function attachTaskCard(
   });
 }
 
+/**
+ * 把生成结果落到**产生它的那条助手消息**上（不再是全局单槽）。
+ *
+ * <p>背景（本次修复）：结果此前只写进全局 `confirmResult`，由 `ConfirmResultCard` 自己渲染图片，
+ * 于是①同一会话里两个结果互相顶掉；②点「满意完成/继续完善」把全局槽清空，而图片只存在那张卡里，
+ * 用户看到的就是"点一下图全没了"。
+ *
+ * <p>载体选择规则（保证**恰好一个**载体，不重复也不丢）：
+ * <ul>
+ *   <li>消息上已有媒体任务卡（批量图/视频，由预置位条渲染）→ 位条就是载体，
+ *       不再补附件、也不弹旧确认卡；</li>
+ *   <li>否则把结果 URL 补成 `sandboxAttachments`（与刷新后服务端回放的是同一字段，
+ *       所以直播/刷新两条路径渲染一致），并挂上确认动作。</li>
+ * </ul>
+ *
+ * <p>导出仅为聚焦测试可直接断言"载体选择"这一条不变量（见 `agentStore.resultCarrier.test.ts`）。
+ */
+export function attachResultToMessage(assistantId: string, info: ConfirmResultInfo | null) {
+  if (!info || !assistantId) return;
+  useAgentStore.setState((state) => {
+    const message = state.messages.find((item) => item.id === assistantId);
+    if (!message) return {};
+    const carriedBySlotStrip = (message.metadata?.taskCards ?? [])
+      .some((card) => isMediaTask(state.tasks[card.taskId]));
+    const existing = message.metadata?.sandboxAttachments ?? [];
+    const urls = (info.urls?.length ? info.urls : [info.url]).filter(Boolean);
+    const known = new Set(existing.map((attachment) => attachment.url));
+    const kind: AgentAttachmentKind = info.kind === 'video' ? 'video' : 'image';
+    const added: AgentAttachment[] = carriedBySlotStrip || urls.length === 0
+      ? []
+      : urls.filter((url) => !known.has(url)).map((url, index) => ({
+          url,
+          name: `生成${kind === 'video' ? '视频' : '图片'}${urls.length > 1 ? ` ${index + 1}` : ''}`,
+          mimeType: kind === 'video' ? 'video/mp4' : 'image/png',
+          kind,
+          ...(info.assetIds?.[index] ? { assetId: info.assetIds[index] } : {}),
+        }));
+    const sandboxAttachments = added.length > 0 ? [...existing, ...added] : existing;
+    const nextMetadata: AgentMessageMetadata = { ...message.metadata };
+    // 位条已承载时不再挂旧确认动作（"只在没有任何其他载体时兜底出现"）；
+    // 否则结果图已进消息附件，确认动作只提供"继续完善/满意完成"，自身不再渲染图片，
+    // 所以点它不会再让图片消失。
+    if (carriedBySlotStrip) delete nextMetadata.confirmResult;
+    else nextMetadata.confirmResult = info;
+    if (added.length > 0) nextMetadata.sandboxAttachments = sandboxAttachments;
+    return {
+      messages: state.messages.map((item) => item.id === assistantId
+        ? { ...item, metadata: nextMetadata }
+        : item),
+    };
+  });
+}
+
 /** UnifiedLoop 异步任务：收到 task_accepted 后独立轮询到终态。 */
 function beginUnifiedVideoPolling(
   taskId: string,
@@ -1022,16 +1169,20 @@ function beginUnifiedVideoPolling(
             agentVideoTask: null,
             messages: active ? state.messages.map((message) =>
               message.id === assistantId ? { ...message, content: completedContent } : message) : state.messages,
-            confirmResult: active && task.kind !== 'long-tool' ? {
-              kind: task.kind === 'image-batch' ? 'image' : 'video',
-              url: task.url || '',
-              urls: task.resultUrls,
-              assetId: task.assetId || task.assetIds?.[0],
-              sceneCount: 0,
-              actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
-            } : state.confirmResult,
           };
         });
+        if (useAgentStore.getState().activeConversationId === conversationId
+            && task.kind !== 'long-tool') {
+          attachResultToMessage(assistantId, {
+            kind: task.kind === 'image-batch' ? 'image' : 'video',
+            url: task.url || '',
+            urls: task.resultUrls,
+            assetId: task.assetId || task.assetIds?.[0],
+            assetIds: task.assetIds,
+            sceneCount: 0,
+            actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
+          });
+        }
         void useAgentStore.getState().loadAssets();
         if (task.kind === 'image-batch' && task.followUpTaskId) {
           beginUnifiedVideoPolling(task.followUpTaskId, conversationId, assistantId, 'video');
@@ -1084,6 +1235,50 @@ function buildGeneratingMetadata(g?: { reasoningDraft?: AgentReasoning; traceDra
   return undefined;
 }
 
+/**
+ * 把「只活在 `generating` 里」的直播状态折进消息 metadata。
+ *
+ * <p>`reasoning` / `agentTrace` / `metrics` 会被 `setLive*` 顺手写进消息，`toolDrafts` 不会：
+ * 它只存在于 `generating.toolDrafts`，而本轮流一结束 `generating` 就会被删除
+ * （`sendMessage` / `submitHumanInput` 的 finally）。因此任何**非 `turn_completed` 的收尾**
+ * ——HITL 暂停、`afterSeq` 重放暂停轮——都必须在那一刻把草稿折进消息，
+ * 否则工具明细会在暂停瞬间从界面消失，只有刷新（服务端 metadata 回放）才重新出现。
+ *
+ * <p>优先级与服务端一致：服务端 payload metadata 优先，直播快照只补缺。
+ */
+function foldLiveTurnMetadata(options: {
+  conversationId: string;
+  serverMetadata?: AgentMessageMetadata;
+  liveSandboxAttachments?: AgentMessageMetadata['sandboxAttachments'];
+  generation?: GenerationSnapshot;
+}): AgentMessageMetadata | undefined {
+  const { conversationId, serverMetadata, liveSandboxAttachments } = options;
+  const generation = options.generation ?? useAgentStore.getState().generating[conversationId];
+  const liveToolDrafts = generation?.toolDrafts && Object.keys(generation.toolDrafts).length > 0
+    ? generation.toolDrafts
+    : undefined;
+  const finalToolDrafts = serverMetadata?.toolDrafts ?? liveToolDrafts;
+  const liveRenders = collectDraftRenderIntents(finalToolDrafts);
+  const finalRenders = serverMetadata?.renders ?? (liveRenders.length > 0 ? liveRenders : undefined);
+  const hasAnyLive = !!serverMetadata || !!generation?.reasoningDraft
+    || !!generation?.traceDraft?.length || !!generation?.usageDraft
+    || !!generation?.assistantMessageMetadata || !!finalToolDrafts || !!finalRenders;
+  if (!hasAnyLive) return undefined;
+  return {
+    ...(generation?.assistantMessageMetadata ?? {}),
+    ...(serverMetadata ?? {}),
+    kind: serverMetadata?.kind ?? generation?.assistantMessageMetadata?.kind ?? 'assistant-reply',
+    reasoning: serverMetadata?.reasoning ?? generation?.reasoningDraft,
+    agentTrace: serverMetadata?.agentTrace ?? generation?.traceDraft,
+    sandboxAttachments: serverMetadata?.sandboxAttachments ?? liveSandboxAttachments,
+    metrics: serverMetadata?.metrics
+      ?? generation?.usageDraft
+      ?? generation?.assistantMessageMetadata?.metrics,
+    ...(finalToolDrafts ? { toolDrafts: finalToolDrafts } : {}),
+    ...(finalRenders ? { renders: finalRenders } : {}),
+  };
+}
+
 /** 从消息元数据反解出 HITL 卡片信息（刷新后从 AgentMessage.metadata.hitl 恢复） */
 export function hitlFromMetadata(metadata?: AgentMessageMetadata): HumanInputInfo | null {
   const h = metadata?.hitl;
@@ -1095,6 +1290,7 @@ export function hitlFromMetadata(metadata?: AgentMessageMetadata): HumanInputInf
     actions: h.actions ?? [],
     expirationTime: h.expirationTime ?? 0,
     messageId: h.messageId,
+    inactive: h.inactive,
   };
 }
 
@@ -1303,6 +1499,7 @@ async function restorePersistedTurn(conversationId: string) {
     : initialEvents.filter((event) => event.seq > afterSeq);
   turnEventSequencer.reset(active.turnId);
   turnEventSequencer.seek(active.turnId, afterSeq);
+  clearTurnGapRecovery(active.turnId);
 
   let terminal: AgentTurnEventEnvelope['type'] | null = null;
   let waitingUser = false;
@@ -1345,7 +1542,7 @@ async function restorePersistedTurn(conversationId: string) {
       }
       if (effects.confirmResult
           && useAgentStore.getState().activeConversationId === conversationId) {
-        useAgentStore.setState({ confirmResult: effects.confirmResult });
+        attachResultToMessage(assistantId, effects.confirmResult);
       }
       if (effects.canvasSessionRequired) {
         const session = effects.canvasSessionRequired;
@@ -1472,25 +1669,6 @@ function emptyTurnEffects(): AgentTurnEnvelopeEffects {
   };
 }
 
-function upsertTimelineEntry(
-  conversationId: string,
-  entry: AgentScopeTimelineEntry,
-) {
-  useAgentStore.setState((state) => {
-    const current = state.timelineByConversation[conversationId] ?? [];
-    const index = current.findIndex((item) => item.id === entry.id);
-    const next = index >= 0
-      ? current.map((item) => item.id === entry.id ? { ...item, ...entry } : item)
-      : [...current, entry];
-    return {
-      timelineByConversation: {
-        ...state.timelineByConversation,
-        [conversationId]: next,
-      },
-    };
-  });
-}
-
 function setLiveReasoning(context: TurnReductionContext, reasoning: AgentReasoning) {
   useAgentStore.setState((state) => {
     const generating = {
@@ -1586,7 +1764,10 @@ function toolStatus(eventType: string, data: Record<string, unknown>): string {
   if (eventType === 'TOOL_RESULT_START') return 'node_running';
   if (eventType === 'TOOL_RESULT_END') {
     const state = asString(data.state).toUpperCase();
-    return state.includes('FAIL') || state.includes('DENIED') ? 'node_failed' : 'node_completed';
+    // ToolResultState 的真实取值是 SUCCESS / ERROR / INTERRUPTED / DENIED / RUNNING；
+    // 只判 FAIL/DENIED 会把 ERROR 显示成「已完成」。后端落库的工具草稿用同一口径
+    // （AgentTraceAccumulator.failedToolState），保证直播与刷新渲染一致。
+    return /FAIL|ERROR|DENIED|INTERRUPT/.test(state) ? 'node_failed' : 'node_completed';
   }
   return 'node_running';
 }
@@ -1596,27 +1777,6 @@ function toolTitle(eventType: string, toolName: string): string {
   if (eventType === 'TOOL_RESULT_START') return `工具执行：${toolName}`;
   if (eventType === 'TOOL_RESULT_END') return `工具完成：${toolName}`;
   return `工具流式输出：${toolName}`;
-}
-
-function timelineKindForTool(toolName: string): AgentScopeTimelineEntry['kind'] | null {
-  if (toolName === 'plan_enter' || toolName === 'plan_write' || toolName === 'plan_exit' || toolName === 'todo_write') {
-    return 'plan';
-  }
-  if (toolName === 'deliver_artifact') return 'artifact';
-  return null;
-}
-
-function timelineTitleForTool(toolName: string, draft?: { input: string }) {
-  if (toolName === 'plan_enter') return '进入规划模式';
-  if (toolName === 'plan_write') {
-    const parsed = parseJsonRecord(draft?.input);
-    const content = asString(parsed?.content);
-    if (content) return content.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '') || '更新执行计划';
-    return '更新执行计划';
-  }
-  if (toolName === 'plan_exit') return '等待计划确认';
-  if (toolName === 'todo_write') return '更新任务清单';
-  return '交付产物';
 }
 
 function taskAcceptedFromText(value: string): AgentScopeTaskAccepted | null {
@@ -1833,6 +1993,15 @@ function applyOneEnvelope(
           title: asString(action?.title),
         })).filter((action) => action.id && action.title)
       : [];
+    /**
+     * 空/空白 formToken 的 HITL 卡片不可交互：
+     * - 提交必然失败（后端一次性 checkpoint 需要 token）；
+     * - 空 token 会让 `hasSubmittedHitlReceipt` 的幂等判定失效（`!formToken` 直接 return false），
+     *   于是重放 `turn_paused` 时又冒出一张能点的卡片。
+     * 因此这类卡片只做只读回显，且不重新装配 `waitingHumanInput`。
+     * 有 token 的卡片行为完全不变（`alreadySubmitted` 分支保持原样）。
+     */
+    const cardInteractive = !!formToken.trim();
     const info: HumanInputInfo = {
       turnId: envelope.turnId,
       formToken,
@@ -1852,6 +2021,7 @@ function applyOneEnvelope(
       message: asString(source.message),
       duration: asNumber(source.duration, 8),
       picUrl: asString(source.picUrl),
+      inactive: !cardInteractive,
     };
     useAgentStore.setState((state) => {
       const videoPlan = info.kind === 'video-plan' || info.hitlType === 'generate_video';
@@ -1868,6 +2038,13 @@ function applyOneEnvelope(
         recommended: info.recommended,
         reasons: info.reasons,
       } : null;
+      // 本轮只活在 generating 里的工具明细必须跟着卡片落进消息：暂停即收尾，
+      // 之后 generating 会被删除，否则工具调用会在暂停瞬间被吞掉（刷新才回来）。
+      const pausedLiveMetadata = foldLiveTurnMetadata({
+        conversationId: context.conversationId,
+        serverMetadata: metadata as unknown as AgentMessageMetadata,
+        generation: state.generating[context.conversationId],
+      });
       const messages = state.messages.map((message) => message.id === context.assistantId
         ? {
             ...message,
@@ -1877,6 +2054,7 @@ function applyOneEnvelope(
               : assistantContent,
             metadata: {
               ...(message.metadata ?? {}),
+              ...(pausedLiveMetadata ?? {}),
               kind: videoPlan ? 'video-plan' as const : 'hitl' as const,
               hitl: {
                 formContent: info.formContent || videoInfo?.message || '',
@@ -1885,6 +2063,7 @@ function applyOneEnvelope(
                 messageId,
                 formToken,
                 expirationTime: info.expirationTime,
+                ...(cardInteractive ? {} : { inactive: true }),
               },
               ...(videoInfo ? { videoPlan: {
                 message: videoInfo.message,
@@ -1908,9 +2087,11 @@ function applyOneEnvelope(
       });
       const alreadySubmitted = state.messages.some((message) =>
         message.id === messageId && message.metadata?.hitl?.pending === false);
+      // 不可交互的卡片（空 formToken）不重新装配待确认状态，避免重放复活点击入口。
+      const armHumanInput = cardInteractive && !videoPlan && !alreadySubmitted;
       return {
         workflowHint: '',
-        waitingHumanInput: videoPlan || alreadySubmitted ? null : info,
+        waitingHumanInput: armHumanInput ? info : null,
         waitingVideoPlan: alreadySubmitted ? null : videoInfo,
         hitlVideoPlan: videoInfo
           ? { ...state.hitlVideoPlan, [context.conversationId]: videoInfo }
@@ -1923,23 +2104,25 @@ function applyOneEnvelope(
 
   if (envelope.type === 'turn_completed') {
     effects.completed = true;
+    clearTurnGapRecovery(envelope.turnId);
     const content = asString(payload.content);
     const metadata = turnMetadata(payload);
     const generation = useAgentStore.getState().generating[context.conversationId];
     const liveSandboxAttachments = useAgentStore.getState().messages
       .find((message) => message.id === context.assistantId)?.metadata?.sandboxAttachments;
-    const finalMetadata: AgentMessageMetadata | undefined = (
-      metadata || generation?.reasoningDraft || generation?.traceDraft?.length
-      || generation?.usageDraft || generation?.assistantMessageMetadata
-    ) ? {
-        ...(generation?.assistantMessageMetadata ?? {}),
-        ...(metadata ?? {}),
-        kind: metadata?.kind ?? generation?.assistantMessageMetadata?.kind ?? 'assistant-reply',
-        reasoning: metadata?.reasoning ?? generation?.reasoningDraft,
-        agentTrace: metadata?.agentTrace ?? generation?.traceDraft,
-        sandboxAttachments: metadata?.sandboxAttachments ?? liveSandboxAttachments,
-        metrics: metadata?.metrics ?? generation?.usageDraft ?? generation?.assistantMessageMetadata?.metrics,
-      } : undefined;
+    /**
+     * 终态 metadata 必须保留直播阶段才有的状态：
+     * - `reasoning` / `agentTrace` / `metrics` 已有回退；
+     * - `toolDrafts` 是本轮工具输出的回放载体（否则刷新后工具结果彻底消失）；
+     * - `renders` 汇总渲染意图，供重放按 kind 分派。
+     * 服务端已在 metadata 里给了对应字段时优先用服务端的，前端只补缺。
+     */
+    const finalMetadata = foldLiveTurnMetadata({
+      conversationId: context.conversationId,
+      serverMetadata: metadata,
+      liveSandboxAttachments,
+      generation,
+    });
     if (content) storeAssistantContent(context.conversationId, context.assistantId, content);
     if (finalMetadata) {
       useAgentStore.setState((state) => {
@@ -2087,29 +2270,21 @@ function applyOneEnvelope(
       startedAt: asString(data.createdAt, new Date().toISOString()),
     });
 
-    const kind = timelineKindForTool(toolName);
-    if (kind) {
-      upsertTimelineEntry(context.conversationId, {
-        id: `${envelope.turnId}:${toolCallId}:${kind}`,
-        turnId: envelope.turnId,
-        seq: envelope.seq,
-        kind,
-        title: timelineTitleForTool(toolName),
-        status,
-        summary: asString(data.delta ?? data.state),
-      });
-    }
-
     useAgentStore.setState((state) => {
       const generation = state.generating[context.conversationId] ?? { hint: '' };
-      const drafts = { ...(generation.toolDrafts ?? {}) };
-      const draft = drafts[toolCallId] ?? { name: toolName, text: '', input: '', status };
+      const drafts: Record<string, AgentToolDraft> = { ...(generation.toolDrafts ?? {}) };
+      const draft: AgentToolDraft = drafts[toolCallId]
+        ?? { name: toolName, text: '', input: '', status, seq: envelope.seq, startedAt: Date.now() };
       if (eventType === 'TOOL_CALL_DELTA') draft.input += asString(data.delta);
       if (eventType === 'TOOL_RESULT_TEXT_DELTA' || eventType === 'TOOL_RESULT_DATA_DELTA') {
         const delta = typeof data.delta === 'string' ? data.delta : data.delta ? JSON.stringify(data.delta) : '';
         draft.text += delta;
       }
       draft.status = status;
+      if (draft.seq === undefined) draft.seq = envelope.seq;
+      // `render` 块（服务端新增）随工具结果到达；缺省时保持 undefined，渲染层回落纯文本。
+      const renderIntent = renderIntentFromEventData(data);
+      if (renderIntent) draft.render = renderIntent;
       drafts[toolCallId] = draft;
       return {
         generating: {
@@ -2123,36 +2298,13 @@ function applyOneEnvelope(
       const draft = useAgentStore.getState().generating[context.conversationId]?.toolDrafts?.[toolCallId];
       if (!effects.taskAccepted) effects.taskAccepted = taskAcceptedFromText(draft?.text ?? '');
       if (!effects.confirmResult) effects.confirmResult = confirmResultFromText(draft?.text ?? '');
-      if (toolName === 'deliver_artifact') {
-        const input = parseJsonRecord(draft?.input);
-        const fileName = asString(input?.fileName) || asString(input?.filePath).split(/[\\/]/).pop() || '产物';
-        upsertTimelineEntry(context.conversationId, {
-          id: `${envelope.turnId}:${toolCallId}:artifact`,
-          turnId: envelope.turnId,
-          seq: envelope.seq,
-          kind: 'artifact',
-          title: fileName,
-          status,
-          summary: asString(input?.description) || draft?.text,
-        });
-      }
     }
     return;
   }
 
   if (eventType === 'SUBAGENT_EXPOSED') {
-    const subagentId = asString(data.subagentId, `subagent-${envelope.seq}`);
-    const label = asString(data.label ?? data.agentId, subagentId);
-    upsertTimelineEntry(context.conversationId, {
-      id: `${envelope.turnId}:${subagentId}:subagent`,
-      turnId: envelope.turnId,
-      seq: envelope.seq,
-      kind: 'subagent',
-      title: label,
-      status: 'node_started',
-      agent: asString(data.agentId, subagentId),
-      summary: asString(data.sessionId),
-    });
+    // 此前这里只写 AgentScopeTimeline 的内存时间线，而那个组件的消费者从未被挂载（已删除）。
+    // 当前没有 UI 消费子智能体暴露事件，显式忽略，避免落进下方通用分支被误处理。
     return;
   }
 
@@ -2173,20 +2325,6 @@ function applyOneEnvelope(
       effects.canvasModeRequired = { ...value, turnId: envelope.turnId };
       return;
     }
-    const lower = name.toLowerCase();
-    const kind: AgentScopeTimelineEntry['kind'] | null = lower.includes('plan')
-      ? 'plan' : lower.includes('subagent') ? 'subagent' : lower.includes('artifact') ? 'artifact' : null;
-    if (kind) {
-      upsertTimelineEntry(context.conversationId, {
-        id: `${envelope.turnId}:${name}:${envelope.seq}`,
-        turnId: envelope.turnId,
-        seq: envelope.seq,
-        kind,
-        title: asString(value.title ?? name),
-        status: asString(value.status, 'node_running'),
-        summary: asString(value.summary ?? value.content ?? value.message),
-      });
-    }
   }
 }
 
@@ -2196,14 +2334,19 @@ export function applyAgentTurnEnvelope(
   context: TurnReductionContext,
 ): AgentTurnEnvelopeEffects {
   const effects = emptyTurnEffects();
-  for (const ready of turnEventSequencer.accept(envelope)) {
-    applyOneEnvelope(ready, context, effects);
+  // 先归并再判定缺口：本次到达的事件补齐了缺口就回收补偿，仍缺则排一次补偿拉取。
+  const ready = turnEventSequencer.accept(envelope);
+  trackTurnGap(envelope.turnId, context.conversationId, context.assistantId);
+  for (const item of ready) {
+    applyOneEnvelope(item, context, effects);
+  }
+  if (effects.completed || effects.failed || effects.paused) {
+    clearTurnGapRecovery(envelope.turnId);
   }
   return effects;
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
-  timelineByConversation: {},
   replayTurnEvents: async (conversationId, turnId, afterSeq) => {
     if (!conversationId || !turnId) return;
     const assistantId = get().generating[conversationId]?.assistantId
@@ -2237,7 +2380,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       }
       if (effects.confirmResult && get().activeConversationId === conversationId) {
-        set({ confirmResult: effects.confirmResult });
+        attachResultToMessage(assistantId, effects.confirmResult);
       }
       if (effects.completed) {
         finishAssistantReply(conversationId, assistantId);
@@ -2649,7 +2792,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       waitingVideoPlan: null,
       streamError: null,
       pendingAssistantId: null,
-      confirmResult: null,
       pendingPicUrls: [],
       refImageUrls: [],
       pendingAttachments: [],
@@ -2763,7 +2905,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingHumanInput: isActive ? null : s.waitingHumanInput, 
         waitingVideoPlan: isActive ? null : s.waitingVideoPlan,
         hitlVideoPlan: h,
-        confirmResult: isActive ? null : s.confirmResult,
         ...(isActive ? {
           canvasEditContext: null,
           canvasBinding: null,
@@ -2781,7 +2922,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!id || get().streaming || get().waitingHumanInput || get().waitingVideoPlan) return;
     await agentApi.clearMessages(id);
     set((s) => { const h = { ...s.hitlVideoPlan }; delete h[id]; return { messages: [], waitingHumanInput: null,
-       waitingVideoPlan: null, hitlVideoPlan: h, streamError: null, pendingAssistantId: null, confirmResult: null, pendingPicUrl: null }; });
+       waitingVideoPlan: null, hitlVideoPlan: h, streamError: null, pendingAssistantId: null, pendingPicUrl: null }; });
   },
 
   selectConversation: async (id) => {
@@ -2801,7 +2942,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
         pendingAssistantId: null,
-        confirmResult: null, pendingPicUrls: [], refImageUrls: [], pendingAttachments: [],
+        pendingPicUrls: [], refImageUrls: [], pendingAttachments: [],
         pickedReferenceVideos: [], pickedReferenceAudios: [], pickedAssetIds: [],
         taskUnread: { ...s.taskUnread, [id]: 0 },
         replyUnread: { ...s.replyUnread, [id]: false },
@@ -3117,7 +3258,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
   storyboardVideoQueue: [],
   storyboardImageQueue: [],
-  confirmResult: null,
   pendingPicUrls: [],
   pendingAssistantId: null,
 
@@ -3485,7 +3625,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         }
         if (effects.confirmResult && get().activeConversationId === snapshotId) {
-          set({ confirmResult: effects.confirmResult });
+          attachResultToMessage(assistantId, effects.confirmResult);
         }
         if (effects.canvasSessionRequired) {
           receivedCanvasModeRequired = true;
@@ -3844,7 +3984,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         }
         if (effects.confirmResult && get().activeConversationId === snapshotId) {
-          set({ confirmResult: effects.confirmResult });
+          attachResultToMessage(assistantId, effects.confirmResult);
         }
       }, customText, params, assetIds, signal, {
         canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
@@ -4184,16 +4324,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 workflowHint: generationHint(gview),
                 pendingAssistantId: null,
                 agentVideoTask: null,
-                confirmResult: t.kind === 'long-tool' ? s.confirmResult : {
-                  kind: t.kind === 'image-batch' ? 'image' : 'video',
-                  url: t.url || '',
-                  urls: t.resultUrls,
-                  assetId: t.assetId || t.assetIds?.[0],
-                  sceneCount: 0,
-                  actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
-                },
               };
             });
+            if (t.kind !== 'long-tool') {
+              attachResultToMessage(assistantId, {
+                kind: t.kind === 'image-batch' ? 'image' : 'video',
+                url: t.url || '',
+                urls: t.resultUrls,
+                assetId: t.assetId || t.assetIds?.[0],
+                assetIds: t.assetIds,
+                sceneCount: 0,
+                actions: [{ id: 'refine', title: '继续完善' }, { id: 'done', title: '满意完成' }],
+              });
+            }
             void get().loadAssets();
             const groupId = sessionStorage.getItem('moon.activeGroupId');
             if (groupId && t.url) {
@@ -4276,7 +4419,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         if (effects.confirmResult && get().activeConversationId === snapshotId) {
           receivedResult = true;
-          set({ confirmResult: effects.confirmResult });
+          attachResultToMessage(assistantId, effects.confirmResult);
         }
       }, '', params, undefined, signal, {
         canvasContext: buildCanvasRequestContext(get().canvasEditContext, {
@@ -4490,47 +4633,63 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (pid) void get().refetchStoryboardImageQueue(pid);
   },
 
-  /** 看图确认卡片：继续完善 → 暂存当前图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送 */
-  refineAsset: () => {
-    const { confirmResult } = get();
-    if (!confirmResult || confirmResult.kind === 'script') return;
-    // 审查修复：confirmResult.url 是后端相对路径（/api/files/images/x.png），容器内无法访问；
+  /**
+   * 结果确认：继续完善 → 暂存结果图 PicUrl，不自动发送；用户输入完善需求后随下一条消息发送。
+   *
+   * <p>只收起该消息上的**动作**：结果图已经在消息附件（或位条）里，
+   * 因此点它不会再出现"点一下图片全没了"。
+   */
+  refineAsset: (info, messageId) => {
+    if (!info || info.kind === 'script') return;
+    // info.url 是后端相对路径（/api/files/images/x.png），容器内无法访问；
     // assetUrl() 拼接 BACKEND 前缀转绝对 URL（http/data: 透传）后再发给后端
-    const picUrl = assetUrl(confirmResult.url);
-    set({ confirmResult: null, pendingPicUrls: [picUrl] });
+    const picUrl = assetUrl(info.url);
+    set({ pendingPicUrls: [picUrl] });
+    if (messageId) get().clearMessageConfirmResult(messageId);
   },
   /** 取消继续完善：清空暂存参考图（输入框提示条上的 ✕ 触发） */
   cancelRefine: () => set({ pendingPicUrls: [] }),
   /**
-   * 看图确认卡片：满意完成 → 通知后端清空图片上下文变量（下次图片需求走全新设计）。
-   * 成功收起卡片 + 刷新资产；失败保留卡片并提示（可重试）。纯前端收起（旧行为）会
-   * 变量残留 → 下次图片需求误走完善路径。
+   * 结果确认：满意完成 → 通知后端清空图片上下文变量（下次图片需求走全新设计）。
+   * 成功才收起该消息上的动作 + 刷新资产；失败保留并提示（可重试）。
+   * 纯前端收起（旧行为）会变量残留 → 下次图片需求误走完善路径。
    */
-  dismissConfirm: async () => {
+  dismissConfirm: async (messageId) => {
     const id = get().activeConversationId;
     if (!id) {
-      set({ confirmResult: null });
+      if (messageId) get().clearMessageConfirmResult(messageId);
       return;
     }
     try {
       await agentApi.confirmDone(id);
-      set({ confirmResult: null });
+      if (messageId) get().clearMessageConfirmResult(messageId);
       void get().loadAssets();
     } catch {
       alert('操作失败，请重试');
     }
+  },
+  clearMessageConfirmResult: (messageId) => {
+    if (!messageId) return;
+    set((state) => ({
+      messages: state.messages.map((message) => {
+        if (message.id !== messageId || !message.metadata?.confirmResult) return message;
+        const metadata = { ...message.metadata };
+        delete metadata.confirmResult;
+        return { ...message, metadata };
+      }),
+    }));
   },
 
   resetChatState: () => {
     if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
     videoPollToken += 1;
     clearCanvasEditContext();
-    set({ messages: [], generating: {}, timelineByConversation: {}, streaming: false, waitingHumanInput: null,
+    set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
        pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
        waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
        pendingAttachments: [], pickedReferenceVideos: [], pickedReferenceAudios: [],
        pendingAssistantId: null,
-       confirmResult: null, pendingPicUrls: [], storyboardImageQueue: [],
+       pendingPicUrls: [], storyboardImageQueue: [],
        canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false,
        sideChat: {
          open: false,

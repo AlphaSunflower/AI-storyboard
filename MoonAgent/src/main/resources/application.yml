@@ -150,6 +150,9 @@ ai:
       max-iters: ${AGENTSCOPE_MAX_ITERS:24}
       asset-search-limit: ${AGENTSCOPE_ASSET_SEARCH_LIMIT:8}
       direct-media-generation: ${AGENTSCOPE_DIRECT_MEDIA_GENERATION:true}
+      # 复合旅程（produce_video_journey）分支阈值：≤ 该秒数走「生图 → 视频」，
+      # 超过则走「分镜 → 逐镜图片 → 逐镜视频 → 合成」。
+      journey-direct-video-max-seconds: ${AGENTSCOPE_JOURNEY_DIRECT_VIDEO_MAX_SECONDS:15}
       state-schema: ${AGENTSCOPE_STATE_SCHEMA:public}
       state-table: ${AGENTSCOPE_STATE_TABLE:agentscope_sessions}
       workspace-dir: ${AGENTSCOPE_WORKSPACE_DIR:${java.io.tmpdir}/moonagent-agentscope}
@@ -164,13 +167,28 @@ ai:
       otel-tracing-enabled: ${AGENTSCOPE_OTEL_TRACING_ENABLED:true}
       distributed-store-enabled: ${AGENTSCOPE_DISTRIBUTED_STORE_ENABLED:true}
       web-search:
-        # 自研 web_search/web_fetch 走 Firecrawl REST；无 key 时不注册这两个工具。
+        # 两个后端，用 provider 切换（默认 searxng = 全自托管，无第三方 key/计费）：
+        #   searxng  → POST {searxng-url}/search?format=json（自己部署的 SearXNG）
+        #   deepseek → POST {base-url}/messages，带服务端工具 web_search_20250305（对齐 DSH 的
+        #              dsh-web-search-deepseek；搜索在 DeepSeek 服务端执行，按账号计费，需 key）
+        # 注意 deepseek 的 base-url 不是 ai.gateway.base-url：原生搜索只存在于 Anthropic
+        # Messages 协议上，网关是 chat-completions 协议，透不过这种服务端工具。
         enabled: ${AGENTSCOPE_WEB_SEARCH_ENABLED:true}
-        firecrawl-url: ${AGENTSCOPE_FIRECRAWL_URL:https://api.firecrawl.dev/v2/search}
-        firecrawl-api-key: ${AGENTSCOPE_FIRECRAWL_API_KEY:${FIRECRAWL_API_KEY:}}
-        max-results: ${AGENTSCOPE_WEB_SEARCH_MAX_RESULTS:5}
-        timeout: ${AGENTSCOPE_WEB_SEARCH_TIMEOUT:30s}
-        # 成功结果的 TTL + 条数上限：同 query 窗口内命中缓存，避免重复计费。
+        provider: ${AGENTSCOPE_WEB_SEARCH_PROVIDER:searxng}
+        # ---- SearXNG 后端（默认）----
+        # 实例的 settings.yml 必须开 json 输出：search: formats: [html, json]，否则返回 403。
+        searxng-url: ${AGENTSCOPE_SEARXNG_URL:http://localhost:8888}
+        searxng-language: ${AGENTSCOPE_SEARXNG_LANGUAGE:zh-CN}
+        # ---- DeepSeek 原生搜索后端（provider=deepseek 时才需要 key）----
+        base-url: ${AGENTSCOPE_WEB_SEARCH_BASE_URL:https://api.deepseek.com/anthropic/v1}
+        api-key: ${AGENTSCOPE_WEB_SEARCH_API_KEY:${DEEPSEEK_API_KEY:}}
+        model: ${AGENTSCOPE_WEB_SEARCH_MODEL:deepseek-v4-flash}
+        max-results: ${AGENTSCOPE_WEB_SEARCH_MAX_RESULTS:8}
+        # 原生搜索 = 一次完整模型轮次，默认超时比纯检索端点长。
+        timeout: ${AGENTSCOPE_WEB_SEARCH_TIMEOUT:60s}
+        max-uses: ${AGENTSCOPE_WEB_SEARCH_MAX_USES:5}
+        max-tokens: ${AGENTSCOPE_WEB_SEARCH_MAX_TOKENS:4096}
+        # 成功结果的 TTL + 条数上限：同 query 窗口内命中缓存，避免重复调用。
         cache-ttl: ${AGENTSCOPE_WEB_SEARCH_CACHE_TTL:5m}
         cache-max-entries: ${AGENTSCOPE_WEB_SEARCH_CACHE_MAX_ENTRIES:256}
       critique-enabled: ${AGENTSCOPE_CRITIQUE_ENABLED:true}

@@ -59,6 +59,27 @@ const asset = (id: string): MediaAsset => ({
 });
 
 describe('GenerationRecordsPanel', () => {
+  it('closes on outside pointerdown but ignores its own trigger and preview overlay', () => {
+    const onClose = vi.fn();
+    render(<GenerationRecordsPanel onClose={onClose} />);
+
+    // 抽屉内部点击不关
+    fireEvent.pointerDown(screen.getByRole('heading', { name: '生成记录' }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    // 右上角「生成记录」入口自己负责开/关
+    const trigger = document.createElement('button');
+    trigger.className = 'canvas-quick-action generation-records-trigger';
+    document.body.appendChild(trigger);
+    fireEvent.pointerDown(trigger);
+    expect(onClose).not.toHaveBeenCalled();
+    trigger.remove();
+
+    // 点别处（画布空白 / 任务队列）收起抽屉
+    fireEvent.pointerDown(document.body);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     vi.stubGlobal('URL', {
       ...URL,

@@ -17,6 +17,8 @@ vi.mock('@xyflow/react', () => ({
   NodeToolbar: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   Position: { Top: 'top', Bottom: 'bottom' },
   useReactFlow: () => ({ fitView: vi.fn() }),
+  useStore: (selector: (state: { nodes: unknown }) => unknown) =>
+    selector({ nodes: { find: () => ({ id: 'node', selected: true }), filter: () => [{}] } }),
 }));
 
 vi.mock('../services/jobRunner', () => ({

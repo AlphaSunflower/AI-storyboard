@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { resolveAbovePopover } from './abovePopover';
+import { act, cleanup, renderHook } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolveAbovePopover, useAbovePopoverPlacement } from './abovePopover';
 
 const viewport = { width: 1440, height: 900 };
 
@@ -48,5 +49,59 @@ describe('resolveAbovePopover', () => {
     expect(narrow.width).toBe(800 - 16);
     expect(narrow.maxHeight).toBe(0);
     expect(narrow.bottom).toBe(600 + 8);
+  });
+});
+
+describe('useAbovePopoverPlacement', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function anchorWith(width: () => number) {
+    const node = document.createElement('div');
+    node.getBoundingClientRect = (() => {
+      const w = width();
+      return {
+        left: 300, right: 300 + w, top: 500, bottom: 560, width: w, height: 60, x: 300, y: 500,
+        toJSON: () => ({}),
+      } as DOMRect;
+    }) as Element['getBoundingClientRect'];
+    return { current: node };
+  }
+
+  it('keeps tracking the anchor when it resizes', () => {
+    // 输入卡从收缩态展开有 260ms 的 max-width 过渡（480→780）。只在打开那一刻量一次，
+    // 斜杠命令列表会停在中间宽度上，比输入框窄一截。
+    const callbacks: Array<() => void> = [];
+    class FakeResizeObserver {
+      constructor(callback: () => void) { callbacks.push(callback); }
+      observe() { /* 记录锚点即可，测试手动触发 */ }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+
+    let renderedWidth = 480;
+    const ref = anchorWith(() => renderedWidth);
+    const { result } = renderHook(() =>
+      useAbovePopoverPlacement(true, ref, { gap: 8, align: 'stretch' }));
+
+    expect(result.current?.width).toBe(480);
+
+    renderedWidth = 780;
+    act(() => { callbacks.forEach((callback) => callback()); });
+
+    expect(result.current?.width).toBe(780);
+    expect(callbacks).toHaveLength(1);
+  });
+
+  it('measures without a ResizeObserver in the host', () => {
+    // jsdom 默认没有 ResizeObserver，缺失时不能抛错。
+    const ref = anchorWith(() => 780);
+    const { result } = renderHook(() =>
+      useAbovePopoverPlacement(true, ref, { gap: 8, align: 'stretch' }));
+
+    expect(result.current?.width).toBe(780);
   });
 });

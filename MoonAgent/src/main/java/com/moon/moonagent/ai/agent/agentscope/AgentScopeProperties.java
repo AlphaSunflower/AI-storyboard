@@ -16,6 +16,7 @@ public class AgentScopeProperties {
     private int maxIters = 24;
     private int assetSearchLimit = 8;
     private boolean directMediaGeneration = true;
+    private int journeyDirectVideoMaxSeconds = 15;
     private String stateSchema = "public";
     private String stateTable = "agentscope_sessions";
     private String workspaceDir = "";
@@ -102,6 +103,21 @@ public class AgentScopeProperties {
 
     public void setDirectMediaGeneration(boolean directMediaGeneration) {
         this.directMediaGeneration = directMediaGeneration;
+    }
+
+    /**
+     * 复合旅程直接出片的时长上限（秒）。
+     *
+     * <p>≤ 该值走「生图 → 视频」短分支；&gt; 该值或显式要求分镜时走
+     * 「分镜 → 逐镜图片 → 逐镜视频 → 合成」长分支。默认 15 秒，与
+     * {@code VideoGenerationPolicy.MAX_DIRECT_SECONDS} 的单镜门禁保持一致。
+     */
+    public int getJourneyDirectVideoMaxSeconds() {
+        return journeyDirectVideoMaxSeconds;
+    }
+
+    public void setJourneyDirectVideoMaxSeconds(int journeyDirectVideoMaxSeconds) {
+        this.journeyDirectVideoMaxSeconds = Math.max(1, Math.min(600, journeyDirectVideoMaxSeconds));
     }
 
     public String getStateSchema() {
@@ -462,10 +478,18 @@ public class AgentScopeProperties {
     }
 
     /**
-     * 网页搜索配置。
+     * 网页搜索配置。支持两个后端，用 {@code search-provider} 切换：
      *
-     * <p>上游 Harness 的 {@code web_search} 只支持 Tavily 且直接读 {@code TAVILY_API_KEY}，本项目改用
-     * Firecrawl REST（{@code /v2/search}）作为搜索后端，见 {@code AgentScopeWebTools}。
+     * <ul>
+     *   <li>{@link Provider#SEARXNG}（默认，自托管）：只打自己部署的 SearXNG
+     *       {@code GET/POST /search?format=json}。所有计算都在自己机器上，无第三方 key、无按次计费；
+     *       代价是仍需一台能出网的 SearXNG 去取上游引擎结果。</li>
+     *   <li>{@link Provider#DEEPSEEK}：DeepSeek 原生网页搜索（对齐 DSH 的
+     *       {@code @deepseek-ai/dsh-web-search-deepseek}）。一次 Anthropic 兼容 Messages 调用
+     *       （{@code POST {deepseek-base-url}/messages}）携带服务端工具 {@code web_search_20250305}，
+     *       结果从结构化的 {@code web_search_tool_result} 块里解析，绝不从模型文本里抓 URL。
+     *       搜索在 DeepSeek 服务端执行，按账号计费，因此必须有 key。</li>
+     * </ul>
      *
      * <p>不走 AgentScope 自带 MCP 客户端：它编译时依赖 MCP SDK 0.17.x 的
      * {@code HttpClientStreamableHttpTransport.Builder#customizeRequest}，而本项目根 pom 为 Spring AI 2.0
@@ -473,17 +497,49 @@ public class AgentScopeProperties {
      */
     public static class WebSearch {
 
+        /** 搜索后端。 */
+        public enum Provider {
+            /** 自托管 SearXNG（默认）。 */
+            SEARXNG,
+            /** DeepSeek 原生网页搜索（服务端执行，按次计费）。 */
+            DEEPSEEK;
+
+            /** 宽松解析配置值；未知值回退默认后端而不是静默禁用能力。 */
+            static Provider parse(String value) {
+                if (value == null || value.isBlank()) return SEARXNG;
+                String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+                return "deepseek".equals(normalized) ? DEEPSEEK : SEARXNG;
+            }
+        }
+
+        /** 自托管 SearXNG 默认地址（官方容器默认监听 8080，这里用 compose 常见的 8888 映射）。 */
+        public static final String DEFAULT_SEARXNG_URL = "http://localhost:8888";
+        /** Anthropic 兼容 Messages 基址；{@code /messages} 由客户端追加。 */
+        public static final String DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic/v1";
+        /** Anthropic 格式模型名，与本仓库 DSH 客户端（web-search-deepseek）保持一致。 */
+        public static final String DEFAULT_MODEL = "deepseek-v4-flash";
+
         private boolean enabled = true;
-        private String firecrawlUrl = "https://api.firecrawl.dev/v2/search";
-        private String firecrawlApiKey = "";
-        private int maxResults = 5;
-        private Duration timeout = Duration.ofSeconds(30);
+        private Provider provider = Provider.SEARXNG;
+        private String searxngUrl = DEFAULT_SEARXNG_URL;
+        private String searxngLanguage = "zh-CN";
+        private String baseUrl = DEFAULT_BASE_URL;
+        private String apiKey = "";
+        private String model = DEFAULT_MODEL;
+        private int maxResults = 8;
+        private int maxUses = 5;
+        private int maxTokens = 4096;
+        private Duration timeout = Duration.ofSeconds(60);
         private Duration cacheTtl = Duration.ofMinutes(5);
         private int cacheMaxEntries = 256;
 
-        /** 只有开启且拿到 key 才注册工具；否则保留原状，由调用方给出明确提示。 */
+        /** 只有开启且当前后端所需配置齐全才注册工具；否则保留原状，由调用方给出明确提示。 */
         public boolean isConfigured() {
-            return enabled && firecrawlApiKey != null && !firecrawlApiKey.isBlank();
+            if (!enabled) return false;
+            if (provider == Provider.SEARXNG) {
+                return searxngUrl != null && !searxngUrl.isBlank();
+            }
+            return apiKey != null && !apiKey.isBlank();
         }
 
         public boolean isEnabled() {
@@ -494,21 +550,86 @@ public class AgentScopeProperties {
             this.enabled = enabled;
         }
 
-        public String getFirecrawlUrl() {
-            return firecrawlUrl;
+        public Provider getProvider() {
+            return provider;
         }
 
-        public void setFirecrawlUrl(String firecrawlUrl) {
-            this.firecrawlUrl = firecrawlUrl == null || firecrawlUrl.isBlank()
-                    ? "https://api.firecrawl.dev/v2/search" : firecrawlUrl.trim();
+        public void setProvider(String provider) {
+            this.provider = Provider.parse(provider);
         }
 
-        public String getFirecrawlApiKey() {
-            return firecrawlApiKey;
+        /** SearXNG 的 {@code /search} 端点（已带 format=json）。 */
+        public String getSearxngEndpoint() {
+            String base = searxngUrl == null || searxngUrl.isBlank() ? DEFAULT_SEARXNG_URL : searxngUrl.trim();
+            while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+            return base + "/search";
         }
 
-        public void setFirecrawlApiKey(String firecrawlApiKey) {
-            this.firecrawlApiKey = firecrawlApiKey == null ? "" : firecrawlApiKey.trim();
+        public String getSearxngUrl() {
+            return searxngUrl;
+        }
+
+        public void setSearxngUrl(String searxngUrl) {
+            this.searxngUrl = searxngUrl == null || searxngUrl.isBlank()
+                    ? DEFAULT_SEARXNG_URL : searxngUrl.trim();
+        }
+
+        /** 传给 SearXNG 的 {@code language} 参数。 */
+        public String getSearxngLanguage() {
+            return searxngLanguage;
+        }
+
+        public void setSearxngLanguage(String searxngLanguage) {
+            this.searxngLanguage = searxngLanguage == null ? "" : searxngLanguage.trim();
+        }
+
+        /** 完整 Messages 端点；调用方直接 POST 该地址。 */
+        public String getMessagesEndpoint() {
+            String base = baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE_URL : baseUrl.trim();
+            while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+            return base + "/messages";
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE_URL : baseUrl.trim();
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey == null ? "" : apiKey.trim();
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model == null || model.isBlank() ? DEFAULT_MODEL : model.trim();
+        }
+
+        /** 服务端网页搜索每次请求的最大使用次数（{@code max_uses}），仅 DeepSeek 后端使用。 */
+        public int getMaxUses() {
+            return maxUses;
+        }
+
+        public void setMaxUses(int maxUses) {
+            this.maxUses = Math.max(1, Math.min(10, maxUses));
+        }
+
+        /** 该次辅助 Messages 调用的生成 token 上限，仅 DeepSeek 后端使用。 */
+        public int getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(int maxTokens) {
+            this.maxTokens = Math.max(256, Math.min(32_000, maxTokens));
         }
 
         public int getMaxResults() {
@@ -524,8 +645,9 @@ public class AgentScopeProperties {
         }
 
         public void setTimeout(Duration timeout) {
+            // 原生搜索是一次完整模型轮次，比纯检索端点慢，默认 60s。
             this.timeout = timeout == null || timeout.isZero() || timeout.isNegative()
-                    ? Duration.ofSeconds(30) : timeout;
+                    ? Duration.ofSeconds(60) : timeout;
         }
 
         /** 成功搜索结果的 TTL；相同 query 在窗口内直接命中缓存，避免重复计费。 */

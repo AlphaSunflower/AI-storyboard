@@ -87,7 +87,7 @@ test('adapts every canvas page to a phone viewport', async ({ page }) => {
   expect(handleBox!.width).toBeGreaterThanOrEqual(17);
   expect(handleBox!.height).toBeGreaterThanOrEqual(17);
 
-  await page.getByRole('button', { name: '打开执行服务' }).click();
+  await page.getByRole('button', { name: '打开 Moon 智能体' }).click();
   await expect(page.locator('.chat-workspace')).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await assertInsideViewport(page, '.chat-workspace');
@@ -100,10 +100,9 @@ test('adapts every canvas page to a phone viewport', async ({ page }) => {
   await page.getByRole('button', { name: '关闭项目库' }).click();
   await expect(page.getByLabel('项目库抽屉')).toHaveCount(0);
 
-  // 430px 以下工具岛会隐藏“生成记录”按钮，移动端的入口在任务队列面板里
-  await page.getByRole('button', { name: '任务队列' }).click();
-  await page.getByRole('dialog', { name: '任务队列' })
-    .getByRole('button', { name: '生成记录' }).click();
+  // 生成记录与任务队列并排在右上角（左栏工具岛只放节点与「上传 / 项目库」）
+  await assertInsideViewport(page, '.canvas-quick-actions');
+  await page.getByRole('button', { name: '生成记录' }).click();
   await expect(page.getByRole('heading', { name: '生成记录' })).toBeVisible();
   await assertNoHorizontalOverflow(page);
   await assertInsideViewport(page, '.generation-records-panel');

@@ -10,6 +10,11 @@ import {
   PROJECT_LIBRARY_DRAG_MIME,
   serializeDragPayload,
 } from '../../lib/projectLibraryDrag';
+import {
+  AGENT_ASSET_DRAG_MIME,
+  serializeAgentAssetDragPayload,
+} from '../../lib/agentAssetDrag';
+import { defaultGenerationPreferences } from '../../lib/generationPreferences';
 import { ChatComposer } from './ChatComposer';
 
 beforeEach(() => {
@@ -80,6 +85,95 @@ describe('ChatComposer project library drops', () => {
     await waitFor(() => {
       expect(attach).toHaveBeenCalledWith('conversation-1', 'group-1');
     });
+  });
+
+  it('keeps the drop highlight opaque so the card does not turn see-through over media', () => {
+    render(<ChatComposer />);
+    const card = document.querySelector('.chat-composer-card') as HTMLElement;
+
+    fireEvent.dragEnter(card, {
+      dataTransfer: {
+        types: [AGENT_ASSET_DRAG_MIME],
+        getData: () => '',
+        files: [],
+      },
+    });
+
+    // 输入卡绝对定位盖在消息流上，高亮底色只要带一点透明，背后有图就整块透出来。
+    expect(card.style.background).not.toMatch(/rgba\([^)]*0\.0\d/);
+    expect(card.style.border).toContain('65, 118, 230');
+  });
+
+  it('adds a dropped generation-center image to the composer references', async () => {
+    render(<ChatComposer />);
+
+    const payload = serializeAgentAssetDragPayload({
+      url: '/api/files/images/generated.png',
+      name: 'generated.png',
+      kind: 'image',
+    });
+    fireEvent.drop(document.querySelector('.chat-composer-card')!, {
+      dataTransfer: {
+        types: [AGENT_ASSET_DRAG_MIME],
+        getData: (type: string) => type === AGENT_ASSET_DRAG_MIME ? payload : '',
+        files: [],
+      },
+    });
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().refImageUrls).toContain('/api/files/images/generated.png');
+    });
+  });
+
+  it('routes a dropped generation-center video to the reference media instead of images', async () => {
+    render(<ChatComposer />);
+
+    const payload = serializeAgentAssetDragPayload({
+      url: '/api/files/videos/generated.mp4',
+      name: 'generated.mp4',
+      kind: 'video',
+    });
+    fireEvent.drop(document.querySelector('.chat-composer-card')!, {
+      dataTransfer: {
+        types: [AGENT_ASSET_DRAG_MIME],
+        getData: (type: string) => type === AGENT_ASSET_DRAG_MIME ? payload : '',
+        files: [],
+      },
+    });
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().pickedReferenceVideos).toContain('/api/files/videos/generated.mp4');
+    });
+    expect(useAgentStore.getState().refImageUrls).not.toContain('/api/files/videos/generated.mp4');
+  });
+
+  it('does not treat a dropped asset as a scene reference', async () => {
+    // 素材拖拽同样会写 text/plain；素材分支必须排在分镜兜底之前，
+    // 否则会被 JSON.parse 成场景引用，直接发一条「请查看 分镜N」出去。
+    const sendMessage = vi.spyOn(useAgentStore.getState(), 'sendMessage');
+    render(<ChatComposer />);
+
+    fireEvent.drop(document.querySelector('.chat-composer-card')!, {
+      dataTransfer: {
+        types: [AGENT_ASSET_DRAG_MIME],
+        getData: (type: string) => {
+          if (type === AGENT_ASSET_DRAG_MIME) {
+            return serializeAgentAssetDragPayload({
+              url: '/api/files/images/generated.png',
+              name: 'generated.png',
+              kind: 'image',
+            });
+          }
+          return JSON.stringify([{ sceneNumber: 1 }]);
+        },
+        files: [],
+      },
+    });
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().refImageUrls).toContain('/api/files/images/generated.png');
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('shows reference image thumbnails instead of a count-only chip', () => {
@@ -519,6 +613,94 @@ describe('ChatComposer 斜杠命令', () => {
     expect(screen.getByText('侧边')).toBeTruthy();
   });
 
+  it('无用量数据时「状态」沿用静态说明', () => {
+    useAgentStore.setState({ messages: [] });
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } });
+
+    expect(screen.getByText('显示会话 ID、背景信息与额度')).toBeTruthy();
+  });
+
+  it('「状态」把缓存、运行轮数与输出速度汇总成实时摘要（与底部状态栏同口径）', () => {
+    useAgentStore.setState({
+      messages: [
+        {
+          id: 'u1', role: 'user', content: '第一问', createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'a1', role: 'assistant', content: '第一答', createdAt: new Date().toISOString(),
+          metadata: {
+            kind: 'assistant-reply',
+            metrics: {
+              inputTokens: 1000, outputTokens: 300, cachedInputTokens: 800, totalTokens: 1300,
+              contextTokens: 4000, contextWindowTokens: 8000,
+              durationMs: 20000, modelDurationMs: 10000, modelCalls: 1, complete: true,
+            },
+          },
+        },
+        {
+          id: 'a2', role: 'assistant', content: '第二答', createdAt: new Date().toISOString(),
+          metadata: {
+            kind: 'assistant-reply',
+            metrics: {
+              inputTokens: 1200, outputTokens: 200, cachedInputTokens: 400, totalTokens: 1400,
+              contextTokens: 4200, contextWindowTokens: 8000,
+              durationMs: 15000, modelDurationMs: 10000, modelCalls: 1, complete: true,
+            },
+          },
+        },
+      ],
+    } as never);
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } });
+
+    const summary = screen.getByText(/运行 1 轮/).textContent ?? '';
+    // 轮 = 用户提问次数（1 条 user），步 = 各轮 modelCalls 之和（1 + 1）。
+    expect(summary).toContain('运行 1 轮 2 步');
+    // 缓存命中率 = 累计缓存读取 / 累计输入 = (800 + 400) / (1000 + 1200)。
+    expect(summary).toContain('缓存命中 55%');
+    // 输出速度分母优先用推理耗时：(300 + 200) / (10s + 10s) = 25 tok/s。
+    expect(summary).toContain('输出 25 tok/s');
+    // 上下文占用取最新一轮：4200 / 8000。
+    expect(summary).toContain('上下文 53%');
+  });
+
+  it('「状态」窗口里也要有运行统计与缓存，且宽度跟输入框一致', () => {
+    useAgentStore.setState({
+      messages: [
+        {
+          id: 'a1', role: 'assistant', content: '答', createdAt: new Date().toISOString(),
+          metadata: {
+            kind: 'assistant-reply',
+            metrics: {
+              inputTokens: 2000, outputTokens: 400, cachedInputTokens: 1500, totalTokens: 2400,
+              contextTokens: 6000, contextWindowTokens: 12000,
+              durationMs: 20000, modelDurationMs: 8000, modelCalls: 3, complete: true,
+            },
+          },
+        },
+      ],
+    } as never);
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/状态' } });
+    fireEvent.keyDown(window, { key: 'Enter' });
+
+    const card = document.querySelector<HTMLElement>('.chat-status-card');
+    expect(card).not.toBeNull();
+    const text = card!.textContent ?? '';
+    expect(text).toContain('运行统计');
+    expect(text).toContain('3 步');
+    expect(text).toContain('50 tok/s');
+    expect(text).toContain('缓存');
+    expect(text).toContain('命中 75%');
+
+    // 共用的 .chat-status-card 把宽度钉在 236px（底部状态栏那张深色小卡），
+    // 这张卡必须显式放开宽度，靠左右贴边撑满输入卡。
+    expect(card!.style.width).toBe('auto');
+    expect(card!.style.left).toBe('0px');
+    expect(card!.style.right).toBe('0px');
+  });
+
   it('新对话（无消息）压缩项不可用', () => {
     render(<ChatComposer />);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '/压缩' } });
@@ -731,6 +913,43 @@ describe('ChatComposer compact mode', () => {
     expect(screen.getByPlaceholderText(/发消息或创建任务/).getAttribute('rows')).toBe('2');
   });
 
+  it('marks the attachment block collapsed after an asset drop so it stops shoving the input aside', async () => {
+    // 收缩态是 flex-direction: row，附加行会变成输入框的横向兄弟。
+    // 它必须同时带上 is-collapsed，CSS 才会把宽度也收掉（只收高度的话仍按内容宽占位）。
+    const { container } = render(<ChatComposer compact />);
+
+    fireEvent.drop(document.querySelector('.chat-composer-card')!, {
+      dataTransfer: {
+        types: [AGENT_ASSET_DRAG_MIME],
+        getData: (type: string) => type === AGENT_ASSET_DRAG_MIME
+          ? serializeAgentAssetDragPayload({
+              url: '/api/files/images/generated.png',
+              name: 'generated.png',
+              kind: 'image',
+            })
+          : '',
+        files: [],
+      },
+    });
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().refImageUrls).toHaveLength(1);
+    });
+
+    const card = container.querySelector('.chat-composer-card')!;
+    expect(card.className).toContain('is-collapsed');
+    expect(card.querySelector('.chat-composer-extra')?.className).toContain('is-collapsed');
+  });
+
+  it('expands a collapsed composer when an asset drag arrives from outside', () => {
+    // 从生成中心往输入框拖素材时，页面按「指针是否越过侧边栏」把 forceExpanded 打开，
+    // 收缩态必须让位，否则 380px 侧边栏旁只剩一条细输入框，图没有落点。
+    const { container } = render(<ChatComposer compact forceExpanded />);
+
+    expect(container.querySelector('.chat-composer-extra--inline.is-collapsed')).toBeNull();
+    expect(screen.getByPlaceholderText(/发消息或创建任务/).getAttribute('rows')).toBe('2');
+  });
+
   it('stays expanded when the thread is at the bottom', () => {
     const { container } = render(<ChatComposer />);
 
@@ -794,5 +1013,63 @@ describe('ChatComposer compact mode', () => {
     expect(card?.contains(send)).toBe(true);
     expect(input.nextElementSibling).toBe(send.parentElement?.parentElement);
     expect(input.style.flex).toContain('1');
+  });
+});
+
+describe('ChatComposer 窄栏底部行（画布 /canvas 内嵌小窗）', () => {
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      refImageUrls: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+    });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const stubCardWidth = (width: number) => {
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);
+  };
+
+  it('窄于阈值时发送收成向上箭头图标按钮，文字不再折行', () => {
+    stubCardWidth(330);
+    render(<ChatComposer />);
+
+    const send = screen.getByRole('button', { name: '发送' });
+    expect(send.textContent).toBe('');
+    expect(send.getAttribute('title')).toBe('发送');
+    expect(send.querySelector('svg')).toBeTruthy();
+  });
+
+  it('够宽时发送仍是文字按钮', () => {
+    stubCardWidth(760);
+    render(<ChatComposer />);
+
+    expect(screen.getByRole('button', { name: '发送' }).textContent).toBe('发送');
+  });
+
+  it('窄栏下生成偏好入口显示「自定」', () => {
+    stubCardWidth(330);
+    useAgentStore.setState({
+      generationPreferences: { ...defaultGenerationPreferences(), auto: false },
+    });
+    render(<ChatComposer />);
+
+    const trigger = screen.getByRole('button', { name: '生成偏好：自定义' });
+    expect(trigger.textContent).toBe('自定');
   });
 });

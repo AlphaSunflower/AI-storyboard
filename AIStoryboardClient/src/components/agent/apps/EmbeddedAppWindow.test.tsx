@@ -279,6 +279,34 @@ describe('EmbeddedAppWindow chat dock resizing', () => {
     expect(onRequestDock).not.toHaveBeenCalled();
   });
 
+  it('lets the iframe go of pointer events while the window is being resized', () => {
+    const { container } = render(
+      <EmbeddedAppWindow
+        tabs={tabs}
+        activeKey="docs"
+        onSelectTab={vi.fn()}
+        onCloseTab={vi.fn()}
+        onCloseWindow={vi.fn()}
+        docked
+        splitMaxWidth={600}
+        expandedSplitMaxWidth={600}
+        sidebarCollapsed
+        sidebarCollapseWidth={800}
+        onCollapseSidebar={vi.fn()}
+        onRequestDock={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+    const shell = container.querySelector('.embedded-app-window')!;
+    const resize = screen.getByRole('button', { name: '拖拽调整窗口大小' });
+
+    fireEvent.pointerDown(resize, { clientX: 500, clientY: 500, pointerId: 13 });
+    expect(shell.classList.contains('is-resizing')).toBe(true);
+
+    fireEvent.pointerUp(document, { clientX: 500, clientY: 500, pointerId: 13 });
+    expect(shell.classList.contains('is-resizing')).toBe(false);
+  });
+
   it('passes the current access token to the canvas iframe', () => {
     setAccessToken('canvas-token');
     render(

@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,10 +23,16 @@ import static org.mockito.Mockito.when;
 
 class AgentScopeWebToolsCacheTest {
 
+    /** 一次 native 搜索的最小结构化响应：结果块 + 带引用摘录的 text 块。 */
     private static final String BODY = """
-            {"success":true,"data":{"web":[
-              {"url":"https://example.com/a","title":"A","description":"first"}
-            ]}}
+            {"content":[
+              {"type":"web_search_tool_result","content":[
+                {"type":"web_search_result","url":"https://example.com/a","title":"A",
+                 "page_age":"2026-09-01"}]},
+              {"type":"text","text":"summary","citations":[
+                {"type":"web_search_result_location","url":"https://example.com/a",
+                 "cited_text":"first"}]}
+            ]}
             """;
 
     @Test
@@ -117,20 +124,89 @@ class AgentScopeWebToolsCacheTest {
         }
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void webFetchRefusesRedirectInsteadOfFollowingIt() throws Exception {
+        HttpClient http = mock(HttpClient.class);
+        HttpResponse<byte[]> redirect = byteResponse(302, new byte[0]);
+        // 302 无 Location 也要拒绝：跟随跳转会绕过 SSRF 守卫（首跳公网、二跳私网）。
+        doReturn(redirect).when(http).<byte[]>send(any(HttpRequest.class),
+                any(HttpResponse.BodyHandler.class));
+        AgentScopeTool fetch = tool(http, AgentScopeWebTools.WEB_FETCH);
+
+        Object result = fetch.invoke(Map.of("url", "https://example.com/redirected"), null);
+
+        assertThat(result.toString()).contains("refused to follow HTTP 302");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void webFetchRejectsPrivateAddressesBeforeAnyRequest() throws Exception {
+        HttpClient http = mock(HttpClient.class);
+        AgentScopeTool fetch = tool(http, AgentScopeWebTools.WEB_FETCH);
+
+        Object result = fetch.invoke(Map.of("url", "http://169.254.169.254/latest/meta-data"), null);
+
+        assertThat(result.toString()).contains("ok=false");
+        verify(http, times(0))
+                .send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void webFetchConvertsHtmlToMarkdown() throws Exception {
+        HttpClient http = mock(HttpClient.class);
+        String html = "<html><head><title>Title</title><style>b{}</style></head><body>"
+                + "<h1>Heading</h1><p>Body <a href=\"https://example.com/x\">link</a></p>"
+                + "<script>var x = 1;</script></body></html>";
+        HttpResponse<byte[]> ok = byteResponse(200, html.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(ok.headers()).thenReturn(headers("text/html; charset=utf-8"));
+        doReturn(ok).when(http).<byte[]>send(any(HttpRequest.class),
+                any(HttpResponse.BodyHandler.class));
+        AgentScopeTool fetch = tool(http, AgentScopeWebTools.WEB_FETCH);
+
+        Object result = fetch.invoke(Map.of("url", "https://example.com/page"), null);
+
+        assertThat(result.toString())
+                .contains("html->markdown")
+                .contains("# Heading")
+                .contains("https://example.com/x")
+                .doesNotContain("var x = 1");
+    }
+
     private static AgentScopeTool searchTool(HttpClient http) {
+        return tool(http, AgentScopeWebTools.WEB_SEARCH);
+    }
+
+    private static AgentScopeTool tool(HttpClient http, String name) {
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setFirecrawlApiKey("fc-test");
+        properties.getWebSearch().setProvider("deepseek");
+        properties.getWebSearch().setApiKey("sk-test");
         return new AgentScopeWebTools(properties, http).tools().stream()
-                .filter(tool -> AgentScopeWebTools.WEB_SEARCH.equals(tool.getName()))
+                .filter(tool -> name.equals(tool.getName()))
                 .findFirst()
                 .orElseThrow();
     }
 
+    @SuppressWarnings("unchecked")
     private static HttpResponse<String> response(int status, String body) {
-        @SuppressWarnings("unchecked")
         HttpResponse<String> response = mock(HttpResponse.class);
         when(response.statusCode()).thenReturn(status);
         when(response.body()).thenReturn(body);
         return response;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static HttpResponse<byte[]> byteResponse(int status, byte[] body) {
+        HttpResponse<byte[]> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(status);
+        when(response.body()).thenReturn(body);
+        when(response.headers()).thenReturn(java.net.http.HttpHeaders.of(Map.of(), (a, b) -> true));
+        return response;
+    }
+
+    private static java.net.http.HttpHeaders headers(String contentType) {
+        return java.net.http.HttpHeaders.of(
+                Map.of("content-type", java.util.List.of(contentType)), (a, b) -> true);
     }
 }

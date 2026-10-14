@@ -11,6 +11,7 @@ import com.moon.moonagent.ai.agent.sandbox.MoonSandboxClient;
 import com.moon.moonagent.ai.agent.sandbox.MoonSandboxException;
 import com.moon.moonagent.ai.agent.sandbox.SandboxArtifactPublisher;
 import com.moon.moonagent.ai.agent.sandbox.SandboxExecutionResult;
+import com.moon.moonagent.ai.agent.sandbox.SandboxOutputReconciler;
 import com.moon.moonagent.ai.agent.sandbox.SandboxSessionLock;
 import com.moon.moonagent.ai.agent.sandbox.SandboxSessionRegistry;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
@@ -32,12 +33,14 @@ import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.entity.AgentAsyncTask;
+import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.entity.Scene;
 import com.moon.moonagent.entity.StoryboardVideoQueue;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
+import com.moon.moonagent.mapper.AgentAssetMapper;
 import com.moon.moonagent.mapper.AgentAsyncTaskMapper;
 import com.moon.moonagent.mapper.AgentConversationMapper;
 import com.moon.moonagent.mapper.AgentMessageMapper;
@@ -47,6 +50,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -65,12 +69,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 @Component
 @ConditionalOnProperty(prefix = "ai.agent.agentscope", name = "enabled",
         havingValue = "true")
-@RequiredArgsConstructor
 public class AgentScopeAsyncTaskService implements AgentRecoverySource {
 
     private static final Logger log = LoggerFactory.getLogger(AgentScopeAsyncTaskService.class);
@@ -85,12 +90,15 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     private final StoryboardProductionService storyboardProductionService;
     private final AgentTaskEventHub taskEvents;
     private final AgentScopeMessageBus messageBus;
+    private final AgentAssetMapper assetMapper;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final Semaphore executorAdmission = new Semaphore(64, true);
     /** 任务运行期的实时输出缓冲（仅内存，终态清理），供任务面板流式展示。 */
     private static final int LIVE_STREAM_MAX_CHARS = 8000;
     private static final long LIVE_STREAM_PUBLISH_INTERVAL_MILLIS = 400L;
     private static final long LIVE_STREAM_PERSIST_INTERVAL_MILLIS = 1500L;
+    /** 复合旅程视频子任务等待 agent_assets 终态的上限（与既有人工确认链路一致，偏保守）。 */
+    private static final Duration VIDEO_ASSET_WAIT = Duration.ofMinutes(15);
     private final Map<String, StringBuilder> liveStreams = new ConcurrentHashMap<>();
     private final Map<String, StringBuilder> liveThinking = new ConcurrentHashMap<>();
     private final Map<String, Long> liveStreamPublishedAt = new ConcurrentHashMap<>();
@@ -100,6 +108,64 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     private final PollingBackoff pollBackoff = PollingBackoff.video();
     /** 任务 → userId：推送实时输出时避免每次都查库。 */
     private final Map<String, String> liveUserIds = new ConcurrentHashMap<>();
+    /**
+     * 子任务终态回调：复合旅程（{@code AgentScopeJourneyRunner}）用它把「子任务完成」
+     * 直接接到父子编排上，不需要轮询数据库，也不需要新增事件通道。
+     */
+    private final Map<String, List<Consumer<AgentAsyncTask>>> terminalListeners =
+            new ConcurrentHashMap<>();
+    /**
+     * 复合旅程编排器（按需解析）。
+     *
+     * <p>{@link AgentScopeJourneyRunner} 与本服务互相引用（本服务调度父任务、父任务回调本服务），
+     * 直接构造器注入会形成 Spring 无法打破的构造环（{@code @Autowired(required=false)} 也不生效：
+     * 依赖在容器里存在，只是当前正在创建）。这里改用 {@link ObjectProvider}，
+     * 容器注入的是按需解析器本身，不会在创建本 Bean 时触发 runner 的实例化；
+     * 真正的循环从此变成"运行时单向调用"。测试直接 new 本服务时该 provider 可为 null
+     * （旅程方法只在有 runner 时才被调用）。
+     */
+    private final ObjectProvider<AgentScopeJourneyRunner> journeyRunnerProvider;
+
+    /**
+     * 显式构造器（保留 9 参重载，既有单测无需改动）。
+     */
+    public AgentScopeAsyncTaskService(AgentAsyncTaskMapper taskMapper,
+                                     AgentConversationMapper conversationMapper,
+                                     AgentMessageMapper messageMapper,
+                                     AgentGenerationService generationService,
+                                     AgentRuntimeSupport support,
+                                     AgentScopeProperties properties,
+                                     StoryboardProductionService storyboardProductionService,
+                                     AgentTaskEventHub taskEvents,
+                                     AgentScopeMessageBus messageBus) {
+        this(taskMapper, conversationMapper, messageMapper, generationService, support, properties,
+                storyboardProductionService, taskEvents, messageBus, null, null);
+    }
+
+    @Autowired
+    public AgentScopeAsyncTaskService(AgentAsyncTaskMapper taskMapper,
+                                     AgentConversationMapper conversationMapper,
+                                     AgentMessageMapper messageMapper,
+                                     AgentGenerationService generationService,
+                                     AgentRuntimeSupport support,
+                                     AgentScopeProperties properties,
+                                     StoryboardProductionService storyboardProductionService,
+                                     AgentTaskEventHub taskEvents,
+                                     AgentScopeMessageBus messageBus,
+                                     @Autowired(required = false) AgentAssetMapper assetMapper,
+                                     ObjectProvider<AgentScopeJourneyRunner> journeyRunnerProvider) {
+        this.taskMapper = taskMapper;
+        this.conversationMapper = conversationMapper;
+        this.messageMapper = messageMapper;
+        this.generationService = generationService;
+        this.support = support;
+        this.properties = properties;
+        this.storyboardProductionService = storyboardProductionService;
+        this.taskEvents = taskEvents;
+        this.messageBus = messageBus;
+        this.assetMapper = assetMapper;
+        this.journeyRunnerProvider = journeyRunnerProvider;
+    }
 
     @Autowired(required = false)
     private transient StoryboardClient storyboardClient;
@@ -112,6 +178,9 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
 
     @Autowired(required = false)
     private transient SandboxArtifactPublisher sandboxPublisher;
+
+    @Autowired(required = false)
+    private transient SandboxOutputReconciler sandboxOutputReconciler;
 
     @Autowired(required = false)
     private transient SandboxSessionLock sandboxSessionLock;
@@ -175,6 +244,13 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                     return parent == null || isTerminal(parent.getStatus());
                 })
                 .forEach(task -> candidates.add(candidate(task)));
+        // 复合旅程：只有 queued 才可安全重放（running 的父子编排无法确认进度，由看门狗按超时处理）。
+        taskMapper.selectList(new LambdaQueryWrapper<AgentAsyncTask>()
+                        .eq(AgentAsyncTask::getKind, "journey")
+                        .eq(AgentAsyncTask::getStatus, "queued")
+                        .orderByAsc(AgentAsyncTask::getCreatedAt)
+                        .last("LIMIT " + Math.max(1, limit)))
+                .forEach(task -> candidates.add(candidate(task)));
         return candidates;
     }
 
@@ -195,6 +271,10 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             return RecoveryOutcome.completed();
         }
         if ("queued".equals(task.getStatus())) {
+            if ("journey".equals(task.getKind())) {
+                submitJourney(task);
+                return RecoveryOutcome.deferred("journey task submitted");
+            }
             if ("long-tool".equals(task.getKind())) {
                 submitStoryboardTask(task);
                 return RecoveryOutcome.deferred("storyboard task submitted");
@@ -713,6 +793,11 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if ("queued".equals(task.getStatus()) || "waiting_parent".equals(task.getStatus())) {
             updateTask(taskId, "status", "cancelled", "cancel_requested", true,
                     "stage", "cancelled", "result_summary", "任务已取消", "completed_at", now);
+            // 取消父任务必须同时收口它的子行，避免留下孤儿后台生成。
+            // 这里刻意不走 afterTerminal：queued/waiting_parent 的任务从未运行，
+            // 没有实时输出需要 flush，取消路径必须只有上面这一次终态写入。
+            releaseWaitingChildren(taskId);
+            notifyTerminalListeners(taskId);
         } else {
             updateTask(taskId, "cancel_requested", true, "status", "cancelling");
         }
@@ -1077,7 +1162,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .set("completed_at", OffsetDateTime.now()));
         if (updated > 0) {
             publish(taskId);
-            releaseChildren(taskId);
+            afterTerminal(taskId);
             appendTerminalResultToAnchor(task, content);
         }
     }
@@ -1715,7 +1800,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .set("updated_at", OffsetDateTime.now())
                 .set("completed_at", OffsetDateTime.now()));
         publish(taskId);
-        releaseChildren(taskId);
+        afterTerminal(taskId);
     }
 
     private void complete(
@@ -1771,7 +1856,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .set("updated_at", OffsetDateTime.now())
                 .set("completed_at", OffsetDateTime.now()));
         publish(taskId);
-        releaseChildren(taskId);
+        afterTerminal(taskId);
         if (enqueueWakeup) enqueueWakeupIfNeeded(taskId, content);
     }
 
@@ -1804,8 +1889,17 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                     "result_json", writeJson(SandboxArtifactPublisher.executionResult(result)));
             SandboxArtifactPublisher.PublishedArtifacts published =
                     sandboxPublisher.publish(conversation, taskId, result);
-            List<String> assetIds = published.assetIds();
-            List<String> urls = published.urls();
+            java.util.LinkedHashSet<String> assetIds = new java.util.LinkedHashSet<>(published.assetIds());
+            java.util.LinkedHashSet<String> urls = new java.util.LinkedHashSet<>(published.urls());
+            // 脚本可能写出未在执行结果里声明、或在回合末扫描之后才落盘的文件。
+            // 任务完成时对 output/ 做一次「只取新建」的补扫，保证产物在本次任务内即可见，
+            // 不再依赖更晚的回合末扫描（避免 reconciler 与异步生产者竞态）。
+            if (sandboxOutputReconciler != null) {
+                SandboxArtifactPublisher.PublishedArtifacts swept =
+                        sandboxOutputReconciler.reconcileNew(conversation, taskId);
+                assetIds.addAll(swept.assetIds());
+                urls.addAll(swept.urls());
+            }
             if (result.timedOut()) {
                 fail(taskId, "Python 脚本执行超时");
                 return;
@@ -1819,9 +1913,11 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             String content = result.stdout().isBlank()
                     ? "Python 脚本执行完成。"
                     : result.stdout();
-            complete(taskId, content, assetIds, urls, "", true, "completed");
+            complete(taskId, content, List.copyOf(assetIds), List.copyOf(urls), "", true, "completed");
         } catch (Exception error) {
-            log.warn("Sandbox task failed: taskId={}, error={}", taskId, error.getMessage());
+            // 带 throwable 记录：这条 catch 之后还会调 fail(...) 收口，若只记 message，
+            // 一旦收口路径再抛异常，日志里就只剩第二个异常，最初根因的栈会彻底丢失。
+            log.warn("Sandbox task failed: taskId={}, error={}", taskId, error.getMessage(), error);
             fail(taskId, error.getMessage() == null ? "沙箱执行失败" : error.getMessage());
         }
     }
@@ -1910,7 +2006,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .set("updated_at", OffsetDateTime.now())
                 .set("completed_at", OffsetDateTime.now()));
         publish(taskId);
-        releaseChildren(taskId);
+        afterTerminal(taskId);
         enqueueWakeupIfNeeded(taskId, "任务失败：" + error);
     }
 
@@ -2030,7 +2126,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 "stage", "cancelled",
                 "result_summary", "任务已取消",
                 "completed_at", OffsetDateTime.now());
-        releaseChildren(taskId);
+        afterTerminal(taskId);
     }
 
     private void updateTask(String taskId, Object... values) {
@@ -2179,44 +2275,41 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if (task == null) return;
         AgentConversation conversation = conversationMapper.selectById(task.getConversationId());
         if (conversation == null) return;
-        taskEvents.publish(task.getUserId(), view(task, conversation));
+        try {
+            taskEvents.publish(task.getUserId(), view(task, conversation));
+        } catch (RuntimeException pushFailure) {
+            // 推送只是「已经发生的事实」的通知：任务行在此之前已经写完。
+            // 让它抛出去会制造两个后果：调用方原本的失败原因被第二个异常顶掉（排障时只剩 NPE，
+            // 看不到真正的根因），以及 liveListener 的进度回调能把整条生成链打断。
+            // 因此这里显式降级为告警，绝不向上传播。
+            log.warn("Task snapshot push failed: taskId={}, error={}",
+                    taskId, pushFailure.getMessage());
+        }
     }
 
     private void releaseChildren(String parentTaskId) {
-        // 只在任务进入终态时调用：顺手清掉实时输出缓冲并通知前端收起
+        // 只在任务进入终态时调用：顺手清掉实时输出缓冲并通知前端收起。
         clearLiveStream(parentTaskId);
+        releaseWaitingChildren(parentTaskId);
+    }
+
+    /**
+     * 释放父任务下仍处于 {@code waiting_parent} 的子行：父任务正常结束→子行排队执行，
+     * 父任务取消→子行一并取消。每个子行的状态迁移统一走 {@link #releaseChildTask(String)}。
+     *
+     * <p>与 {@link #releaseChildren(String)} 分开是刻意的：后者还会 flush 实时输出快照，
+     * 而「取消一个从未运行过的任务」没有任何实时输出可 flush——多写一次
+     * {@code persistLiveSnapshot} 会为一次逻辑终态制造第二次 DB 写入和第二个任务视图事件。
+     */
+    private void releaseWaitingChildren(String parentTaskId) {
         AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
         if (parent == null) return;
         List<AgentAsyncTask> children = taskMapper.selectList(new LambdaQueryWrapper<AgentAsyncTask>()
                 .eq(AgentAsyncTask::getParentTaskId, parentTaskId)
                 .eq(AgentAsyncTask::getStatus, "waiting_parent")
                 .orderByAsc(AgentAsyncTask::getCreatedAt));
-        if (children.isEmpty()) return;
-        OffsetDateTime now = OffsetDateTime.now();
-        boolean cancelled = "cancelled".equals(parent.getStatus());
-        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
-                .eq("parent_task_id", parentTaskId)
-                .eq("status", "waiting_parent")
-                .set("status", cancelled ? "cancelled" : "queued")
-                .set("stage", cancelled ? "cancelled" : "accepted")
-                .set("progress", cancelled ? null : 0)
-                .set("completed_at", cancelled ? now : null)
-                .set("updated_at", now)
-                .setSql("version = COALESCE(version, 0) + 1"));
-        Map<String, AgentConversation> conversations = conversationsById(children);
         for (AgentAsyncTask child : children) {
-            child.setStatus(cancelled ? "cancelled" : "queued");
-            child.setStage(cancelled ? "cancelled" : "accepted");
-            child.setProgress(cancelled ? child.getProgress() : 0);
-            child.setCompletedAt(cancelled ? now : null);
-            child.setUpdatedAt(now);
-            AgentConversation conversation = conversations.get(child.getConversationId());
-            if (conversation != null) {
-                taskEvents.publish(child.getUserId(), view(child, conversation));
-            }
-            if (!cancelled) {
-                submit(child);
-            }
+            releaseChildTask(child.getId());
         }
     }
 
@@ -2224,6 +2317,12 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         if (task == null) return;
         if (AgentScopeImageTools.GENERATE_IMAGE_BATCH.equals(task.getToolName())) {
             submitAdmitted(() -> runBatchImageTask(task.getId()));
+            return;
+        }
+        if (AgentScopeVideoTools.GENERATE_VIDEO.equals(task.getToolName())
+                && task.getParentTaskId() != null && !task.getParentTaskId().isBlank()) {
+            // 复合旅程的视频子任务：父任务按「子任务终态」编排，所以这里不能只创建就返回。
+            submitAdmitted(() -> runJourneyVideoTask(task.getId()));
             return;
         }
         submitStoryboardTask(task);
@@ -2299,7 +2398,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         query.eq(AgentAsyncTask::getStatus, status);
     }
 
-    private static AgentTaskView view(AgentAsyncTask task, AgentConversation conversation) {
+    private AgentTaskView view(AgentAsyncTask task, AgentConversation conversation) {
         if (task == null || conversation == null) return null;
         List<String> assetIds = readStringList(task.getAssetIdsJson());
         List<String> urls = readStringList(task.getResultUrlsJson());
@@ -2326,6 +2425,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 task.getResultSummary() == null ? "" : task.getResultSummary(),
                 task.getError() == null ? "" : task.getError(),
                 task.getParentTaskId() == null ? "" : task.getParentTaskId(),
+                parentToolCallId(task),
                 task.getAnchorMessageId() == null ? "" : task.getAnchorMessageId(),
                 task.getVersion() == null ? 0L : task.getVersion(),
                 task.getCreatedAt(),
@@ -2346,6 +2446,30 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 canFollowUp);
     }
 
+    /**
+     * 工具卡归属 id：只对复合旅程生效，且只复用任务行上已有的 {@code toolCallId}，不新造关联 id。
+     *
+     * <ul>
+     *   <li>旅程父任务 → 自身的 {@code toolCallId}（发起旅程的那次工具调用）</li>
+     *   <li>旅程子任务 → 父任务的 {@code toolCallId}（步骤进度折到同一张工具卡下）</li>
+     *   <li>非旅程任务（含 retry 产生的父子关系）→ 空字符串，前端行为与今天完全一致</li>
+     * </ul>
+     */
+    private String parentToolCallId(AgentAsyncTask task) {
+        if (task == null) return "";
+        if (AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY.equals(string(task.getToolName()))) {
+            return string(task.getToolCallId());
+        }
+        String parentTaskId = string(task.getParentTaskId());
+        if (parentTaskId.isBlank()) return "";
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null
+                || !AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY.equals(string(parent.getToolName()))) {
+            return "";
+        }
+        return string(parent.getToolCallId());
+    }
+
     private static Map<String, Object> viewMap(AgentTaskView task) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("taskId", task.taskId());
@@ -2360,6 +2484,7 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         out.put("resultSummary", task.resultSummary());
         out.put("error", task.error());
         out.put("parentTaskId", task.parentTaskId());
+        out.put("parentToolCallId", task.parentToolCallId());
         out.put("anchorMessageId", task.anchorMessageId());
         out.put("version", task.version());
         out.put("createdAt", task.createdAt());
@@ -2442,6 +2567,16 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         } catch (Exception e) {
             return List.of();
         }
+    }
+
+    /** 供复合旅程编排器解析任务行 JSON（无状态纯函数，不暴露内部 ObjectMapper）。 */
+    static Map<String, Object> parseJsonMap(String value) {
+        return readMap(value);
+    }
+
+    /** 供复合旅程编排器解析任务行里的 URL 数组。 */
+    static List<String> parseJsonList(String value) {
+        return readStringList(value);
     }
 
     private static List<String> stringList(Object value) {
@@ -2636,6 +2771,648 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             prompt = prompt == null ? "" : prompt;
             sourceUrls = sourceUrls == null ? List.of() : List.copyOf(sourceUrls);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 复合旅程（produce_video_journey）：父任务 + 逐步子任务，全部复用既有 service 方法
+    // ------------------------------------------------------------------
+
+    /**
+     * 启动复合旅程父任务。父任务本身不下发媒体生成，只按分支串行调度子任务；
+     * 每个子任务带 {@code parentTaskId} 且初始为 {@code waiting_parent}，
+     * 由父任务释放成 {@code queued} 后进入既有执行链。
+     */
+    public String startJourneyTask(AgentConversation conversation,
+                                   String prompt,
+                                   List<String> prompts,
+                                   List<String> sourceUrls,
+                                   String size,
+                                   String quality,
+                                   String model,
+                                   String aspectRatio,
+                                   String resolution,
+                                   String duration,
+                                   int imageCount,
+                                   boolean explicitStoryboard,
+                                   AgentScopeJourneyPlanner.JourneyPlan plan,
+                                   String toolCallId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("prompt", prompt == null ? "" : prompt);
+        request.put("prompts", prompts == null ? List.of() : prompts);
+        request.put("sourceUrls", sourceUrls == null ? List.of() : sourceUrls);
+        request.put("size", size == null ? "" : size);
+        request.put("quality", quality == null ? "" : quality);
+        request.put("model", model == null ? "" : model);
+        request.put("aspectRatio", aspectRatio == null ? "" : aspectRatio);
+        request.put("resolution", resolution == null ? "" : resolution);
+        request.put("duration", duration == null ? "" : duration);
+        request.put("imageCount", Math.max(1, imageCount));
+        request.put("explicitStoryboard", explicitStoryboard);
+        request.put("branch", plan == null ? "short" : AgentScopeJourneyPlanner.branchName(plan.branch()));
+        request.put("steps", plan == null ? List.of() : plan.steps().stream()
+                .map(step -> Map.<String, Object>of(
+                        "order", step.order(),
+                        "kind", step.kind(),
+                        "title", step.title(),
+                        "unitCount", step.unitCount(),
+                        "unitLabel", step.unitLabel()))
+                .toList());
+        request.put("threshold", properties.getJourneyDirectVideoMaxSeconds());
+        String requestJson = writeJson(request);
+        String idempotencyKey = childIdempotencyKey(conversation.getId(), "journey", toolCallId,
+                requestJson);
+        AgentAsyncTask existing = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                .eq(AgentAsyncTask::getIdempotencyKey, idempotencyKey)
+                .last("LIMIT 1"));
+        if (existing != null) return existing.getId();
+
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY);
+        task.setKind("journey");
+        task.setStatus("queued");
+        task.setTitle("复合旅程：" + (plan == null ? "生图 → 视频"
+                : AgentScopeJourneyPlanner.branchLabel(plan.branch())));
+        task.setStage("accepted");
+        task.setProgress(0);
+        task.setRequestJson(requestJson);
+        task.setIdempotencyKey(idempotencyKey);
+        task.setVersion(0L);
+        task.setCancelRequested(false);
+        task.setUpdatedAt(OffsetDateTime.now());
+        taskMapper.insert(task);
+        publish(task.getId());
+        submitJourney(task);
+        return task.getId();
+    }
+
+    /** 按需解析复合旅程编排器；未装配（单测直接 new）时返回 null。 */
+    private AgentScopeJourneyRunner journeyRunner() {
+        ObjectProvider<AgentScopeJourneyRunner> provider = journeyRunnerProvider;
+        return provider == null ? null : provider.getIfAvailable();
+    }
+
+    /** 父任务编排器是否可用（测试装配下可能缺席）。 */
+    boolean journeyEnabled() {
+        return journeyRunner() != null;
+    }
+
+    /**
+     * 启动/释放一个批次生图子任务（父任务为空时等价于既有 {@code startBatchImageTask}）。
+     */
+    public String startJourneyImageChild(String parentTaskId,
+                                         int stepIndex,
+                                         String stepKey,
+                                         AgentConversation conversation,
+                                         String prompt,
+                                         List<String> prompts,
+                                         List<String> sourceUrls,
+                                         String size,
+                                         String quality,
+                                         int count,
+                                         boolean followUpVideo,
+                                         String videoPrompt,
+                                         String videoDuration,
+                                         String videoAspectRatio,
+                                         String videoResolution,
+                                         String toolCallId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("prompt", prompt == null ? "" : prompt);
+        request.put("prompts", prompts == null ? List.of() : prompts);
+        request.put("sourceUrls", sourceUrls == null ? List.of() : sourceUrls);
+        request.put("size", size == null ? "" : size);
+        request.put("quality", quality == null ? "" : quality);
+        request.put("count", Math.max(1, count));
+        request.put("followUpVideo", followUpVideo);
+        request.put("videoPrompt", videoPrompt == null ? "" : videoPrompt);
+        request.put("videoDuration", videoDuration == null ? "" : videoDuration);
+        request.put("videoAspectRatio", videoAspectRatio == null ? "" : videoAspectRatio);
+        request.put("videoResolution", videoResolution == null ? "" : videoResolution);
+        request.put("journeyStep", stepKey == null ? "" : stepKey);
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(AgentScopeImageTools.GENERATE_IMAGE_BATCH);
+        task.setKind("image-batch");
+        task.setTitle(count > 1 ? "生成 " + count + " 张图片" : "生成图片");
+        return insertJourneyChild(task, parentTaskId, stepIndex, stepKey, request);
+    }
+
+    /** 启动/释放一个逐镜配图子任务。 */
+    public String startJourneyStoryboardImageChild(String parentTaskId,
+                                                   int stepIndex,
+                                                   AgentConversation conversation,
+                                                   List<StoryboardImageTarget> targets,
+                                                   boolean overwrite,
+                                                   String toolCallId) {
+        List<StoryboardImageTarget> safeTargets = targets == null ? List.of() : targets;
+        if (safeTargets.isEmpty()) {
+            throw new IllegalStateException("没有需要生成图片的分镜");
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("prompt", "分镜图片批量生成");
+        request.put("prompts", safeTargets.stream().map(StoryboardImageTarget::prompt).toList());
+        request.put("slotLabels", safeTargets.stream().map(StoryboardImageTarget::label).toList());
+        request.put("sceneIds", safeTargets.stream().map(StoryboardImageTarget::sceneId).toList());
+        request.put("shotIds", safeTargets.stream().map(StoryboardImageTarget::shotId).toList());
+        request.put("sourceUrlsBySlot",
+                safeTargets.stream().map(StoryboardImageTarget::sourceUrls).toList());
+        request.put("sourceUrls", List.of());
+        request.put("count", safeTargets.size());
+        request.put("overwrite", overwrite);
+        request.put("followUpVideo", false);
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(AgentScopeImageTools.GENERATE_IMAGE_BATCH);
+        task.setKind("image-batch");
+        task.setTitle("逐镜配图 " + safeTargets.size() + " 个镜头");
+        return insertJourneyChild(task, parentTaskId, stepIndex, "storyboard_image", request);
+    }
+
+    /** 启动/释放一个逐镜视频子任务。 */
+    public String startJourneyStoryboardVideoChild(String parentTaskId,
+                                                   int stepIndex,
+                                                   AgentConversation conversation,
+                                                   List<String> sceneIds,
+                                                   boolean overwrite,
+                                                   String toolCallId) {
+        List<String> targets = sceneIds == null ? List.of() : sceneIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .toList();
+        if (targets.isEmpty()) {
+            throw new IllegalStateException("没有可生成视频的分镜");
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("sceneIds", targets);
+        request.put("overwrite", overwrite);
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(targets.size() == 1
+                ? AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO
+                : AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS);
+        task.setKind("long-tool");
+        task.setTitle("逐镜视频 " + targets.size() + " 个镜头");
+        return insertJourneyChild(task, parentTaskId, stepIndex, "storyboard_video", request);
+    }
+
+    /** 插入复合旅程的子任务行（{@code waiting_parent}）；已存在同键子任务时幂等返回。 */
+    /** 启动/释放一个复合旅程的视频子任务（短分支第二步：图生视频）。 */
+    String startJourneyVideoChild(String parentTaskId,
+                                  int stepIndex,
+                                  AgentConversation conversation,
+                                  String prompt,
+                                  List<String> imageUrls,
+                                  String model,
+                                  String resolution,
+                                  String aspectRatio,
+                                  String duration,
+                                  String toolCallId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("prompt", prompt == null ? "" : prompt);
+        request.put("imageUrls", imageUrls == null ? List.of() : imageUrls);
+        request.put("model", model == null ? "" : model);
+        request.put("resolution", resolution == null ? "" : resolution);
+        request.put("aspectRatio", aspectRatio == null ? "" : aspectRatio);
+        request.put("duration", duration == null ? "" : duration);
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolCallId(toolCallId);
+        task.setToolName(AgentScopeVideoTools.GENERATE_VIDEO);
+        task.setKind("long-tool");
+        task.setTitle("生成视频");
+        return insertJourneyChild(task, parentTaskId, stepIndex, "video", request);
+    }
+
+    /**
+     * 启动/释放复合旅程的分镜子任务。
+     *
+     * <p>复用 {@link #startStoryboardTask} 的请求结构与执行链
+     * （{@code startAutoStoryboard} → 写项目分镜），因此与 {@code start_storyboard_production}
+     * 工具完全同源；额外带上 {@code parentTaskId} 与 {@code waiting_parent}。
+     */
+    String startStoryboardChildTask(String parentTaskId,
+                                    int stepIndex,
+                                    AgentConversation conversation,
+                                    String prompt,
+                                    String creationType,
+                                    String requestedShotCount,
+                                    List<String> referenceUrls) {
+        List<AssetRef> assets = new ArrayList<>();
+        int index = 0;
+        for (String url : referenceUrls == null ? List.<String>of() : referenceUrls) {
+            if (url == null || url.isBlank()) continue;
+            index++;
+            assets.add(new AssetRef("reference-" + index, "image", url, ""));
+        }
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("originalScript", prompt == null ? "" : prompt);
+        request.put("creationType", creationType == null || creationType.isBlank()
+                ? "video" : creationType);
+        request.put("requestedShotCount", requestedShotCount == null ? "" : requestedShotCount);
+        request.put("assets", assets);
+        request.put("roleHints", List.of());
+        request.put("commitMode", StoryboardCommitMode.APPEND.name());
+        request.put("auto", true);
+        AgentAsyncTask task = new AgentAsyncTask();
+        task.setConversationId(conversation.getId());
+        task.setUserId(conversation.getUserId());
+        task.setSessionId(conversation.getId());
+        task.setToolName(AgentScopeStoryboardTools.START_STORYBOARD);
+        task.setKind("long-tool");
+        task.setTitle("生成剧情、诊断与分镜");
+        return insertJourneyChild(task, parentTaskId, stepIndex, "storyboard", request);
+    }
+
+    /**
+     * 等待视频资产行进入终态（复用 AgentRuntimeSupport 的后台轮询写回结果）。
+     *
+     * <p>{@code AgentGenerationService.createVideoTaskWithRole} 先建资产行再回填 taskId，
+     * 因此这里要同时容忍「行已存在但 taskId 未写」与「taskId 已写」两种中间态。
+     */
+    private AgentAsset awaitVideoAsset(String childTaskId, String videoTaskId) {
+        long deadline = System.nanoTime() + VIDEO_ASSET_WAIT.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (isCancelRequested(childTaskId)) return null;
+            List<AgentAsset> found = assetMapper.selectList(new LambdaQueryWrapper<AgentAsset>()
+                    .eq(AgentAsset::getTaskId, videoTaskId)
+                    .last("LIMIT 1"));
+            if (!found.isEmpty()) {
+                AgentAsset asset = found.getFirst();
+                if (AgentAsset.STATUS_DELETED.equals(asset.getStatus())) return null;
+                if ("completed".equals(asset.getStatus())
+                        || "failed".equals(asset.getStatus())) {
+                    return asset;
+                }
+            }
+            try {
+                Thread.sleep(2000L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 复合旅程的视频子任务：复用 {@code AgentRuntimeSupport.startVideoGenerationAsyncWithRole}
+     * （与 {@code generate_video} 工具同一入口），完成后把视频 URL/资产写回子任务行，
+     * 供父任务继续串行编排。
+     */
+    private void runJourneyVideoTask(String taskId) {
+        AgentAsyncTask task = taskMapper.selectById(taskId);
+        if (task == null || !"queued".equals(task.getStatus())) return;
+        int claimed = claim(taskId, "submitting", 20);
+        if (claimed == 0) return;
+        try {
+            if (isCancelRequested(taskId)) {
+                cancelRunning(taskId);
+                return;
+            }
+            AgentConversation conversation = conversationMapper.selectById(task.getConversationId());
+            if (conversation == null) {
+                fail(taskId, "会话不存在");
+                return;
+            }
+            Map<String, Object> request = readMap(task.getRequestJson());
+            List<String> imageUrls = stringList(request.get("imageUrls"));
+            Map<String, String> params = new LinkedHashMap<>();
+            String model = string(request.get("model"));
+            String resolution = string(request.get("resolution"));
+            if (!model.isBlank()) params.put("model", model);
+            if (!resolution.isBlank()) params.put("resolution", resolution);
+            List<ReferenceImage> references = imageUrls.isEmpty()
+                    ? List.of()
+                    : List.of(ReferenceImage.ofFirstFrame(imageUrls.getFirst()));
+            OrchestrationRequest videoRequest =
+                    new OrchestrationRequest(conversation, string(request.get("prompt")), List.of(), null);
+            String videoTaskId = support.startVideoGenerationAsyncWithRole(
+                    videoRequest,
+                    string(request.get("prompt")),
+                    string(request.get("duration")),
+                    string(request.get("aspectRatio")),
+                    references,
+                    List.of(),
+                    params);
+            if (videoTaskId == null || videoTaskId.isBlank()) {
+                fail(taskId, "视频任务创建失败");
+                return;
+            }
+            updateTask(taskId, "stage", "video_generating", "progress", 40);
+            // 复用既有视频链路：AgentRuntimeSupport 已在后台轮询并把结果写回 agent_assets；
+            // 这里只等该资产行进入终态，把 URL/资产 ID 记到子任务行，父任务据此继续编排。
+            AgentAsset asset = awaitVideoAsset(taskId, videoTaskId);
+            if (asset == null) {
+                fail(taskId, "视频生成超时未返回结果");
+                return;
+            }
+            if ("failed".equals(asset.getStatus())) {
+                fail(taskId, asset.getError() == null || asset.getError().isBlank()
+                        ? "视频生成失败" : asset.getError());
+                return;
+            }
+            List<String> urls = new ArrayList<>();
+            if (asset.getUrl() != null && !asset.getUrl().isBlank()) urls.add(asset.getUrl());
+            for (String url : readStringList(asset.getResultUrls())) {
+                if (!urls.contains(url)) urls.add(url);
+            }
+            List<String> assetIds = asset.getId() == null || asset.getId().isBlank()
+                    ? List.of() : List.of(asset.getId());
+            complete(taskId,
+                    "视频已生成完成：" + (urls.isEmpty() ? "" : urls.getFirst()),
+                    assetIds, urls, "", false);
+        } catch (Exception e) {
+            log.warn("Journey video task failed: taskId={}, error={}", taskId, e.getMessage());
+            if (isCancelRequested(taskId)) cancelRunning(taskId);
+            else fail(taskId, e.getMessage() == null ? "视频任务创建失败" : e.getMessage());
+        }
+    }
+
+    private String insertJourneyChild(AgentAsyncTask task,
+                                      String parentTaskId,
+                                      int stepIndex,
+                                      String stepKey,
+                                      Map<String, Object> request) {
+        String requestJson = writeJson(request);
+        String idempotencyKey = childIdempotencyKey(task.getConversationId(),
+                "journey-step-" + stepKey, String.valueOf(stepIndex), requestJson);
+        AgentAsyncTask existing = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                .eq(AgentAsyncTask::getIdempotencyKey, idempotencyKey)
+                .last("LIMIT 1"));
+        if (existing != null) return existing.getId();
+
+        task.setStatus("waiting_parent");
+        task.setStage("waiting_parent");
+        task.setProgress(0);
+        task.setRequestJson(requestJson);
+        task.setParentTaskId(parentTaskId);
+        task.setIdempotencyKey(idempotencyKey);
+        task.setVersion(0L);
+        task.setCancelRequested(false);
+        task.setUpdatedAt(OffsetDateTime.now());
+        taskMapper.insert(task);
+        publish(task.getId());
+        return task.getId();
+    }
+
+    /** 单步键：父任务 + 步骤 + 请求内容的确定性哈希。 */
+    private static String childIdempotencyKey(String conversationId, String stepKey,
+                                              String discriminator, String requestJson) {
+        return UUID.nameUUIDFromBytes((conversationId + "|" + stepKey + "|" + discriminator
+                + "|" + requestJson).getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    /**
+     * 释放单个子任务：{@code waiting_parent → queued} 并进入既有执行链。
+     *
+     * @return true 表示本次调用把子任务推进到了可执行状态
+     */
+    boolean releaseChildTask(String childTaskId) {
+        AgentAsyncTask child = taskMapper.selectById(childTaskId);
+        if (child == null || !"waiting_parent".equals(child.getStatus())) return false;
+        AgentAsyncTask parent = child.getParentTaskId() == null
+                ? null : taskMapper.selectById(child.getParentTaskId());
+        if (parent == null) return false;
+        boolean cancelled = "cancelled".equals(parent.getStatus());
+        OffsetDateTime now = OffsetDateTime.now();
+        int updated = taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", childTaskId)
+                .eq("status", "waiting_parent")
+                .set("status", cancelled ? "cancelled" : "queued")
+                .set("stage", cancelled ? "cancelled" : "accepted")
+                .set("progress", cancelled ? null : 0)
+                .set("completed_at", cancelled ? now : null)
+                .set("updated_at", now)
+                .setSql("version = COALESCE(version, 0) + 1"));
+        if (updated == 0) return false;
+        AgentAsyncTask refreshed = taskMapper.selectById(childTaskId);
+        if (refreshed == null) return false;
+        publish(refreshed.getId());
+        if (!cancelled) submit(refreshed);
+        return true;
+    }
+
+    /** 父任务写入一步进度（只更新 result_json 与阶段/进度，不改状态）。 */
+    void noteJourneyStep(String parentTaskId, String stepKey, int progress, int totalSteps,
+                         String childTaskId) {
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null) return;
+        Map<String, Object> result = new LinkedHashMap<>(readMap(parent.getResultJson()));
+        result.put("currentStep", stepKey == null ? "" : stepKey);
+        result.put("stepIndex", Math.max(0, progress));
+        result.put("totalSteps", Math.max(1, totalSteps));
+        result.put("pendingChildId", childTaskId == null ? "" : childTaskId);
+        // 步骤进度自身也带上工具卡归属：任务视图事件（snapshot）与持久化的 result_json 一致，
+        // 前端直播与刷新后都能把步骤折回同一次 produce_video_journey 工具卡。
+        result.put("parentToolCallId", parentToolCallId(parent));
+        Object steps = readMap(parent.getRequestJson()).get("steps");
+        if (steps != null) result.put("steps", steps);
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", parentTaskId)
+                .in("status", List.of("queued", "running"))
+                .set("stage", "journey:" + (stepKey == null ? "" : stepKey))
+                .set("progress", totalSteps <= 0 ? 0
+                        : (int) Math.round(100.0 * Math.max(0, progress) / totalSteps))
+                .set("result_json", writeJson(result))
+                .setSql("version = COALESCE(version, 0) + 1")
+                .set("updated_at", OffsetDateTime.now()));
+        publish(parentTaskId);
+    }
+
+    /** 父任务写入步骤产出的结构化数据（如分镜 runId、写入的场景 ID）。 */
+    void noteJourneyData(String parentTaskId, String key, Object value) {
+        if (key == null || key.isBlank()) return;
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null) return;
+        Map<String, Object> result = new LinkedHashMap<>(readMap(parent.getResultJson()));
+        result.put(key, value);
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", parentTaskId)
+                .set("result_json", writeJson(result))
+                .setSql("version = COALESCE(version, 0) + 1")
+                .set("updated_at", OffsetDateTime.now()));
+    }
+
+    /** 读取父任务已写入的结构化数据。 */
+    Map<String, Object> journeyData(String parentTaskId) {
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        return parent == null ? Map.of() : readMap(parent.getResultJson());
+    }
+
+    /**
+     * 等待子任务进入终态，供父任务串行编排使用。
+     *
+     * <p>先注册终态回调再检查一次当前状态（避免「释放即完成」的竞态），
+     * 超时后返回 {@code null}，由调用方按失败收口。
+     */
+    AgentAsyncTask awaitChildTask(String parentTaskId, String childTaskId, Duration timeout) {
+        if (childTaskId == null || childTaskId.isBlank()) return null;
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        registerTerminalListener(childTaskId, finished -> latch.countDown());
+        long deadline = System.nanoTime()
+                + (timeout == null ? Duration.ofHours(2) : timeout).toNanos();
+        try {
+            while (System.nanoTime() < deadline) {
+                AgentAsyncTask child = taskMapper.selectById(childTaskId);
+                if (child == null) return null;
+                if (isTerminal(child.getStatus()) || "cancelling".equals(child.getStatus())) {
+                    return child;
+                }
+                if (parentCancelled(parentTaskId)) {
+                    cancelChildTask(child);
+                    return taskMapper.selectById(childTaskId);
+                }
+                if (latch.await(500, TimeUnit.MILLISECONDS)) {
+                    AgentAsyncTask settled = taskMapper.selectById(childTaskId);
+                    if (settled != null && isTerminal(settled.getStatus())) return settled;
+                }
+            }
+            return null;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return taskMapper.selectById(childTaskId);
+        } finally {
+            terminalListeners.remove(childTaskId);
+        }
+    }
+
+    /** 注册子任务终态回调。 */
+    private void registerTerminalListener(String taskId, Consumer<AgentAsyncTask> listener) {
+        if (taskId == null || taskId.isBlank() || listener == null) return;
+        terminalListeners.computeIfAbsent(taskId, key -> new java.util.concurrent.CopyOnWriteArrayList<>())
+                .add(listener);
+    }
+
+    /** 任务终态统一出口：先发布，再通知等待它的父任务。 */
+    private void notifyTerminalListeners(String taskId) {
+        List<Consumer<AgentAsyncTask>> listeners = terminalListeners.remove(taskId);
+        if (listeners == null || listeners.isEmpty()) return;
+        AgentAsyncTask task = taskMapper.selectById(taskId);
+        if (task == null) return;
+        for (Consumer<AgentAsyncTask> listener : listeners) {
+            try {
+                listener.accept(task);
+            } catch (RuntimeException error) {
+                log.warn("Task terminal listener failed: taskId={}, error={}", taskId, error.getMessage());
+            }
+        }
+    }
+
+    boolean parentCancelled(String parentTaskId) {
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null) return true;
+        if (Boolean.TRUE.equals(parent.getCancelRequested())) return true;
+        return "cancelled".equals(parent.getStatus()) || "cancelling".equals(parent.getStatus());
+    }
+
+    /** 取消一个仍处于 waiting_parent 的子任务（父任务失败/取消时收口）。 */
+    private void cancelChildTask(AgentAsyncTask child) {
+        if (child == null) return;
+        if (!"waiting_parent".equals(child.getStatus())) return;
+        updateTask(child.getId(),
+                "status", "cancelled",
+                "stage", "cancelled",
+                "result_summary", "父任务已结束，子任务未执行",
+                "completed_at", OffsetDateTime.now());
+    }
+
+    /** 父任务成功收口（内容 + 产物）。 */
+    void completeJourneyTask(String parentTaskId, String content,
+                             List<String> assetIds, List<String> urls) {
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null || isTerminal(parent.getStatus())) return;
+        List<String> safeAssetIds = assetIds == null ? List.of() : List.copyOf(assetIds);
+        List<String> safeUrls = urls == null ? List.of() : List.copyOf(urls);
+        Map<String, Object> result = new LinkedHashMap<>(readMap(parent.getResultJson()));
+        result.put("content", content == null ? "" : content);
+        result.put("pendingChildId", "");
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", parentTaskId)
+                .in("status", List.of("queued", "running", "cancelling"))
+                .set("status", "completed")
+                .set("stage", "completed")
+                .set("progress", 100)
+                .set("result_summary", summarize(content))
+                .set("result_json", writeJson(result))
+                .set("asset_ids_json", writeJson(safeAssetIds))
+                .set("result_urls_json", writeJson(safeUrls))
+                .setSql("version = COALESCE(version, 0) + 1")
+                .set("updated_at", OffsetDateTime.now())
+                .set("completed_at", OffsetDateTime.now()));
+        publish(parentTaskId);
+        releaseChildren(parentTaskId);
+        notifyTerminalListeners(parentTaskId);
+        enqueueWakeupIfNeeded(parentTaskId, content);
+    }
+
+    /** 父任务取消收口：释放尚未启动的子任务，保证没有孤儿后台生成。 */
+    void cancelJourneyTask(String parentTaskId, String summary) {
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null || isTerminal(parent.getStatus())) return;
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", parentTaskId)
+                .in("status", List.of("queued", "running", "cancelling"))
+                .set("status", "cancelled")
+                .set("stage", "cancelled")
+                .set("cancel_requested", true)
+                .set("result_summary", summary == null || summary.isBlank() ? "任务已取消" : summary)
+                .setSql("version = COALESCE(version, 0) + 1")
+                .set("updated_at", OffsetDateTime.now())
+                .set("completed_at", OffsetDateTime.now()));
+        publish(parentTaskId);
+        // 与 cancelTask 同一口径：取消路径只做一次终态写入 + 子行收口，不 flush 实时快照。
+        releaseWaitingChildren(parentTaskId);
+        notifyTerminalListeners(parentTaskId);
+    }
+
+    /** 父任务失败收口。 */
+    void failJourneyTask(String parentTaskId, String error) {
+        AgentAsyncTask parent = taskMapper.selectById(parentTaskId);
+        if (parent == null || isTerminal(parent.getStatus())) return;
+        String message = error == null || error.isBlank() ? "复合旅程执行失败" : error;
+        taskMapper.update(null, new UpdateWrapper<AgentAsyncTask>()
+                .eq("id", parentTaskId)
+                .in("status", List.of("queued", "running", "cancelling"))
+                .set("status", "failed")
+                .set("stage", "failed")
+                .set("result_summary", message)
+                .set("error", message)
+                .setSql("version = COALESCE(version, 0) + 1")
+                .set("updated_at", OffsetDateTime.now())
+                .set("completed_at", OffsetDateTime.now()));
+        publish(parentTaskId);
+        releaseChildren(parentTaskId);
+        notifyTerminalListeners(parentTaskId);
+        enqueueWakeupIfNeeded(parentTaskId, "任务失败：" + message);
+    }
+
+    /** 子任务终态：发布后唤醒等待它的父任务；再顺手释放该子任务自己的待执行子行。 */
+    private void afterTerminal(String taskId) {
+        releaseChildren(taskId);
+        notifyTerminalListeners(taskId);
+    }
+
+    private void submitJourney(AgentAsyncTask task) {
+        AgentScopeJourneyRunner runner = journeyRunner();
+        if (runner == null) {
+            fail(task.getId(), "复合旅程执行器未启用");
+            return;
+        }
+        submitAdmitted(() -> runner.run(task.getId()));
     }
 
     @PreDestroy

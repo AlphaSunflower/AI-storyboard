@@ -415,7 +415,10 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - 前端 `AgentTurnEventSequencer` 对每个 turn 持有缺口；如果后端绕开有序 publisher，前端不会
   “猜顺序”，而是等待缺失序号，表现为卡住。不要用缩短前端等待时间掩盖后端乱序。
 - `turn_completed.payload.metadata` 必须合并并保留实时阶段的 `reasoning`、`agentTrace`、
-  `metrics` 和 `sandboxAttachments`，不能因终态 payload 只含正文而把直播数据覆盖为空。
+  `metrics`、`toolDrafts` 和 `sandboxAttachments`，不能因终态 payload 只含正文而把直播数据覆盖为空。
+- `turn_paused`（HITL 暂停）同样是收尾：流一结束 `generating` 快照就被删除，因此暂停那一刻
+  必须把只活在 `generating.toolDrafts` 里的工具明细（含 `renders`）折进卡片 metadata，
+  否则工具调用会在暂停瞬间被吞掉，只有刷新才回来。直播草稿只渲染在发起本轮的那条消息上。
 - 沙箱产物文件卡由 `metadata.sandboxAttachments` 驱动；没有该 metadata 就不能算产物已交付。
 
 ### 数据与恢复
@@ -551,8 +554,9 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 ## Verification Commands
 
 ```powershell
-# 仓库根目录；Java 25。JAVA_HOME 必须是 Windows 路径。
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-25"
+# 仓库根目录；Java 25。本机 JDK 25 位于 E:\Development\jdk25，环境变量 JAVA_HOME 已指向它。
+# 不要再手工赋值：写错路径会让 maven 报 "JAVA_HOME is not defined correctly"，
+# 而报错指不到真正原因（旧文档里的 C:\Program Files\Java\jdk-25 已不存在）。
 
 # 关键 Agent 直播、HITL、沙箱链路
 mvn -pl MoonAgent -am test

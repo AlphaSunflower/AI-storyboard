@@ -2,7 +2,7 @@ import { getJobToken } from '../services/jobAuth';
 import { useCanvasStore } from '../store/canvasStore';
 
 /**
- * 画布「执行服务」面板内嵌 Moon 对话小窗：iframe 复用 AIStoryboardClient 现成的 /chat 页。
+ * 画布「Moon 智能体」面板内嵌 Moon 对话小窗：iframe 复用 AIStoryboardClient 现成的 /chat 页。
  * 生产同源部署下由 HttpOnly refresh cookie 恢复内存 Access Token，不通过 URL 传凭证。
  * media：聊天页「去画布编辑」带过来的媒体参数，原样透传，画布编辑会话据此挂载这张素材。
  */

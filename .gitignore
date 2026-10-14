@@ -40,3 +40,7 @@ scripts/e2e/seed_tmp/
 # 运行时日志与本地缓存（模块级 gateway 日志、Web 探测缓存）
 *.log
 .firecrawl/
+
+# 一次性排查/重构草稿（asar 抽取探针、临时计划文件），禁止入库
+.tmp-*/
+.tmp-*.md

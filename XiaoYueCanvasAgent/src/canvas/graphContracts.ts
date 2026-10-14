@@ -344,30 +344,30 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
   text: define({
     kind: 'text', title: '文字', category: '输入', icon: 'type', defaultSize: { width: 380, height: 280 },
     inputs: [], outputs: [port({ id: 'text', label: '文字', media: 'text', acceptsKinds: [], role: 'source', order: 0, ordered: false, min: 0, max: Infinity, required: false })],
-    actions: noneAction(), createDefaultData: () => data('text', '文字', '#f4c95d'), renderer,
+    actions: noneAction(), createDefaultData: () => data('text', '文字', '#cacaca'), renderer,
   }),
   script: define({
     kind: 'script', title: '剧本', category: '输入', icon: 'file-text', defaultSize: { width: 420, height: 320 },
     // 输出与文字同媒体：文字即剧本，存量剧本节点仍能接分镜拆解
     inputs: [], outputs: [port({ id: 'script', label: '剧本', media: 'text', acceptsKinds: [], role: 'source', order: 0, ordered: false, min: 0, max: Infinity, required: false })],
-    actions: noneAction(), createDefaultData: () => ({ ...data('script', '剧本', '#a9c9f5'), scriptText: '' }), renderer,
+    actions: noneAction(), createDefaultData: () => ({ ...data('script', '剧本', '#c5c5c5'), scriptText: '' }), renderer,
   }),
   note: define({
     kind: 'note', title: '批注', category: '辅助', icon: 'message-square', defaultSize: { width: 250, height: 250 },
     inputs: [], outputs: [], actions: noneAction(),
-    createDefaultData: () => ({ ...data('note', '批注', '#e5e7eb'), richText: '' }), renderer,
+    createDefaultData: () => ({ ...data('note', '批注', '#e7e7e7'), richText: '' }), renderer,
   }),
   image: define({
     kind: 'image', title: '图片', category: '输入', icon: 'image', defaultSize: { width: 250, height: 250 },
     inputs: [port({ id: 'origin', label: '生成来源', media: 'image', acceptsKinds: ['imageGeneration', 'textToImage', 'imageToImage', 'batchImageRefine', 'shot'], role: 'origin', order: 0, ordered: false, min: 0, max: 1, required: false })],
     outputs: [outputImage()], actions: noneAction(),
-    createDefaultData: () => data('image', '图片', '#ff775f'), renderer,
+    createDefaultData: () => data('image', '图片', '#929292'), renderer,
   }),
   video: define({
     kind: 'video', title: '视频', category: '输入', icon: 'video', defaultSize: { width: 420, height: 236 },
     inputs: [port({ id: 'origin', label: '生成来源', media: 'video', acceptsKinds: ['videoGeneration', 'textToVideo', 'imageToVideo', 'firstLastFrameToVideo', 'referenceToVideo', 'shot'], role: 'origin', order: 0, ordered: false, min: 0, max: 1, required: false })],
     outputs: [outputVideo()], actions: noneAction(),
-    createDefaultData: () => data('video', '视频', '#8f9cff'), renderer,
+    createDefaultData: () => data('video', '视频', '#a0a0a0'), renderer,
   }),
   storyboardPlanner: define({
     kind: 'storyboardPlanner', title: '分镜拆解', category: '分镜', icon: 'clapperboard', defaultSize: { width: 520, height: 420 },
@@ -378,7 +378,7 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
     ],
     outputs: [port({ id: 'shots', label: '镜头', media: 'shot', acceptsKinds: ['shot'], role: 'result', order: 0, ordered: true, min: 0, max: Infinity, required: false })],
     actions: [action('plan', '生成镜头', 'storyboard.plan', 'inline-data')],
-    createDefaultData: () => ({ ...data('storyboardPlanner', '分镜拆解', '#ff8a3d'), shots: [], isGenerating: false }), renderer,
+    createDefaultData: () => ({ ...data('storyboardPlanner', '分镜拆解', '#9d9d9d'), shots: [], isGenerating: false }), renderer,
   }),
   shot: define({
     kind: 'shot', title: '镜头', category: '分镜', icon: 'film', defaultSize: { width: 360, height: 300 },
@@ -388,37 +388,37 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
     ],
     outputs: [outputImage(), outputVideo()],
     actions: [action('generateImage', '生成图片', 'image.generate', 'media-nodes'), action('generateVideo', '生成视频', 'video.generate', 'media-nodes')],
-    createDefaultData: () => ({ ...data('shot', '镜头', '#ffb3a1'), shotId: '', shotKey: '', shotOrdinal: 0, imagePrompt: '', videoPrompt: '', negativePrompt: '' }), renderer,
+    createDefaultData: () => ({ ...data('shot', '镜头', '#c2c2c2'), shotId: '', shotKey: '', shotOrdinal: 0, imagePrompt: '', videoPrompt: '', negativePrompt: '' }), renderer,
   }),
   textToImage: define({
     kind: 'textToImage', title: '文生图', category: '图像生成', icon: 'sparkles', defaultSize: { width: 520, height: 420 },
     inputs: [port({ id: 'prompt', label: '提示词', media: 'text', acceptsKinds: ['text', 'script'], role: 'prompt', order: 0, ordered: false, min: 0, max: 1, required: false })],
     outputs: [outputImage()], actions: [action('generate', '生成图片', 'image.generate', 'media-nodes')],
-    createDefaultData: () => data('textToImage', '文生图', '#b48cff'), renderer,
+    createDefaultData: () => data('textToImage', '文生图', '#9d9d9d'), renderer,
   }),
   imageToImage: define({
     kind: 'imageToImage', title: '图生图', category: '图像生成', icon: 'images', defaultSize: { width: 520, height: 420 },
     inputs: [sourceImage('source'), port({ id: 'reference', label: '参考图', media: 'image', acceptsKinds: ['image'], role: 'reference', order: 1, ordered: true, min: 0, max: 5, required: false })],
     outputs: [outputImage()], actions: [action('generate', '生成图片', 'image.redraw', 'media-nodes')],
-    createDefaultData: () => data('imageToImage', '图生图', '#b48cff'), renderer,
+    createDefaultData: () => data('imageToImage', '图生图', '#9d9d9d'), renderer,
   }),
   batchImageRefine: define({
     kind: 'batchImageRefine', title: '批量完善图片', category: '图像生成', icon: 'layout-grid', defaultSize: { width: 560, height: 460 },
     inputs: [port({ id: 'images', label: '源图片', media: 'image', acceptsKinds: ['image'], role: 'source', order: 0, ordered: true, min: 1, max: 12, required: true })],
     outputs: [outputImage()], actions: [action('refineBatch', '批量完善', 'image.redraw', 'media-nodes')],
-    createDefaultData: () => data('batchImageRefine', '批量完善图片', '#b48cff'), renderer,
+    createDefaultData: () => data('batchImageRefine', '批量完善图片', '#9d9d9d'), renderer,
   }),
   textToVideo: define({
     kind: 'textToVideo', title: '文生视频', category: '视频生成', icon: 'video', defaultSize: { width: 520, height: 420 },
     inputs: [port({ id: 'prompt', label: '提示词', media: 'text', acceptsKinds: ['text', 'script'], role: 'prompt', order: 0, ordered: false, min: 0, max: 1, required: false })],
     outputs: [outputVideo()], actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
-    createDefaultData: () => ({ ...data('textToVideo', '文生视频', '#8f9cff'), videoMode: 'text2video' }), renderer,
+    createDefaultData: () => ({ ...data('textToVideo', '文生视频', '#a0a0a0'), videoMode: 'text2video' }), renderer,
   }),
   imageToVideo: define({
     kind: 'imageToVideo', title: '图生视频', category: '视频生成', icon: 'video', defaultSize: { width: 520, height: 420 },
     inputs: [port({ id: 'first', label: '首帧', media: 'image', acceptsKinds: ['image'], role: 'first_frame', order: 0, ordered: false, min: 1, max: 1, required: true })],
     outputs: [outputVideo()], actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
-    createDefaultData: () => ({ ...data('imageToVideo', '图生视频', '#8f9cff'), videoMode: 'image2video' }), renderer,
+    createDefaultData: () => ({ ...data('imageToVideo', '图生视频', '#a0a0a0'), videoMode: 'image2video' }), renderer,
   }),
   firstLastFrameToVideo: define({
     kind: 'firstLastFrameToVideo', title: '首尾帧生视频', category: '视频生成', icon: 'video', defaultSize: { width: 560, height: 420 },
@@ -427,7 +427,7 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
       port({ id: 'last', label: '尾帧', media: 'image', acceptsKinds: ['image'], role: 'last_frame', order: 1, ordered: false, min: 1, max: 1, required: true }),
     ],
     outputs: [outputVideo()], actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
-    createDefaultData: () => ({ ...data('firstLastFrameToVideo', '首尾帧生视频', '#8f9cff'), videoMode: 'firstLastFrame' }), renderer,
+    createDefaultData: () => ({ ...data('firstLastFrameToVideo', '首尾帧生视频', '#a0a0a0'), videoMode: 'firstLastFrame' }), renderer,
   }),
   referenceToVideo: define({
     kind: 'referenceToVideo', title: '参考物生视频', category: '视频生成', icon: 'scan-search', defaultSize: { width: 560, height: 460 },
@@ -436,7 +436,7 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
       port({ id: 'video', label: '参考视频', media: 'video', acceptsKinds: ['video'], role: 'video_reference', order: 1, ordered: false, min: 0, max: 1, required: false }),
     ],
     outputs: [outputVideo()], actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
-    createDefaultData: () => ({ ...data('referenceToVideo', '参考物生视频', '#8f9cff'), videoMode: 'fullReference' }), renderer,
+    createDefaultData: () => ({ ...data('referenceToVideo', '参考物生视频', '#a0a0a0'), videoMode: 'fullReference' }), renderer,
   }),
   // ── 合并后的生成节点（节点库只展示这两个；旧 kind 走 getNodeDefinition 别名归一）──
   // 端口刻意取宽（文/图/视频都能连），真正的必填与上限由 generationModes 的「模式规则」决定，
@@ -450,7 +450,7 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
     ],
     outputs: [outputVideo()],
     actions: [action('generate', '生成视频', 'video.generate', 'media-nodes')],
-    createDefaultData: () => ({ ...data(VIDEO_GENERATION_KIND, '视频生成', '#8f9cff'), mode: DEFAULT_VIDEO_GENERATION_MODE }),
+    createDefaultData: () => ({ ...data(VIDEO_GENERATION_KIND, '视频生成', '#a0a0a0'), mode: DEFAULT_VIDEO_GENERATION_MODE }),
     renderer,
   }),
   imageGeneration: define({
@@ -464,7 +464,7 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
       action('generate', '生成图片', 'image.generate', 'media-nodes'),
       action('redraw', '图生图', 'image.redraw', 'media-nodes'),
     ],
-    createDefaultData: () => ({ ...data(IMAGE_GENERATION_KIND, '图片生成', '#b48cff'), mode: DEFAULT_IMAGE_GENERATION_MODE }),
+    createDefaultData: () => ({ ...data(IMAGE_GENERATION_KIND, '图片生成', '#9d9d9d'), mode: DEFAULT_IMAGE_GENERATION_MODE }),
     renderer,
   }),
   videoMerge: define({
@@ -483,7 +483,7 @@ export const CANVAS_NODE_DEFINITIONS: Record<CanvasNodeKind, NodeDefinition> = {
     })],
     outputs: [outputVideo()],
     actions: [action('mergeVideo', '合并视频', 'video.merge', 'media-nodes', false)],
-    createDefaultData: () => data('videoMerge', '视频合并', '#8f9cff'),
+    createDefaultData: () => data('videoMerge', '视频合并', '#a0a0a0'),
     renderer,
   }),
 };
@@ -539,11 +539,20 @@ export function getMediaPlaceholderContract(kind: string | undefined): MediaPlac
 }
 
 /** 不再出现在节点库 / 右键菜单的 kind（定义保留，存量画布照旧渲染）。 */
-export const MENU_HIDDEN_NODE_KINDS: ReadonlySet<string> = new Set(['script']);
+export const MENU_HIDDEN_NODE_KINDS: ReadonlySet<string> = new Set(['script', 'note']);
+
+/**
+ * 正文就地编辑的纯文字 kind。这些节点默认渲染静态预览面（整块可拖动），
+ * 双击才切进 textarea 输入态，失焦或 Esc 退出。
+ * 集中在这里是为了让「谁渲染成文字节点」（MediaNode）和
+ * 「双击是否让位给编辑」（CanvasWorkspace）用同一份判断，不再各写各的。
+ */
+export const TEXT_EDIT_NODE_KINDS: ReadonlySet<string> = new Set(['text', 'note', 'prompt']);
 
 export function listNodeDefinitions(): NodeDefinition[] {
   // 已合并的旧生成节点、以及「剧本」都仍然保留定义（存量数据可渲染），但不再出现在节点库/右键菜单里。
   // 剧本下架原因：文字即剧本，分镜拆解改收文字节点。
+  // 批注下架原因：既不参与连线也不能生成，画布上没有它能做的事。
   return Object.values(CANVAS_NODE_DEFINITIONS).filter((definition) =>
     !MERGED_GENERATION_SOURCE_KINDS.has(definition.kind) && !MENU_HIDDEN_NODE_KINDS.has(definition.kind));
 }

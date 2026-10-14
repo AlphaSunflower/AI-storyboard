@@ -7,6 +7,8 @@ import {
   type CanvasLibraryFolder,
   type CanvasProjectLibraryResponse,
 } from '../services/canvasProjectLibrary';
+import { listLibraryAssets } from '../services/projectStorage';
+import type { PersistedAsset } from '../types';
 
 export const ASSET_DRAG_MIME = 'application/x-morrow-asset';
 export const LIBRARY_ASSET_DRAG_MIME = 'application/x-morrow-library-asset';
@@ -18,7 +20,14 @@ interface AssetDrawerProps {
   /** 多选上传模式：点选图片 / 视频，底部「上传到画布」把选中项落成节点。 */
   selecting?: boolean;
   onConfirmUpload?: (libraryAssetIds: string[]) => void;
+  /**
+   * 「本地素材库」里点一条素材：把它落成画布节点。
+   * 抽屉不因此关闭——连插几张是常见动作。
+   */
+  onInsertLocalAsset?: (assetId: string) => void;
   uploading?: boolean;
+  /** 显示/隐藏动效：由父级 usePresence 传进来，退场期间保持挂载 */
+  present?: boolean;
 }
 
 interface FolderLocation {
@@ -27,16 +36,20 @@ interface FolderLocation {
   scope: 'PROJECT' | 'GLOBAL';
 }
 
-type LibraryFilter = 'all' | 'canvas' | 'groups';
+type LibraryFilter = 'all' | 'canvas' | 'groups' | 'local';
 
-export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, onConfirmUpload, uploading = false }: AssetDrawerProps) {
+export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, onConfirmUpload, onInsertLocalAsset, uploading = false, present = true }: AssetDrawerProps) {
   const [library, setLibrary] = useState<CanvasProjectLibraryResponse | null>(null);
   const [path, setPath] = useState<FolderLocation[]>([]);
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // 跨项目本地素材：和项目库不是同一份数据源（IndexedDB vs 项目库接口），所以按需单独读。
+  const [localAssets, setLocalAssets] = useState<PersistedAsset[]>([]);
   const currentFolder = path.at(-1) ?? null;
+  // 本地素材没有文件夹层级，进去就把面包屑和文件夹区让出来。
+  const browsingLocal = filter === 'local';
 
   useEffect(() => {
     if (!selecting) setSelectedIds([]);
@@ -66,6 +79,15 @@ export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, o
 
   useEffect(() => { void reload(); }, [reload]);
 
+  useEffect(() => {
+    if (!browsingLocal) return;
+    let cancelled = false;
+    void listLibraryAssets()
+      .then((assets) => { if (!cancelled) setLocalAssets(assets); })
+      .catch(() => { if (!cancelled) setLocalAssets([]); });
+    return () => { cancelled = true; };
+  }, [browsingLocal]);
+
   const folders = useMemo(
     () => libraryFolderChildren(library, currentFolder?.scope ?? null, currentFolder?.id ?? null),
     [currentFolder?.id, currentFolder?.scope, library],
@@ -85,7 +107,7 @@ export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, o
   };
 
   return (
-    <aside className="asset-drawer-panel" style={drawer} aria-label="项目库抽屉">
+    <aside className="asset-drawer-panel motion-presence" data-present={present} style={drawer} aria-label="项目库抽屉">
       <header style={header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Layers size={16} />
@@ -102,9 +124,10 @@ export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, o
         <FilterButton active={filter === 'all'} label="全部" onClick={() => setFilter('all')} />
         <FilterButton active={filter === 'canvas'} label="项目画布素材" onClick={() => setFilter('canvas')} />
         <FilterButton active={filter === 'groups'} label="资产集" onClick={() => setFilter('groups')} />
+        <FilterButton active={browsingLocal} label="本地素材库" onClick={() => setFilter('local')} />
       </div>
 
-      <div style={breadcrumbs}>
+      {!browsingLocal && <div style={breadcrumbs}>
         <button type="button" onClick={() => setPath([])} disabled={path.length === 0} style={crumbButton}>
           <Folder size={12} /> 项目库
         </button>
@@ -120,13 +143,30 @@ export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, o
             </button>
           </span>
         ))}
-      </div>
+      </div>}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 12 }}>
-        {loading ? (
+        {browsingLocal ? (
+          localAssets.length > 0 ? (
+            <section>
+              <div style={sectionTitle}>本地素材库 · {localAssets.length} 项</div>
+              <div style={assetGrid}>
+                {localAssets.map((item) => (
+                  <LocalLibraryCard
+                    key={item.id}
+                    asset={item}
+                    onInsert={() => onInsertLocalAsset?.(item.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : (
+            <div style={empty}>还没有保存到本地素材库的素材</div>
+          )
+        ) : loading ? (
           <div style={empty}><LoaderCircle size={16} className="is-spinning" /> 正在读取项目库…</div>
         ) : error ? (
-          <div style={{ ...empty, color: '#ff9b9b' }}>{error}</div>
+          <div style={{ ...empty, color: '#b0b0b0' }}>{error}</div>
         ) : (
           <>
             {folders.length > 0 && (
@@ -231,6 +271,40 @@ export function AssetDrawer({ projectId, canvasId, onClose, selecting = false, o
   );
 }
 
+/**
+ * 跨项目本地素材（IndexedDB 里的 PersistedAsset）卡片。
+ * 和项目库素材一样可拖到画布（同一个 ASSET_DRAG_MIME），也可以点一下直接插到视口中心。
+ */
+function LocalLibraryCard({ asset, onInsert }: { asset: PersistedAsset; onInsert: () => void }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    const next = URL.createObjectURL(asset.thumbnailBlob);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [asset]);
+  return (
+    <div
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData(ASSET_DRAG_MIME, asset.id);
+        event.dataTransfer.effectAllowed = 'copy';
+      }}
+      style={localCard}
+      title="拖到画布，或点击插入画布"
+    >
+      <button type="button" onClick={onInsert} style={localInsert} aria-label={`插入画布 ${asset.name}`}>
+        <span style={thumb}>
+          {url ? <img src={url} alt="" draggable={false} style={image} /> : <ImageIcon size={19} style={{ opacity: 0.4 }} />}
+        </span>
+        <strong style={ellipsis}>{asset.name}</strong>
+        <small style={assetMeta}>
+          {asset.kind === 'video' ? 'video' : 'image'} · {asset.width} × {asset.height}
+        </small>
+      </button>
+    </div>
+  );
+}
+
 function LibraryAssetCard({ asset, selecting, selected, onToggle }: {
   asset: CanvasLibraryAsset;
   selecting: boolean;
@@ -273,8 +347,8 @@ function LibraryAssetCard({ asset, selecting, selected, onToggle }: {
           ? {
             cursor: selectable ? 'pointer' : 'not-allowed',
             opacity: selectable ? 1 : 0.42,
-            borderColor: selected ? 'rgba(215,255,84,0.75)' : assetCard.borderColor,
-            background: selected ? 'rgba(215,255,84,0.10)' : assetCard.background,
+            borderColor: selected ? 'rgba(234,234,234,0.75)' : assetCard.borderColor,
+            background: selected ? 'rgba(234,234,234,0.10)' : assetCard.background,
           }
           : {}),
       }}
@@ -328,7 +402,7 @@ const drawer: React.CSSProperties = {
   // 左侧工具岛（x 16~68）与项目栏（top 16~64）要留出来，否则抽屉会压住工具岛按钮
   position: 'absolute', left: 80, top: 92, bottom: 16, width: 300,
   display: 'flex', flexDirection: 'column', boxSizing: 'border-box', zIndex: 40,
-  background: 'rgba(24, 26, 30, 0.97)', borderRadius: 14,
+  background: 'rgba(26,26,26,0.97)', borderRadius: 14,
   border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 12px 40px rgba(0,0,0,0.4)',
   overflow: 'hidden',
 };
@@ -371,9 +445,16 @@ const thumb: React.CSSProperties = {
   height: 66, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.05)',
   display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 5,
 };
+const localCard: React.CSSProperties = {
+  ...assetCard, padding: 0, cursor: 'grab', overflow: 'hidden',
+};
+const localInsert: React.CSSProperties = {
+  width: '100%', display: 'block', padding: 6, border: 'none', background: 'transparent',
+  color: 'inherit', textAlign: 'left', cursor: 'pointer', font: 'inherit',
+};
 const selectBadge: React.CSSProperties = {
   position: 'absolute', right: 4, top: 4, width: 16, height: 16, display: 'grid', placeItems: 'center',
-  borderRadius: 5, border: '1px solid rgba(215,255,84,0.75)', background: 'rgba(10,14,8,0.72)', color: '#d7ff54',
+  borderRadius: 5, border: '1px solid rgba(234,234,234,0.75)', background: 'rgba(13,13,13,0.72)', color: '#eaeaea',
 };
 const selectHint: React.CSSProperties = {
   padding: '8px 12px', fontSize: 10.5, lineHeight: 1.5, color: 'rgba(244,244,245,0.6)',
@@ -389,7 +470,7 @@ const selectCancel: React.CSSProperties = {
 };
 const selectConfirm: React.CSSProperties = {
   padding: '6px 12px', borderRadius: 8, border: 'none',
-  background: '#d7ff54', color: '#111311', fontSize: 11, fontWeight: 600,
+  background: '#eaeaea', color: '#121212', fontSize: 11, fontWeight: 600,
 };
 const image: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover' };
 const ellipsis: React.CSSProperties = {

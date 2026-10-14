@@ -8,6 +8,14 @@ import java.time.OffsetDateTime;
 @Data
 @TableName(value = "agent_assets", schema = "public")
 public class AgentAsset {
+
+    /**
+     * 软删除标记。用户删除素材时 MinIO 对象即刻进清理队列，但行本身保留
+     * （提示词、参数、结果 URL 仍要能在「生成记录」里查阅），只把 status 置成这个值。
+     * 会话资产列表按它过滤；生成记录照常展示并标注「已删除」。
+     */
+    public static final String STATUS_DELETED = "deleted";
+
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
     private String conversationId;

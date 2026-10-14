@@ -1,0 +1,378 @@
+/**
+ * 工具调用时间轴 —— /chat 里 agent「干活」的视觉层。
+ *
+ * 颜色不在这里定义：组件会把 `agentChatTokens` 的值以 CSS 变量注入 `.tool-timeline`，
+ * 本文件只负责结构、层次和动效。这样品牌色永远只有一个来源（TS token），
+ * 不会出现「CSS 里悄悄多出一份蓝色」的漂移。
+ *
+ * 层次靠脊线、圆点和留白，不靠边框：整块没有一个 1px 的方框。
+ */
+
+.tool-timeline {
+  width: 100%;
+  max-width: 100%;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 表头：与下面的脊线左对齐，读起来像一段工作的标题而不是一个面板标题 */
+.tool-timeline__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 1px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--tc-muted);
+}
+
+.tool-timeline__head-icon {
+  display: inline-flex;
+  color: var(--tc-faint);
+}
+
+/* ---------- 节点 ---------- */
+
+.tool-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+  padding-bottom: 12px;
+}
+
+.tool-node:last-child {
+  padding-bottom: 0;
+}
+
+/* 脊线：从当前节点圆点连到下一个节点；最后一个节点不画，末端自然收口 */
+.tool-node:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 7.5px;
+  top: 17px;
+  bottom: 0;
+  width: 1px;
+  background: var(--tc-rail);
+}
+
+/* 圆点：状态色阶的唯一载体，配 3px 白色光晕把脊线"打断"，做出节点感 */
+.tool-node__dot {
+  grid-column: 1;
+  justify-self: center;
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--tc-dot);
+  box-shadow: 0 0 0 3px var(--tc-dot-halo);
+}
+
+.tool-node[data-tone='running'] .tool-node__dot {
+  animation: tool-node-breathe 1.7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* 呼吸环从白光晕外沿（4px）扩到 10px 并淡出，避免和 3px 光晕叠在同一圈上 */
+@keyframes tool-node-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px var(--tc-dot-halo),
+      0 0 0 4px var(--tc-dot-pulse);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px var(--tc-dot-halo),
+      0 0 0 10px transparent;
+  }
+}
+
+/* ---------- 行 ---------- */
+
+.tool-node__body {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.tool-node__toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 0;
+  padding: 2px 6px 2px 2px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  color: var(--tc-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.tool-node__toggle:hover {
+  background: var(--tc-hover);
+}
+
+.tool-node__toggle:focus-visible {
+  outline: 2px solid var(--tc-brand);
+  outline-offset: 1px;
+}
+
+.tool-node__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--tc-faint);
+}
+
+.tool-node[data-tone='running'] .tool-node__icon {
+  color: var(--tc-brand);
+}
+
+.tool-node[data-tone='failed'] .tool-node__icon {
+  color: var(--tc-failed);
+}
+
+.tool-node__title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.5;
+  color: var(--tc-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 状态胶囊：图标 + 文案。文案与后端状态逐字对应，不在这里改写语义 */
+.tool-node__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.7;
+  color: var(--tc-chip-ink);
+  background: var(--tc-chip-bg);
+}
+
+.tool-node__chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* 「结果报错」：传输层是已完成、但载荷自己声明失败时的独立提示 */
+.tool-node__note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.7;
+  color: var(--tc-warn);
+  background: var(--tc-warn-bg);
+}
+
+/* 紧跟状态胶囊，不吃 margin-left:auto —— 整行没有边框，右对齐的箭头会飘在
+   一大片空白里，读起来像布局错误而不是「这行可展开」 */
+.tool-node__chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 1px;
+  color: var(--tc-faint);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tool-node__toggle[aria-expanded='true'] .tool-node__chevron {
+  transform: rotate(90deg);
+}
+
+/* 副行：等宽原名 + 一行输出摘要。原名保留完整，便于对照日志与排查 */
+.tool-node__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px 0 2px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.tool-node__rawname {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--tc-muted);
+}
+
+.tool-node__separator {
+  flex-shrink: 0;
+  color: var(--tc-muted);
+}
+
+.tool-node__preview {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--tc-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 「（暂无输出）」是文本，不能跟着图标一起降级到 3:1 */
+.tool-node__empty {
+  color: var(--tc-muted);
+}
+
+/* ---------- 展开区 ---------- */
+
+.tool-node__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 2px;
+  padding-left: 2px;
+  animation: tool-detail-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes tool-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tool-node__section-label {
+  margin-bottom: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--tc-muted);
+}
+
+.tool-node__pre {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--tc-code-bg);
+  border: 1px solid var(--tc-hairline);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--tc-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+}
+
+.tool-node__more {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--tc-hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tc-brand-ink);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.tool-node__more:hover {
+  background: var(--tc-hover);
+  border-color: var(--tc-brand);
+}
+
+/* ---------- 轨迹行：与工具节点共用脊线骨架，但没有折叠按钮 ---------- */
+
+.tool-node__trace-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 2px 2px 0;
+}
+
+.tool-node__trace-agent {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--tc-ink);
+}
+
+.tool-node__trace-meta {
+  font-size: 11px;
+  color: var(--tc-muted);
+}
+
+.tool-node__trace-title {
+  padding: 3px 2px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tc-ink);
+}
+
+.tool-node__trace-summary {
+  padding: 2px 2px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--tc-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tool-node__trace-intent {
+  padding: 2px 2px 0;
+  font-size: 11px;
+  color: var(--tc-muted);
+}
+
+/* ---------- 折叠在工具卡下的后台任务 ---------- */
+
+.tool-node__nested {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--tc-rail);
+}
+
+.tool-node__nested-label {
+  font-size: 11px;
+  color: var(--tc-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-node[data-tone='running'] .tool-node__dot {
+    animation: none;
+  }
+
+  .tool-node__detail {
+    animation: none;
+  }
+
+  .tool-node__chevron,
+  .tool-node__toggle,
+  .tool-node__more {
+    transition: none;
+  }
+}

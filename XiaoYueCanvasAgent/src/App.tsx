@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { Maximize2, MessageCircle, SlidersHorizontal } from 'lucide-react';
+import { LayoutList, Maximize2, MessageCircle } from 'lucide-react';
 import type { Viewport } from '@xyflow/react';
 import { startCanvasBridge } from './canvas/bridgeClient';
 import {
@@ -28,10 +28,13 @@ import { LoginScreen } from './components/LoginScreen';
 import { bootstrapJobAuth, clearToken, getJobToken, setJobToken, tokenExpired } from './services/jobAuth';
 import { recoverGenerationJobs } from './canvas/generationRuntime';
 import { recoverGraphExecutions } from './canvas/graphExecutionService';
+import { usePresence } from './hooks/usePresence';
 import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
 
 type SideView = 'agent' | 'inspector';
 type View = 'home' | 'projectHome' | 'canvas';
+// 视图层级：层级变大＝往里走（推入），变小＝往外退（退回）。动画方向按这个算。
+const VIEW_RANK: Record<View, number> = { home: 0, projectHome: 1, canvas: 2 };
 
 const downloadBlob = (blob: Blob, name: string) => {
   const url = URL.createObjectURL(blob);
@@ -45,6 +48,17 @@ const downloadBlob = (blob: Blob, name: string) => {
 
 export default function App() {
   const [view, setView] = useState<View>('home');
+  // 视图切换方向：往画布里走是推入（从右滑进来），退回项目中心是退回（从左滑进来）。
+  const previousViewRank = useRef(VIEW_RANK[view]);
+  const viewMotion = useRef<'forward' | 'back'>('forward');
+  if (VIEW_RANK[view] !== previousViewRank.current) {
+    viewMotion.current = VIEW_RANK[view] > previousViewRank.current ? 'forward' : 'back';
+    previousViewRank.current = VIEW_RANK[view];
+  }
+  // 写在 <html> 上给 .view-shell 读：三个视图壳分属不同组件，用属性比逐层传 prop 干净
+  useLayoutEffect(() => {
+    document.documentElement.dataset.viewMotion = viewMotion.current;
+  }, [view]);
   // 登录门控：无画布 token（未从 /chat 跳转带 token，也未本地登录）→ 先显示登录页
   const [authed, setAuthed] = useState(() => !!getJobToken() && !tokenExpired());
   const embeddedModeRef = useRef<CanvasEmbeddedMode | null>(parseCanvasEmbeddedMode(window.location.search));
@@ -59,9 +73,13 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [sideView, setSideView] = useState<SideView>(embeddedWindow ? 'inspector' : 'agent');
   const [sideOpen, setSideOpen] = useState(!embeddedWindow && window.innerWidth > 1180);
-  const [panelWidth, setPanelWidth] = useState(400); // 执行服务面板宽度（可拖拽）
+  const [panelWidth, setPanelWidth] = useState(400); // Moon 智能体面板宽度（可拖拽）
+  const [panelResizing, setPanelResizing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [canvasInteractionLocked, setCanvasInteractionLocked] = useState(false);
+  // 显示/隐藏动效：拖拽把手与右下角「打开面板」浮标都要进出场，而不是啪一下出现/消失。
+  const resizeHandle = usePresence(sideOpen, { duration: 140 });
+  const reopenFab = usePresence(!sideOpen, { duration: 140 });
   // 聊天页「去画布编辑」带过来的媒体参数：只在本窗口内透传给内嵌 Moon 对话，用完即从 hash 抹掉
   const [chatMediaParam, setChatMediaParam] = useState('');
   const [isExporting, setIsExporting] = useState(false);
@@ -83,9 +101,11 @@ export default function App() {
     window.setTimeout(() => setNotice(null), 2200);
   }, []);
 
-  // 画布 ↔ 执行服务面板 拖拽拉伸。健壮性要点：
+  // 画布 ↔ Moon 智能体面板 拖拽拉伸。健壮性要点：
   // - onMove 里 ev.buttons===0 直接停止 → 鼠标松开（含在 iframe 上松开导致 mouseup 未送达 document）后，悬浮不会再触发 resize；
   // - 拖拽期间直改 DOM 宽度（不 setState 每帧），避免 App 全树 re-render 与 react-flow 重排卡顿；mouseup/mouseleave 才 commit state；
+  // - 拖拽期间给 app-shell 挂 is-panel-resizing：面板里嵌的 Moon 子站（iframe）吃掉 pointer-events 会让
+  //   光标一旦移进子站就收不到 mousemove、拉伸卡住；由 CSS 把 iframe 置为 pointer-events:none 接管；
   // - ponytail: react-flow 对容器尺寸的 ResizeObserver 重排在所难免，若仍卡顿，升级路径是面板改绝对定位覆盖画布（不挤占 canvas 宽度）。
   const startPanelResize = useCallback((e: ReactMouseEvent<HTMLElement>) => {
     e.preventDefault();
@@ -95,11 +115,13 @@ export default function App() {
     const clamp = (w: number) => Math.min(680, Math.max(360, w));
     let lastWidth = startWidth;
     if (el) el.style.transition = 'none';
+    setPanelResizing(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     const stop = () => {
       const cur = panelRef.current;
       if (cur) cur.style.transition = '';
+      setPanelResizing(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
@@ -635,7 +657,7 @@ export default function App() {
   if (!project || !canvas) return null;
 
   return (
-    <div className={`app-shell ${sideOpen ? '' : 'side-is-closed'}`}>
+    <div className={`app-shell view-shell ${sideOpen ? '' : 'side-is-closed'}${panelResizing ? ' is-panel-resizing' : ''}`}>
       <CanvasWorkspace
         projectId={project.id}
         projectTitle={project.title}
@@ -645,8 +667,6 @@ export default function App() {
         projects={projects}
         saveStatus={saveStatus}
         canvasModeLocked={!!embeddedMode}
-        hideAgentButton={embeddedWindow}
-        agentPanelOpen={!embeddedWindow && sideOpen && sideView === 'agent'}
         canvasInteractionLocked={canvasInteractionLocked}
         initialViewport={canvas.viewport}
         onProjectTitleChange={(title) => { setProject((current) => { const next = current ? { ...current, title } : current; if (next) void saveProject(next); return next; }); }}
@@ -661,22 +681,15 @@ export default function App() {
         onDeleteProject={() => void removeCurrentProject().catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
         onRenameProjectById={(projectId, title) => void renameProjectById(projectId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名项目失败'))}
         onDeleteProjectById={(projectId) => void removeProjectById(projectId).catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
-        onOpenAgent={() => {
-          if (!embeddedWindow && sideOpen && sideView === 'agent') {
-            setSideOpen(false);
-            return;
-          }
-          setSideView(embeddedWindow ? 'inspector' : 'agent');
-          setSideOpen(true);
-        }}
         onOpenInspector={() => { setSideView('inspector'); setSideOpen(true); }}
         onExportProject={() => void exportPackage()}
         isExporting={isExporting}
         onNotify={notify}
       />
-      {sideOpen && (
+      {resizeHandle.mounted && (
         <div
-          className="panel-resize-handle"
+          className="panel-resize-handle motion-presence"
+          data-present={resizeHandle.present}
           onMouseDown={startPanelResize}
           role="separator"
           aria-orientation="vertical"
@@ -689,30 +702,56 @@ export default function App() {
         style={sideOpen ? { width: panelWidth, flexBasis: panelWidth } : undefined}
       >
         <header className="chat-topbar">
-          <button className={sideView === 'inspector' ? 'is-active' : ''} onClick={() => setSideView(sideView === 'inspector' ? 'agent' : 'inspector')} aria-label="画布设置"><SlidersHorizontal size={18} /></button>
-          <strong className="workspace-side-title">{sideView === 'agent' ? '执行服务' : '节点属性'}</strong>
+          {/* 两个视图各占一个标签，选中态落在当前视图上：用户一眼能看出这是切换而不是单个开关 */}
+          <div
+            className={`workspace-side-tabs${embeddedWindow ? ' is-single' : ''}`}
+            role="tablist"
+            aria-label="面板视图"
+          >
+            {!embeddedWindow && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={sideView === 'agent'}
+                className={`workspace-side-tab${sideView === 'agent' ? ' is-active' : ''}`}
+                onClick={() => { setSideView('agent'); setSideOpen(true); }}
+              >
+                <MessageCircle size={16} />Moon 智能体
+              </button>
+            )}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sideView === 'inspector'}
+              className={`workspace-side-tab${sideView === 'inspector' ? ' is-active' : ''}`}
+              onClick={() => { setSideView('inspector'); setSideOpen(true); }}
+            >
+              <LayoutList size={16} />节点属性
+            </button>
+          </div>
           <div className="chat-topbar-spacer" />
           <button onClick={() => setSideOpen(false)} aria-label="收起面板"><Maximize2 size={16} /></button>
         </header>
         <div className="chat-body">
           {!embeddedWindow && (
-            <div className="chat-view" hidden={sideView !== 'agent'}>
+            <div className="chat-view" data-active={sideView === 'agent'}>
               <MoonChatWindow media={chatMediaParam} />
             </div>
           )}
-          <div className="chat-view" hidden={sideView !== 'inspector'}><InspectorPanel /></div>
+          <div className="chat-view" data-active={sideView === 'inspector'}><InspectorPanel /></div>
         </div>
       </aside>
-      {!sideOpen && (
+      {reopenFab.mounted && (
         <button
-          className="reopen-chat"
+          className="reopen-chat motion-presence"
+          data-present={reopenFab.present}
           onClick={() => {
             if (embeddedWindow) setSideView('inspector');
             setSideOpen(true);
           }}
-          aria-label={embeddedWindow ? '打开节点属性' : '打开执行服务'}
+          aria-label={sideView === 'inspector' ? '打开节点属性' : '打开 Moon 智能体'}
         >
-          {embeddedWindow ? <SlidersHorizontal size={20} /> : <MessageCircle size={20} />}
+          {sideView === 'inspector' ? <LayoutList size={20} /> : <MessageCircle size={20} />}
         </button>
       )}
       {notice && <div className="canvas-status-toast app-status-toast" role="status">{notice}</div>}

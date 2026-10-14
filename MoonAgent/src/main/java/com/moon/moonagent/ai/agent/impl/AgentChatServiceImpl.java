@@ -109,6 +109,8 @@ import java.util.regex.Pattern;
 public class AgentChatServiceImpl implements AgentChatService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentChatServiceImpl.class);
+    /** 只给 {@link #visibleResultUrls} 用的解析器：那个方法要能在不建服务实例的前提下单测。 */
+    private static final ObjectMapper ASSET_JSON = new ObjectMapper();
     private static final String CANVAS_BIND_ACTION = "canvas-bind";
 
     private final AgentConversationMapper conversationMapper;
@@ -527,18 +529,81 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @Override
     public void deleteAsset(String userId, String assetId) {
-        AgentAsset asset = assetMapper.selectById(assetId);
-        if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
-            throw new BusinessException(40401, "资产不存在或无权访问");
-        }
-        // 校验资产归属的会话属于本人（防 IDOR）
-        getOwnedConversation(userId, asset.getConversationId());
+        AgentAsset asset = requireOwnedDeletableAsset(userId, assetId);
         if (storageCleanupService != null) {
             storageCleanupService.enqueue(asset.getUrl());
             storageCleanupService.enqueueAll(resultUrls(asset));
         }
-        assetMapper.deleteById(assetId);
+        // 软删除：行保留，提示词/参数/结果 URL 仍可在生成记录里查阅。
+        // resultUrls 与 url 故意不动，缩略图由前端按 status=deleted 出占位符；
+        // 会话资产列表靠 status 过滤，不会因为清空数组触发 url 回退而重新出现。
+        asset.setStatus(AgentAsset.STATUS_DELETED);
+        assetMapper.updateById(asset);
     }
+
+    @Override
+    public void deleteAssetResult(String userId, String assetId, int resultIndex) {
+        AgentAsset asset = requireOwnedDeletableAsset(userId, assetId);
+        List<String> visible = visibleResultUrls(asset);
+        // 先算方案：越界在下标取用之前就会抛出，不会误删别的图。
+        ResultRemoval removal = planResultRemoval(visible, resultIndex);
+        if (storageCleanupService != null) {
+            storageCleanupService.enqueue(visible.get(resultIndex));
+        }
+        removal.applyTo(asset);
+        assetMapper.updateById(asset);
+    }
+
+    /**
+     * 按下标摘掉一张结果之后的落库方案。抽成纯函数是因为两处最容易出错的判断都在这儿：
+     * 下标口径必须和前端一致，以及「删到最后一张」不能把 resultUrls 写成 {@code "[]"}。
+     */
+    record ResultRemoval(List<String> survivors) {
+
+        void applyTo(AgentAsset asset) {
+            if (survivors.isEmpty()) {
+                // 最后一张：保留原 URL 字段做留痕，只翻状态。
+                // 这里绝不能写 "[]" —— 前后端都会在数组为空时回退到 asset.url，
+                // 写空数组反而让单图资产重新冒出来。
+                asset.setStatus(AgentAsset.STATUS_DELETED);
+                return;
+            }
+            asset.setResultUrls(toJsonArray(survivors));
+            asset.setUrl(survivors.getFirst());
+        }
+
+        private static String toJsonArray(List<String> urls) {
+            try {
+                return ASSET_JSON.writeValueAsString(urls);
+            } catch (Exception e) {
+                log.warn("结果 URL 序列化失败: {}", e.getMessage());
+                return null;
+            }
+        }
+    }
+
+    static ResultRemoval planResultRemoval(List<String> visible, int resultIndex) {
+        if (resultIndex < 0 || resultIndex >= visible.size()) {
+            throw new BusinessException(40001, "要删除的素材不存在");
+        }
+        List<String> survivors = new ArrayList<>(visible);
+        survivors.remove(resultIndex);
+        return new ResultRemoval(List.copyOf(survivors));
+    }
+
+    /** 删除入口共用的归属校验：不存在、未归属会话、或会话不属于本人都按 40401 拒绝（防 IDOR 枚举）。 */
+    private AgentAsset requireOwnedDeletableAsset(String userId, String assetId) {
+        AgentAsset asset = assetMapper.selectById(assetId);
+        if (asset == null || asset.getConversationId() == null || asset.getConversationId().isBlank()) {
+            throw new BusinessException(40401, "资产不存在或无权访问");
+        }
+        if (AgentAsset.STATUS_DELETED.equals(asset.getStatus())) {
+            throw new BusinessException(40401, "资产不存在或无权访问");
+        }
+        getOwnedConversation(userId, asset.getConversationId());
+        return asset;
+    }
+
 
     @Override
     @Transactional(readOnly = true)
@@ -552,6 +617,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 new LambdaQueryWrapper<AgentAsset>()
                         .eq(AgentAsset::getConversationId, conversationId)
                         .ne(AgentAsset::getType, "reference")
+                        // 软删除的行留着给生成记录查阅，但不能再出现在会话资产网格里。
+                        .ne(AgentAsset::getStatus, AgentAsset.STATUS_DELETED)
                         .orderByDesc(AgentAsset::getCreatedAt));
         List<AgentAsset> records = resultPage.getRecords() == null
                 ? List.of() : resultPage.getRecords();
@@ -574,7 +641,9 @@ public class AgentChatServiceImpl implements AgentChatService {
     private long countAssets(String conversationId, String type) {
         return assetMapper.selectCount(new LambdaQueryWrapper<AgentAsset>()
                 .eq(AgentAsset::getConversationId, conversationId)
-                .eq(AgentAsset::getType, type));
+                .eq(AgentAsset::getType, type)
+                // 分类角标要和网格内容对得上，已删除的不计入。
+                .ne(AgentAsset::getStatus, AgentAsset.STATUS_DELETED));
     }
 
     private void signAssetUrls(AgentAsset asset) {
@@ -588,6 +657,34 @@ public class AgentChatServiceImpl implements AgentChatService {
                 .filter(asset -> type.equals(asset.getType()))
                 .mapToInt(asset -> resultUrls(asset).size())
                 .sum();
+    }
+
+    /**
+     * 前端可见的结果 URL 列表，索引口径必须与前端 {@code assetUrls}（parseResultUrls + url 回退）严格一致。
+     *
+     * <p>与 {@link #resultUrls} 的区别：这里<b>不去重</b>。resultUrls 走的是 LinkedHashSet，
+     * 一旦历史数据里出现重复 URL，集合口径的下标就会和前端渲染出来的格子错位，
+     * 按错的张数去删。删除入口一律用这一份。
+     */
+    static List<String> visibleResultUrls(AgentAsset asset) {
+        List<String> urls = new ArrayList<>();
+        if (asset.getResultUrls() != null && !asset.getResultUrls().isBlank()) {
+            try {
+                JsonNode root = ASSET_JSON.readTree(asset.getResultUrls());
+                if (root.isArray()) {
+                    for (JsonNode item : root) {
+                        String url = item.isTextual() ? item.asText("") : item.path("url").asText("");
+                        if (!url.isBlank()) urls.add(url);
+                    }
+                }
+            } catch (Exception ignored) {
+                // 坏数据回退 url 单字段，与前端解析失败时的行为一致。
+            }
+        }
+        if (urls.isEmpty() && asset.getUrl() != null && !asset.getUrl().isBlank()) {
+            urls.add(asset.getUrl());
+        }
+        return List.copyOf(urls);
     }
 
     /** result_urls 支持字符串数组与历史对象数组；无结果时回退单 url。 */
@@ -1106,6 +1203,11 @@ public class AgentChatServiceImpl implements AgentChatService {
 
         CompletableFuture.runAsync(() -> {
             com.moon.moonagent.entity.AgentTurnEntity turn = null;
+            // 一个 turn 只有一个 publisher：turn_started → … → turn_completed/turn_failed 全部经它写入 + 推送，
+            // flush、序号分配与 emitter 串行化因此只有一条有序通道（红线 1）。
+            // 显式 close（不用 try-with-resources）是为了让 catch 分支仍能用同一个 publisher 写终态事件，
+            // 避免出现第二个 store writer；持久化失败仍由 close() 暴露，不静默跳号。
+            AgentTurnEventPublisher orderedPublisher = null;
             try {
                 bootstrapAgentScopeSession(userId, conversation);
                 String idempotencyKey = clientRequestId == null || clientRequestId.isBlank()
@@ -1144,92 +1246,127 @@ public class AgentChatServiceImpl implements AgentChatService {
                             effectiveRoutingHint, effectiveReferenceVideos, effectiveReferenceAudios,
                             effectiveAttachments);
                 }
-                Map<String, Object> started = new LinkedHashMap<>();
-                started.put("turnId", turn.getId());
-                started.put("conversationId", conversationId);
-                started.put("runtime", turn.getRuntimeEngine() == null
-                        ? "agentscope-java-2.0.4" : turn.getRuntimeEngine());
-                // 随 turn_started 提前下发模型上下文窗口，前端首轮即可展示正确分母（无需等 usage 事件）
-                started.put("contextWindowTokens", resolveAgentContextWindow());
-                sendRuntimeEnvelope(emitter,
-                        turnEventStore.append(turn.getId(), "turn_started", started));
+                AgentTurnResult result = null;
+                try {
+                    Map<String, Object> started = new LinkedHashMap<>();
+                    started.put("turnId", turn.getId());
+                    started.put("conversationId", conversationId);
+                    started.put("runtime", turn.getRuntimeEngine() == null
+                            ? "agentscope-java-2.0.4" : turn.getRuntimeEngine());
+                    // 随 turn_started 提前下发模型上下文窗口，前端首轮即可展示正确分母（无需等 usage 事件）
+                    started.put("contextWindowTokens", resolveAgentContextWindow());
 
-                OrchestrationRequest request = new OrchestrationRequest(
-                        conversation, effectiveContent, effectivePicUrls, emitter);
-                request.setTurnId(turn.getId());
-                request.setAssetIds(effectiveAssetIds);
-                request.setRoutingHint(effectiveRoutingHint);
-                request.setCanvasContext(canvasContext);
-                request.setNativeEventsOnly(true);
-                request.setReferenceVideos(effectiveReferenceVideos);
-                request.setReferenceAudios(effectiveReferenceAudios);
-                request.setAttachments(effectiveAttachments);
-                request.setGenerationPreferences(generationPreferences);
-                ConstraintLedger ledger = conversation.getProjectId() == null
-                        || conversation.getProjectId().isBlank()
-                        ? null
-                        : creativeContext.prepareTurn(
-                                userId, conversation.getProjectId(), effectiveContent);
-                if (ledger == null) {
-                    ledger = new ConstraintLedger(
-                            com.moon.moonagent.ai.agent.creative.CreativeMode.BALANCED,
-                            List.of(), List.of(), List.of());
-                }
-                final ConstraintLedger turnLedger = ledger;
-                if (ledger.strict() || !ledger.unresolved().isEmpty()) {
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(
-                            turn.getId(), "constraint_flagged", Map.of(
-                                    "mode", turnLedger.mode().name(),
-                                    "hardConstraints", turnLedger.hard(),
-                                    "softConstraints", turnLedger.soft(),
-                                    "unresolved", turnLedger.unresolved())));
-                }
-                AgentTraceAccumulator trace = new AgentTraceAccumulator(
-                        request, resolveAgentContextWindow());
-                request.setTrace(trace);
+                    OrchestrationRequest request = new OrchestrationRequest(
+                            conversation, effectiveContent, effectivePicUrls, emitter);
+                    request.setTurnId(turn.getId());
+                    request.setAssetIds(effectiveAssetIds);
+                    request.setRoutingHint(effectiveRoutingHint);
+                    request.setCanvasContext(canvasContext);
+                    request.setNativeEventsOnly(true);
+                    request.setReferenceVideos(effectiveReferenceVideos);
+                    request.setReferenceAudios(effectiveReferenceAudios);
+                    request.setAttachments(effectiveAttachments);
+                    request.setGenerationPreferences(generationPreferences);
+                    ConstraintLedger ledger = conversation.getProjectId() == null
+                            || conversation.getProjectId().isBlank()
+                            ? null
+                            : creativeContext.prepareTurn(
+                                    userId, conversation.getProjectId(), effectiveContent);
+                    if (ledger == null) {
+                        ledger = new ConstraintLedger(
+                                com.moon.moonagent.ai.agent.creative.CreativeMode.BALANCED,
+                                List.of(), List.of(), List.of());
+                    }
+                    final ConstraintLedger turnLedger = ledger;
+                    AgentTraceAccumulator trace = new AgentTraceAccumulator(
+                            request, resolveAgentContextWindow());
+                    request.setTrace(trace);
+                    orderedPublisher = eventPublisher(
+                            turn.getId(), emitter, trace.contextWindowTokens());
+                    orderedPublisher.publish("turn_started", started);
+                    if (ledger.strict() || !ledger.unresolved().isEmpty()) {
+                        orderedPublisher.publish("constraint_flagged", Map.of(
+                                "mode", turnLedger.mode().name(),
+                                "hardConstraints", turnLedger.hard(),
+                                "softConstraints", turnLedger.soft(),
+                                "unresolved", turnLedger.unresolved()));
+                    }
 
-                AgentTurnResult result;
-                try (AgentTurnEventPublisher eventPublisher = eventPublisher(
-                        turn.getId(), emitter, trace.contextWindowTokens())) {
-                    AgentTurnEventPublisher orderedPublisher = eventPublisher;
-                    String orderedTurnId = turn.getId();
-                    result = withTraceStreaming(trace, orderedPublisher, () ->
+                    // lambda 只能捕获 effectively-final：orderedPublisher 在 catch/finally 里会被再赋值
+                    final AgentTurnEventPublisher streamPublisher = orderedPublisher;
+                    final String streamTurnId = turn.getId();
+                    result = withTraceStreaming(trace, streamPublisher, () ->
                             agentScopeMediaRuntime.runTurn(
                                     conversation, request, trace,
-                                    eventObserver(trace, orderedPublisher, orderedTurnId, emitter,
+                                    eventObserver(trace, streamPublisher, streamTurnId, emitter,
                                             trace.contextWindowTokens())));
-                }
-                throwIfInterrupted(conversationId);
-                result = reconcileSandboxOutputs(conversation, turn.getId(), result);
-                finishAgentScopeTurn(conversation, turn, result, emitter);
-            } catch (AgentInterruptException e) {
-                if (turn != null) {
-                    var canvasRun = canvasRunService.activeByTurn(turn.getId());
-                    if (canvasRun != null) {
-                        canvasRunService.fail(canvasRun.runId(), "用户停止");
-                        sendRuntimeEnvelope(emitter, turnEventStore.append(
-                                turn.getId(), "canvas_run_failed",
-                                Map.of("canvasRunId", canvasRun.runId(), "message", "用户停止")));
+                    throwIfInterrupted(conversationId);
+                    result = withToolDrafts(reconcileSandboxOutputs(conversation, turn.getId(), result), trace);
+                    finishAgentScopeTurn(conversation, turn, result, orderedPublisher);
+                } catch (AgentInterruptException e) {
+                    if (turn != null) {
+                        AgentTurnEventPublisher terminal = orderedPublisher != null
+                                ? orderedPublisher
+                                : eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                        var canvasRun = canvasRunService.activeByTurn(turn.getId());
+                        if (canvasRun != null) {
+                            canvasRunService.fail(canvasRun.runId(), "用户停止");
+                            terminal.publish("canvas_run_failed",
+                                    Map.of("canvasRunId", canvasRun.runId(), "message", "用户停止"));
+                        }
+                        turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "40904", "message", "生成已停止"));
                     }
-                    turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
-                            Map.of("code", "40904", "message", "生成已停止")));
+                    log.info("AgentScope turn 被用户打断: conversationId={}", conversationId);
+                } catch (Exception e) {
+                    if (turn != null) {
+                        AgentTurnEventPublisher terminal = orderedPublisher != null
+                                ? orderedPublisher
+                                : eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                        var canvasRun = canvasRunService.activeByTurn(turn.getId());
+                        if (canvasRun != null) {
+                            canvasRunService.fail(canvasRun.runId(), friendlyRuntimeError(e));
+                            terminal.publish("canvas_run_failed",
+                                    Map.of("canvasRunId", canvasRun.runId(),
+                                            "message", friendlyRuntimeError(e)));
+                        }
+                        turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "50001", "message", friendlyRuntimeError(e)));
+                    } else {
+                        sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
+                    }
+                    log.error("AgentScope turn 失败: conversationId={}, error={}",
+                            conversationId, e.getMessage(), e);
+                } finally {
+                    if (orderedPublisher != null) {
+                        try {
+                            orderedPublisher.close();
+                        } catch (RuntimeException closeFailure) {
+                            // 持久化失败已在 publisher 内 log.error；这里再显式暴露一次，绝不静默跳号
+                            log.error("turn 事件持久化失败在关闭时暴露: conversationId={}, error={}",
+                                    conversationId, closeFailure.getMessage(), closeFailure);
+                        }
+                    }
                 }
-                log.info("AgentScope turn 被用户打断: conversationId={}", conversationId);
+            } catch (AgentInterruptException e) {
+                // turn 尚未建立就中断：与旧行为一致，只登记日志，不写事件
+                log.info("AgentScope turn 建立前被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
                 if (turn != null) {
-                    var canvasRun = canvasRunService.activeByTurn(turn.getId());
-                    if (canvasRun != null) {
-                        canvasRunService.fail(canvasRun.runId(), friendlyRuntimeError(e));
-                        sendRuntimeEnvelope(emitter, turnEventStore.append(
-                                turn.getId(), "canvas_run_failed",
-                                Map.of("canvasRunId", canvasRun.runId(),
-                                        "message", friendlyRuntimeError(e))));
+                    // turn 已建立、publisher 尚未起来：仍按同一收口写终态，不留无终态的 running 轮次
+                    AgentTurnEventPublisher terminal =
+                            eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                    try {
+                        turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "50001", "message", friendlyRuntimeError(e)));
+                    } finally {
+                        terminal.close();
                     }
-                    turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
-                            Map.of("code", "50001", "message", friendlyRuntimeError(e))));
                 } else {
+                    // turn 未建立的失败（bootstrap/start）：沿用原有无序号错误帧
                     sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
                 }
                 log.error("AgentScope turn 失败: conversationId={}, error={}",
@@ -1290,13 +1427,16 @@ public class AgentChatServiceImpl implements AgentChatService {
                 started.put("conversationId", conversationId);
                 started.put("resume", true);
                 started.put("runtime", turn.getRuntimeEngine());
-                sendRuntimeEnvelope(emitter,
-                        turnEventStore.append(turn.getId(), "turn_started", started));
 
                 if ("reject".equalsIgnoreCase(action)) {
                     checkpointResumeService.complete(claim);
-                    finishAgentScopeTurn(conversation, turn,
-                            AgentTurnResult.done("已取消，本次操作未执行。"), emitter);
+                    // reject 是终态取消：turn_started 与 turn_completed 也必须走同一个有序 publisher
+                    try (AgentTurnEventPublisher rejectPublisher = eventPublisher(
+                            turn.getId(), emitter, resolveAgentContextWindow())) {
+                        rejectPublisher.publish("turn_started", started);
+                        finishAgentScopeTurn(conversation, turn,
+                                AgentTurnResult.done("已取消，本次操作未执行。"), rejectPublisher);
+                    }
                     return;
                 }
 
@@ -1317,33 +1457,72 @@ public class AgentChatServiceImpl implements AgentChatService {
                         request, resolveAgentContextWindow());
                 request.setTrace(trace);
 
-                AgentTurnResult result;
-                try (AgentTurnEventPublisher eventPublisher = eventPublisher(
-                        turn.getId(), emitter, trace.contextWindowTokens())) {
-                    AgentTurnEventPublisher orderedPublisher = eventPublisher;
-                    String orderedTurnId = turn.getId();
-                    result = withTraceStreaming(trace, orderedPublisher, () ->
+                AgentTurnEventPublisher orderedPublisher = null;
+                try {
+                    orderedPublisher = eventPublisher(
+                            turn.getId(), emitter, trace.contextWindowTokens());
+                    orderedPublisher.publish("turn_started", started);
+
+                    // lambda 只能捕获 effectively-final：orderedPublisher 在 catch/finally 里会被再赋值
+                    final AgentTurnEventPublisher resumePublisher = orderedPublisher;
+                    final String orderedTurnId = turn.getId();
+                    AgentTurnResult result = withTraceStreaming(trace, resumePublisher, () ->
                             agentScopeMediaRuntime.resumeTurn(
                                     conversation, claim.checkpoint(), request, trace,
                                     action, customText,
-                                    eventObserver(trace, orderedPublisher, orderedTurnId, emitter,
+                                    eventObserver(trace, resumePublisher, orderedTurnId, emitter,
                                             trace.contextWindowTokens())));
+                    throwIfInterrupted(conversationId);
+                    result = withToolDrafts(reconcileSandboxOutputs(conversation, turn.getId(), result), trace);
+                    checkpointResumeService.complete(claim);
+                    finishAgentScopeTurn(conversation, turn, result, orderedPublisher);
+                } catch (AgentInterruptException e) {
+                    if (turn != null) {
+                        AgentTurnEventPublisher terminal = orderedPublisher != null
+                                ? orderedPublisher
+                                : eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                        turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "40904", "message", "生成已停止"));
+                    }
+                } catch (Exception e) {
+                    if (turn != null) {
+                        AgentTurnEventPublisher terminal = orderedPublisher != null
+                                ? orderedPublisher
+                                : eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                        turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "50001", "message", friendlyRuntimeError(e)));
+                    } else {
+                        sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
+                    }
+                    log.error("AgentScope resume 失败: conversationId={}, error={}",
+                            conversationId, e.getMessage(), e);
+                } finally {
+                    if (orderedPublisher != null) {
+                        try {
+                            orderedPublisher.close();
+                        } catch (RuntimeException closeFailure) {
+                            // 持久化失败已在 publisher 内 log.error；这里再显式暴露一次，绝不静默跳号
+                            log.error("turn 事件持久化失败在关闭时暴露: conversationId={}, error={}",
+                                    conversationId, closeFailure.getMessage(), closeFailure);
+                        }
+                    }
                 }
-                throwIfInterrupted(conversationId);
-                result = reconcileSandboxOutputs(conversation, turn.getId(), result);
-                checkpointResumeService.complete(claim);
-                finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
-                if (turn != null) {
-                    turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
-                            Map.of("code", "40904", "message", "生成已停止")));
-                }
+                log.info("AgentScope resume 建立前被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
                 if (turn != null) {
-                    turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
-                            Map.of("code", "50001", "message", friendlyRuntimeError(e))));
+                    // turn 已建立、publisher 尚未起来：仍按同一收口写终态
+                    AgentTurnEventPublisher terminal =
+                            eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                    try {
+                        turnEventStore.finish(turn.getId(), "failed", e.getMessage(), OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "50001", "message", friendlyRuntimeError(e)));
+                    } finally {
+                        terminal.close();
+                    }
                 } else {
                     sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
                 }
@@ -1402,8 +1581,6 @@ public class AgentChatServiceImpl implements AgentChatService {
                 started.put("resume", true);
                 started.put("canvasSessionId", session.sessionId());
                 started.put("runtime", turn.getRuntimeEngine());
-                sendRuntimeEnvelope(emitter,
-                        turnEventStore.append(turn.getId(), "turn_started", started));
 
                 OrchestrationRequest request = new OrchestrationRequest(
                         conversation,
@@ -1423,36 +1600,73 @@ public class AgentChatServiceImpl implements AgentChatService {
                         : agentContextWindowResolver.resolve(agentScopeMediaRuntime.primaryModelName()));
                 request.setTrace(trace);
 
-                AgentTurnResult result;
-                try (AgentTurnEventPublisher eventPublisher = eventPublisher(
-                        turn.getId(), emitter, trace.contextWindowTokens())) {
-                    AgentTurnEventPublisher orderedPublisher = eventPublisher;
-                    String orderedTurnId = turn.getId();
-                    result = withTraceStreaming(trace, orderedPublisher, () ->
+                AgentTurnEventPublisher orderedPublisher = null;
+                try {
+                    orderedPublisher = eventPublisher(
+                            turn.getId(), emitter, trace.contextWindowTokens());
+                    orderedPublisher.publish("turn_started", started);
+
+                    // lambda 只能捕获 effectively-final：orderedPublisher 在 catch/finally 里会被再赋值
+                    final AgentTurnEventPublisher canvasPublisher = orderedPublisher;
+                    final String orderedTurnId = turn.getId();
+                    AgentTurnResult result = withTraceStreaming(trace, canvasPublisher, () ->
                             agentScopeMediaRuntime.resumeCanvasTurn(
                                     conversation, session, request, trace,
-                                    eventObserver(trace, orderedPublisher, orderedTurnId, emitter,
+                                    eventObserver(trace, canvasPublisher, orderedTurnId, emitter,
                                             trace.contextWindowTokens())));
+                    throwIfInterrupted(conversationId);
+                    result = withToolDrafts(reconcileSandboxOutputs(conversation, turn.getId(), result), trace);
+                    canvasSessionService.markResumed(session.sessionId());
+                    finishAgentScopeTurn(conversation, turn, result, orderedPublisher);
+                } catch (AgentInterruptException e) {
+                    canvasSessionService.markFailed(session.sessionId(), "用户停止");
+                    if (turn != null) {
+                        AgentTurnEventPublisher terminal = orderedPublisher != null
+                                ? orderedPublisher
+                                : eventPublisher(turn.getId(), emitter, trace.contextWindowTokens());
+                        turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "40904", "message", "生成已停止"));
+                    }
+                } catch (Exception e) {
+                    canvasSessionService.markRetryable(session.sessionId(), e.getMessage());
+                    if (turn != null) {
+                        AgentTurnEventPublisher terminal = orderedPublisher != null
+                                ? orderedPublisher
+                                : eventPublisher(turn.getId(), emitter, trace.contextWindowTokens());
+                        turnEventStore.markWaitingUser(turn.getId());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "50001", "message", friendlyRuntimeError(e)));
+                    } else {
+                        sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
+                    }
+                    log.error("Canvas session resume 失败: conversationId={}, sessionId={}",
+                            conversationId, sessionId, e);
+                } finally {
+                    if (orderedPublisher != null) {
+                        try {
+                            orderedPublisher.close();
+                        } catch (RuntimeException closeFailure) {
+                            // 持久化失败已在 publisher 内 log.error；这里再显式暴露一次，绝不静默跳号
+                            log.error("turn 事件持久化失败在关闭时暴露: conversationId={}, error={}",
+                                    conversationId, closeFailure.getMessage(), closeFailure);
+                        }
+                    }
                 }
-                throwIfInterrupted(conversationId);
-                result = reconcileSandboxOutputs(conversation, turn.getId(), result);
-                canvasSessionService.markResumed(session.sessionId());
-                finishAgentScopeTurn(conversation, turn, result, emitter);
             } catch (AgentInterruptException e) {
-                canvasSessionService.markFailed(session.sessionId(), "用户停止");
-                if (turn != null) {
-                    turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(
-                            turn.getId(), "turn_failed",
-                            Map.of("code", "40904", "message", "生成已停止")));
-                }
+                log.info("Canvas session resume 建立前被用户打断: conversationId={}", conversationId);
             } catch (Exception e) {
-                canvasSessionService.markRetryable(session.sessionId(), e.getMessage());
                 if (turn != null) {
-                    turnEventStore.markWaitingUser(turn.getId());
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(
-                            turn.getId(), "turn_failed",
-                            Map.of("code", "50001", "message", friendlyRuntimeError(e))));
+                    // turn 已建立、publisher 尚未起来：仍按同一收口写终态
+                    AgentTurnEventPublisher terminal =
+                            eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
+                    try {
+                        turnEventStore.markWaitingUser(turn.getId());
+                        terminal.publish("turn_failed",
+                                Map.of("code", "50001", "message", friendlyRuntimeError(e)));
+                    } finally {
+                        terminal.close();
+                    }
                 } else {
                     sendRuntimeError(emitter, "50001", friendlyRuntimeError(e));
                 }
@@ -1669,6 +1883,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             } else if (event instanceof ThinkingBlockEndEvent) {
                 trace.recordThinkingEnd();
             }
+            // 同时累积工具明细草稿：落进终态 metadata 后，刷新/重放才能继续渲染工具调用明细。
+            trace.recordToolEvent(event);
             eventPublisher.accept(event);
             if (event instanceof ToolResultEndEvent result) {
                 eventPublisher.flush();
@@ -1678,8 +1894,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     if (run != null) {
                         String eventType = "canvas_create_run".equals(toolName)
                                 ? "canvas_run_started" : "canvas_run_updated";
-                        sendRuntimeEnvelope(emitter,
-                                turnEventStore.append(turnId, eventType, run.toMap()));
+                        eventPublisher.publish(eventType, run.toMap());
                     }
                 }
                 String special = switch (result.getToolCallName() == null
@@ -1695,8 +1910,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     Map<String, Object> payload = new LinkedHashMap<>();
                     payload.put("eventType", agentScopeEventMapper.type(event));
                     payload.put("data", agentScopeEventMapper.payload(event, contextWindowTokens));
-                    sendRuntimeEnvelope(emitter, turnEventStore.append(
-                            turnId, special, payload));
+                    eventPublisher.publish(special, payload);
                 }
             }
         };
@@ -1727,21 +1941,26 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
     }
 
+    /**
+     * 收敛一轮的终态：`turn_failed` / `canvas_session_required` / `turn_paused` /
+     * `canvas_run_completed` / `turn_completed` 等终态事件必须经同一个 {@link AgentTurnEventPublisher}
+     * 写入 + 推送，由 publisher 先 flush 尚未落库的 delta 再按同一序号发布（红线 1：终态不得越过其依赖事件）。
+     */
     private void finishAgentScopeTurn(AgentConversation conversation,
                                       com.moon.moonagent.entity.AgentTurnEntity turn,
-                                      AgentTurnResult result, SseEmitter emitter) {
+                                      AgentTurnResult result,
+                                      AgentTurnEventPublisher eventPublisher) {
         if (result == null) {
             turnEventStore.finish(turn.getId(), "failed", "runtime returned no result", OffsetDateTime.now());
-            sendRuntimeEnvelope(emitter, turnEventStore.append(turn.getId(), "turn_failed",
-                    Map.of("code", "50001", "message", "AgentScope 运行时没有返回结果")));
+            eventPublisher.publish("turn_failed",
+                    Map.of("code", "50001", "message", "AgentScope 运行时没有返回结果"));
             return;
         }
         Object canvasSession = result.metadata() == null
                 ? null : result.metadata().get("canvasSession");
         if (canvasSession != null) {
             turnEventStore.markWaitingUser(turn.getId());
-            sendRuntimeEnvelope(emitter,
-                    turnEventStore.append(turn.getId(), "canvas_session_required", canvasSession));
+            eventPublisher.publish("canvas_session_required", canvasSession);
             return;
         }
         if (result.hitlPaused()) {
@@ -1758,8 +1977,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 turnEventStore.attachCheckpoint(
                         turn.getId(), String.valueOf(pending.get("formToken")));
             }
-            sendRuntimeEnvelope(emitter,
-                    turnEventStore.append(turn.getId(), "turn_paused", paused));
+            eventPublisher.publish("turn_paused", paused);
             return;
         }
         boolean hasSandboxAttachments = result.metadata() != null
@@ -1773,9 +1991,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                 && com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.RUNNING
                 .equals(canvasRun.status())) {
             canvasRunService.complete(canvasRun.runId(), Map.of());
-            sendRuntimeEnvelope(emitter,
-                    turnEventStore.append(turn.getId(), "canvas_run_completed",
-                            canvasRunService.activeByTurn(turn.getId()).toMap()));
+            eventPublisher.publish("canvas_run_completed",
+                    canvasRunService.activeByTurn(turn.getId()).toMap());
         }
         turnEventStore.finish(turn.getId(), "completed", "", OffsetDateTime.now());
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -1783,15 +2000,36 @@ public class AgentChatServiceImpl implements AgentChatService {
         payload.put("status", "completed");
         payload.put("content", result.content() == null ? "" : result.content());
         payload.put("metadata", result.metadata() == null ? Map.of() : result.metadata());
-        sendRuntimeEnvelope(emitter,
-                turnEventStore.append(turn.getId(), "turn_completed", payload));
+        eventPublisher.publish("turn_completed", payload);
+    }
+
+    /**
+     * 把本轮累积的工具调用草稿并进终态 metadata。
+     *
+     * <p>前端 `ToolResultBlocks` 直播读 `generating.toolDrafts`、刷新/重放读 `metadata.toolDrafts`；
+     * 后端此前只写 `sandboxAttachments`，因此**刷新后工具明细必然消失**。
+     * 这里落库后，直播 / 刷新 / `afterSeq` 重放三条路径渲染的是同一份草稿。
+     * 无工具调用时不写键，保持既有 payload 不变（零回归）。
+     */
+    private AgentTurnResult withToolDrafts(AgentTurnResult result, AgentTraceAccumulator trace) {
+        if (result == null || trace == null) return result;
+        Map<String, Object> drafts = trace.toolDrafts();
+        if (drafts.isEmpty()) return result;
+        Map<String, Object> metadata = new LinkedHashMap<>(
+                result.metadata() == null ? Map.of() : result.metadata());
+        metadata.put("toolDrafts", drafts);
+        return new AgentTurnResult(
+                result.content(), metadata, result.agentTrace(), result.reasoning(),
+                result.suggestedActions(), result.hitlPaused(), result.messageId());
     }
 
     @SuppressWarnings("unchecked")
     private AgentTurnResult reconcileSandboxOutputs(
             AgentConversation conversation, String turnId, AgentTurnResult result) {
         if (sandboxOutputReconciler == null || result == null) return result;
-        var published = sandboxOutputReconciler.reconcile(conversation, turnId);
+        // 只挂本次新建的产物：重复内容会命中既有 agent_assets 行，
+        // 若把既有资产一并返回，后续每个回合都会把历史产物重新挂成自己的附件（红线 5）。
+        var published = sandboxOutputReconciler.reconcileNew(conversation, turnId);
         return published.assetIds().isEmpty()
                 ? result
                 : withSandboxAttachments(result, published);
@@ -1857,7 +2095,12 @@ public class AgentChatServiceImpl implements AgentChatService {
         messageMapper.updateById(update);
     }
 
-    /** HITL 暂停时把本轮思考链合并到已落库卡片，确保刷新后仍可恢复。 */
+    /**
+     * HITL 暂停时把本轮思考链与工具明细合并到已落库卡片，确保刷新后仍可恢复。
+     *
+     * <p>暂停轮不会走 `persistAssistant`，因此这里必须显式带上 `toolDrafts`——
+     * 否则"暂停过一次"的回合刷新后工具调用明细仍会消失。
+     */
     void mergeHitlMessageThinking(String messageId, AgentTurnResult result) {
         if (messageId == null || messageId.isBlank() || result == null) return;
         Map<String, Object> additions = new LinkedHashMap<>();
@@ -1867,6 +2110,9 @@ public class AgentChatServiceImpl implements AgentChatService {
         }
         if (result.metadata() != null && result.metadata().get("metrics") != null) {
             additions.put("metrics", result.metadata().get("metrics"));
+        }
+        if (result.metadata() != null && result.metadata().get("toolDrafts") != null) {
+            additions.put("toolDrafts", result.metadata().get("toolDrafts"));
         }
         if (additions.isEmpty()) return;
 

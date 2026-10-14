@@ -67,13 +67,45 @@ public class SandboxArtifactPublisher {
                                           String path,
                                           long sizeBytes,
                                           String suppliedMimeType) {
+        PublishOutcome outcome = publishPathOutcome(conversation, taskId, path, sizeBytes, suppliedMimeType);
+        if (outcome.assetId() == null) return PublishedArtifacts.EMPTY;
+        return new PublishedArtifacts(
+                List.of(outcome.assetId()),
+                outcome.url() == null ? List.of() : List.of(outcome.url()));
+    }
+
+    /**
+     * 与 {@link #publishPath} 相同的幂等语义，但只返回<b>本次新建</b>的资产。
+     *
+     * <p>补扫场景（异步任务完成后的 output/ 全量扫描、回合末扫描）必须用它：
+     * 重复内容只会命中既有 {@code agent_assets} 行，若把既有资产也返回，
+     * 每个后续回合都会把历史产物当成自己的附件重新挂上，制造重复卡片
+     * ——这正是红线 5「同一内容重复扫描必须幂等，不能制造重复资产或重复卡片」禁止的行为。
+     */
+    public PublishedArtifacts publishPathIfNew(AgentConversation conversation,
+                                               String taskId,
+                                               String path,
+                                               long sizeBytes,
+                                               String suppliedMimeType) {
+        PublishOutcome outcome = publishPathOutcome(conversation, taskId, path, sizeBytes, suppliedMimeType);
+        if (!outcome.created() || outcome.assetId() == null) return PublishedArtifacts.EMPTY;
+        return new PublishedArtifacts(
+                List.of(outcome.assetId()),
+                outcome.url() == null ? List.of() : List.of(outcome.url()));
+    }
+
+    private PublishOutcome publishPathOutcome(AgentConversation conversation,
+                                              String taskId,
+                                              String path,
+                                              long sizeBytes,
+                                              String suppliedMimeType) {
         if (conversation == null || path == null || path.isBlank()) {
-            return PublishedArtifacts.EMPTY;
+            return PublishOutcome.EMPTY;
         }
         String extension = extension(path);
         if (sizeBytes > MAX_ARTIFACT_BYTES) {
             log.warn("Skip oversized sandbox artifact {} from task {}", path, taskId);
-            return PublishedArtifacts.EMPTY;
+            return PublishOutcome.EMPTY;
         }
         try {
             byte[] bytes = client.download(conversation.getId(), path);
@@ -83,9 +115,8 @@ public class SandboxArtifactPublisher {
                     .eq(AgentAsset::getIdempotencyKey, idempotencyKey)
                     .last("LIMIT 1"));
             if (existing != null) {
-                return new PublishedArtifacts(
-                        List.of(existing.getId()),
-                        existing.getUrl() == null ? List.of() : List.of(existing.getUrl()));
+                return new PublishOutcome(existing.getId(),
+                        existing.getUrl() == null ? null : existing.getUrl(), false);
             }
             String name = fileName(path);
             String mime = suppliedMimeType == null || suppliedMimeType.isBlank()
@@ -111,11 +142,15 @@ public class SandboxArtifactPublisher {
             asset.setResultUrls(json(List.of(url)));
             assetMapper.insert(asset);
             outboxService.enqueue(asset);
-            return new PublishedArtifacts(List.of(asset.getId()), List.of(url));
+            return new PublishOutcome(asset.getId(), url, true);
         } catch (RuntimeException error) {
             log.warn("Unable to publish sandbox artifact {}: {}", path, error.getMessage());
-            return PublishedArtifacts.EMPTY;
+            return PublishOutcome.EMPTY;
         }
+    }
+
+    private record PublishOutcome(String assetId, String url, boolean created) {
+        private static final PublishOutcome EMPTY = new PublishOutcome(null, null, false);
     }
 
     /**

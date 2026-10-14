@@ -36,7 +36,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
   const [tab, setTab] = useState<'canvas' | 'assets'>('canvas');
 
   return (
-    <main className="project-home" style={{ minHeight: '100vh', padding: '40px 48px', boxSizing: 'border-box', maxWidth: 1180, margin: '0 auto' }}>
+    <main className="project-home view-shell" style={{ minHeight: '100vh', padding: '40px 48px', boxSizing: 'border-box', maxWidth: 1180, margin: '0 auto' }}>
       <header className="project-home__header" style={{ display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 32 }}>
         <button
           onClick={onBack}
@@ -83,8 +83,8 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
 
             {canvases.length ? (
               <div className="project-home__grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-                {canvases.map((canvas) => (
-                  <article key={canvas.id} style={card}>
+                {canvases.map((canvas, index) => (
+                  <article key={canvas.id} style={{ ...card, '--index': index } as React.CSSProperties}>
                     <button onClick={() => onOpenCanvas(canvas.id)} style={{ ...cardOpen, textAlign: 'left' }}>
                       <CanvasCover canvasId={canvas.id} coverAssetId={canvas.coverAssetId} />
                       {renamingCanvasId === canvas.id ? (
@@ -139,12 +139,12 @@ function CanvasCover({ canvasId, coverAssetId }: { canvasId: string; coverAssetI
 
 const iconButton: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
 const ghostButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13 };
-const dangerButton: React.CSSProperties = { ...ghostButton, background: '#e5484d', borderColor: '#e5484d', color: '#fff' };
-const dangerGhostButton: React.CSSProperties = { ...iconButton, color: '#ff8a8e', width: 40, height: 40 };
+const dangerButton: React.CSSProperties = { ...ghostButton, background: '#6a6a6a', borderColor: '#6a6a6a', color: '#fff' };
+const dangerGhostButton: React.CSSProperties = { ...iconButton, color: '#a3a3a3', width: 40, height: 40 };
 const primaryButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 9, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
 const card: React.CSSProperties = { padding: 16, borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)' };
 const cardOpen: React.CSSProperties = { display: 'block', width: '100%', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 };
 const miniButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 5, borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
-const miniDanger: React.CSSProperties = { ...miniButton, color: '#ff8a8e', borderColor: 'rgba(255,138,142,0.4)' };
+const miniDanger: React.CSSProperties = { ...miniButton, color: '#a3a3a3', borderColor: 'rgba(163,163,163,0.4)' };
 const tabActive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
 const tabInactive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13 };

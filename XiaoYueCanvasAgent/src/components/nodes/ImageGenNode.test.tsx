@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ImageGenNode } from './ImageGenNode';
 import type { CanvasNode } from '../../types';
@@ -28,6 +28,8 @@ vi.mock('@xyflow/react', () => ({
   NodeToolbar: ({ children, className, isVisible }: { children?: React.ReactNode; className?: string; isVisible?: boolean }) =>
     isVisible === false ? null : <div className={className}>{children}</div>,
   Position: { Top: 'top', Bottom: 'bottom' },
+  useStore: (selector: (state: { nodes: unknown }) => unknown) =>
+    selector({ nodes: { find: () => ({ id: 'node', selected: true }), filter: () => [{}] } }),
 }));
 
 const emptyPool: ReferenceImagePoolResult = {
@@ -144,7 +146,7 @@ describe('ImageGenNode merged modes', () => {
     expect(updateNode).toHaveBeenCalledWith('image-node', { mode: 'batchRefine' });
   });
 
-  it('previews the source image of an image-to-image node', () => {
+  it('previews the source image of an image-to-image node', async () => {
     useMediaStore.setState({ assets: { 'asset-1': imageAsset('asset-1') } });
     renderNode(
       data({
@@ -161,7 +163,9 @@ describe('ImageGenNode merged modes', () => {
     expect(within(dialog).getByRole('img', { name: '图1' })).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('button', { name: '关闭预览' }));
-    expect(screen.queryByRole('dialog', { name: '图片预览' })).toBeNull();
+    // 预览浮层接入了退场动效：先切到退场态，动效结束才卸载
+    expect(dialog.dataset.present).toBe('false');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '图片预览' })).toBeNull());
   });
 
   it('previews the generated result from the node body', () => {

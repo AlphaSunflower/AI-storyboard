@@ -1623,6 +1623,9 @@ public class AgentRuntimeSupport {
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentAsset>()
                             .eq(AgentAsset::getTaskId, taskId).last("LIMIT 1"));
             if (asset == null) return;
+            // 已软删除的素材不再接受轮询写回：否则完成时会覆写状态、重新挂上 URL，
+            // 甚至通过 persistVideoMessage 把用户明确删掉的视频又发回对话。
+            if (AgentAsset.STATUS_DELETED.equals(asset.getStatus())) return;
             String previousStatus = asset.getStatus();
             asset.setStatus(status);
             if (url != null && !url.isBlank()) asset.setUrl(url);

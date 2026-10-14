@@ -60,7 +60,7 @@ function FrameAssetProperty({ assetId, label }: { assetId?: string; label: strin
         <span className="text-[12px] text-foreground">{label}</span>
         {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}</small>}
       </header>
-      <div className="mt-2 grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(8,18,14,0.72)]">
+      <div className="mt-2 grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(16,16,16,0.72)]">
         {assetError
           ? <span className="px-3 text-center text-[11px] text-muted-foreground">{assetError}</span>
           : previewUrl
@@ -209,7 +209,8 @@ export function InspectorPanel() {
     <>
     <div className="flex flex-col gap-3 p-4" key={selectedNodeId}>
       <div className="flex items-center gap-3 rounded-xl border border-[var(--border-dark)] bg-[rgba(244,244,245,0.05)] p-3">
-        <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: nodeData.accent }} />
+        {/* 节点分类不再用色相区分：统一中性点，类型靠下面的 kind 文本读 */}
+        <span className="h-3 w-3 shrink-0 rounded-full bg-[rgba(244,244,245,0.6)]" />
         <div className="min-w-0">
           <small className="block font-mono text-[10px] tracking-[0.12em] text-muted-foreground">{nodeData.kind.toUpperCase()} NODE</small>
           <strong className="block truncate text-sm text-foreground">{selectedNodeId.slice(0, 22)}…</strong>
@@ -225,7 +226,7 @@ export function InspectorPanel() {
             <span className="flex items-center gap-2 text-[12px] text-foreground"><Video size={14} className="text-acid" />视频预览</span>
             {asset && <small className="font-mono text-[10px] text-muted-foreground">{asset.width} × {asset.height}{asset.durationSeconds ? ` · ${asset.durationSeconds.toFixed(1)}s` : ''}</small>}
           </header>
-          <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(8,18,14,0.72)]">
+          <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(16,16,16,0.72)]">
             {assetError ? (
               <span className="grid aspect-video w-full place-items-center px-4 text-center text-[12px] text-muted-foreground">{assetError}</span>
             ) : videoUrl ? (
@@ -247,7 +248,7 @@ export function InspectorPanel() {
             disabled={!previewUrl}
             aria-label={`预览图片：${nodeData.label}`}
             onClick={() => setPreviewTarget({ assetId: nodeData.assetId!, label: nodeData.label })}
-            className="group relative mt-2 block w-full overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(8,18,14,0.72)] disabled:cursor-wait"
+            className="group relative mt-2 block w-full overflow-hidden rounded-lg border border-[var(--border-dark)] bg-[rgba(16,16,16,0.72)] disabled:cursor-wait"
           >
             {assetError ? (
               <span className="grid aspect-[4/3] w-full place-items-center px-4 text-center text-[12px] text-muted-foreground">{assetError}</span>
@@ -256,7 +257,7 @@ export function InspectorPanel() {
             ) : (
               <span className="grid aspect-[4/3] w-full place-items-center text-muted-foreground">图片加载中…</span>
             )}
-            <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-[rgba(5,10,8,0.76)] text-acid opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-[rgba(9,9,9,0.76)] text-acid opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
               <Maximize2 size={14} />
             </span>
           </button>
@@ -306,7 +307,7 @@ export function InspectorPanel() {
       {nodeData.assetId && <p className="text-xs leading-relaxed text-muted-foreground">该节点引用真实本地资产。编辑操作会创建派生版本，不会覆盖原图。</p>}
       <div className="flex gap-2">
         <button onClick={duplicate} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-acid font-medium text-ink transition hover:brightness-105"><Copy size={15} /> 复制节点</button>
-        <button onClick={remove} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[rgba(255,107,94,0.4)] bg-[rgba(255,107,94,0.1)] font-medium text-destructive transition hover:bg-[rgba(255,107,94,0.18)]"><Trash2 size={15} /> 删除</button>
+        <button onClick={remove} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[rgba(138,138,138,0.4)] bg-[rgba(138,138,138,0.1)] font-medium text-destructive transition hover:bg-[rgba(138,138,138,0.18)]"><Trash2 size={15} /> 删除</button>
       </div>
     </div>
     {previewTarget && <ImagePreviewOverlay target={previewTarget} onClose={() => setPreviewTarget(null)} />}

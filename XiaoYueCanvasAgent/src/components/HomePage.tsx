@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { ArrowRight, FileArchive, FolderOpen, Image, Plus, Trash2 } from 'lucide-react';
 import type { ProjectSummary } from '../types';
 
@@ -27,7 +27,7 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
   const fileInput = useRef<HTMLInputElement>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   return (
-    <main className="canvas-home min-h-dvh overflow-auto px-6 py-10 md:px-14"
+    <main className="canvas-home view-shell min-h-dvh overflow-auto px-6 py-10 md:px-14"
       style={{ background: 'radial-gradient(circle at 82% 8%, rgba(244,244,245,0.10), transparent 30%), radial-gradient(circle at 16% 90%, rgba(24,24,24,0.9), transparent 40%), var(--canvas)' }}>
       <input ref={fileInput} className="canvas-file-input" type="file" accept=".morrow,application/x-morrow-project,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.target.value = ''; }} />
 
@@ -49,8 +49,8 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
           <span className="font-mono text-xs text-muted-foreground">{projects.length} 个项目</span>
         </header>
         {loading ? <div className="grid place-items-center rounded-2xl border border-dashed border-[var(--border-dark)] py-16 text-muted-foreground">正在读取本地项目…</div> : projects.length ? (
-          <div className="canvas-home__grid grid grid-cols-1 gap-4 sm:grid-cols-2">{projects.map((project) => (
-            <article key={project.id} className="group flex items-center gap-4 rounded-2xl border border-[var(--border-dark)] bg-card p-4 transition hover:border-[var(--acid)] hover:shadow-[0_0_24px_rgba(244,244,245,0.08)]">
+          <div className="canvas-home__grid grid grid-cols-1 gap-4 sm:grid-cols-2">{projects.map((project, index) => (
+            <article key={project.id} style={{ '--index': index } as CSSProperties} className="group flex items-center gap-4 rounded-2xl border border-[var(--border-dark)] bg-card p-4 transition hover:border-[var(--acid)] hover:shadow-[0_0_24px_rgba(244,244,245,0.08)]">
               <button className="flex flex-1 items-center gap-4 rounded-xl text-left" onClick={() => onOpen(project.id)}>
                 <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[rgba(244,244,245,0.12)] text-acid"><Image size={24} /><i className="absolute bottom-1 right-1.5 font-mono text-[9px] not-italic text-acid/80">{project.assetCount}</i></span>
                 <span className="min-w-0">
@@ -59,7 +59,7 @@ export function HomePage({ projects, loading, onCreate, onOpen, onDelete, onImpo
                 </span>
                 <ArrowRight size={17} className="ml-2 shrink-0 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-acid" />
               </button>
-              {pendingDeleteId === project.id ? <span className="flex gap-1.5"><button className="rounded-md bg-destructive px-2.5 py-1.5 text-xs font-medium text-destructive-foreground" onClick={() => { onDelete(project.id); setPendingDeleteId(null); }}>确认删除</button><button className="rounded-md border border-[var(--border-dark)] px-2.5 py-1.5 text-xs text-muted-foreground" onClick={() => setPendingDeleteId(null)}>取消</button></span> : <button className="shrink-0 rounded-lg p-2 text-muted-foreground transition hover:bg-[rgba(255,107,94,0.12)] hover:text-destructive" aria-label={`删除 ${project.title}`} title="删除本地项目" onClick={() => setPendingDeleteId(project.id)}><Trash2 size={15} /></button>}
+              {pendingDeleteId === project.id ? <span className="flex gap-1.5"><button className="rounded-md bg-destructive px-2.5 py-1.5 text-xs font-medium text-destructive-foreground" onClick={() => { onDelete(project.id); setPendingDeleteId(null); }}>确认删除</button><button className="rounded-md border border-[var(--border-dark)] px-2.5 py-1.5 text-xs text-muted-foreground" onClick={() => setPendingDeleteId(null)}>取消</button></span> : <button className="shrink-0 rounded-lg p-2 text-muted-foreground transition hover:bg-[rgba(138,138,138,0.12)] hover:text-destructive" aria-label={`删除 ${project.title}`} title="删除本地项目" onClick={() => setPendingDeleteId(project.id)}><Trash2 size={15} /></button>}
             </article>
           ))}</div>
         ) : (

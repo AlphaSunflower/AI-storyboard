@@ -19,6 +19,7 @@ import { useGatewayModels, parseModelParams, normalizeModelDefault, type ModelPa
 import { useCanvasStore } from '../../store/canvasStore';
 import { useMediaStore } from '../../store/mediaStore';
 import { useAssetPreviewUrl } from '../../hooks/useAssetPreviewUrl';
+import { usePresence } from '../../hooks/usePresence';
 import { createPersistedCanvasAsset, persistExistingCanvasAsset } from '../../services/canvasMedia';
 import { getMediaNodeSize } from '../../utils/mediaPipeline';
 import { hydrateAsset, listLibraryAssets } from '../../services/projectStorage';
@@ -86,12 +87,16 @@ export function GenerationPreviewCard({ nodeId, media, generating, progress, emp
   });
   const url = useAssetPreviewUrl(latestAssetId);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const previewPresence = usePresence(previewOpen, { duration: 140 });
   const EmptyIcon = media === 'video' ? VideoIcon : ImageIcon;
   // 只有静态图能进图片预览（视频继续留在节点内的播放器里）
   const openable = media === 'image' && Boolean(latestAssetId) && Boolean(url) && !generating;
   return (
     <>
-      <div className="gen-preview nodrag" data-state={generating ? 'generating' : url ? 'ready' : 'empty'}>
+      {/* 预览面不挂 .nodrag：生成节点整块正文就是这个框（.media-node.has-surface .gen-node 无内边距），
+          一旦这里退出拖动，图片/视频生成节点就只能靠标题条挪位置。
+          框内没有输入控件，整块当拖动面是安全的；点击（位移小于 nodeDragThreshold）仍会落到下面的打开按钮。 */}
+      <div className="gen-preview" data-state={generating ? 'generating' : url ? 'ready' : 'empty'}>
         {url && !generating && (openable ? (
           <button
             type="button"
@@ -118,8 +123,9 @@ export function GenerationPreviewCard({ nodeId, media, generating, progress, emp
           </div>
         )}
       </div>
-      {previewOpen && latestAssetId && (
+      {previewPresence.mounted && latestAssetId && (
         <ImagePreviewOverlay
+          present={previewPresence.present}
           target={{ assetId: latestAssetId, label: '生成结果' }}
           onClose={() => setPreviewOpen(false)}
         />
@@ -139,7 +145,7 @@ function LibraryThumb({ record }: { record: PersistedAsset }) {
 }
 
 /** 「＋」参考素材菜单：上传本地图片 / 从本地素材库选择，选定后建图片节点并自动连线到 reference。 */
-function GenerationReferencePicker({ nodeId, onClose }: { nodeId: string; onClose: () => void }) {
+function GenerationReferencePicker({ nodeId, onClose, present = true }: { nodeId: string; onClose: () => void; present?: boolean }) {
   const nodes = useCanvasStore((state) => state.nodes);
   const addImportedImages = useCanvasStore((state) => state.addImportedImages);
   const connect = useCanvasStore((state) => state.connect);
@@ -201,7 +207,7 @@ function GenerationReferencePicker({ nodeId, onClose }: { nodeId: string; onClos
   };
 
   return (
-    <div className="gen-ref-picker nodrag nowheel" role="dialog" aria-label="添加参考素材">
+    <div className="gen-ref-picker motion-presence nodrag nowheel" data-present={present} role="dialog" aria-label="添加参考素材">
       {!showLibrary ? (
         <>
           <button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); fileInput.current?.click(); }}><Upload size={13} /> 上传本地图片</button>
@@ -288,6 +294,7 @@ export function GenerationReferenceArea({ nodeId, kind, mode, pool, onDeleteRef 
   onDeleteRef?: (entry: { number: number; sourceNodeId: string }) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerPresence = usePresence(pickerOpen, { duration: 140 });
   const rule = generationModeInputRule(kind, { mode });
   const orderedEntries = useOrderedReferenceEntries(nodeId, pool);
 
@@ -299,7 +306,7 @@ export function GenerationReferenceArea({ nodeId, kind, mode, pool, onDeleteRef 
       <button type="button" aria-label="添加参考素材" title="添加参考素材" onClick={(event) => { event.stopPropagation(); setPickerOpen((open) => !open); }}>
         <Plus size={14} />
       </button>
-      {pickerOpen && <GenerationReferencePicker nodeId={nodeId} onClose={() => setPickerOpen(false)} />}
+      {pickerPresence.mounted && <GenerationReferencePicker present={pickerPresence.present} nodeId={nodeId} onClose={() => setPickerOpen(false)} />}
     </span>
   );
 
@@ -559,15 +566,16 @@ function RatioGlyph({ ratio }: { ratio: string }) {
 }
 
 /** 参数浮层：时长滑块 / 分辨率 / 宽高比 / 数量 / 提示词模板 / 其余网关字段（不含输出格式与码率档位）。 */
-export function GenerationSettingsPopover({ kind, settings, showTemplate = false, showCount = false }: {
+export function GenerationSettingsPopover({ kind, settings, showTemplate = false, showCount = false, present = true }: {
   kind: MergedGenerationKind;
   settings: GenerationSettings;
   showTemplate?: boolean;
   showCount?: boolean;
+  present?: boolean;
 }) {
   const durationIndex = Math.max(0, settings.durations.indexOf(settings.duration));
   return (
-    <div className="gen-settings nodrag nowheel" role="dialog" aria-label="生成参数设置">
+    <div className="gen-settings motion-presence nodrag nowheel" data-present={present} role="dialog" aria-label="生成参数设置">
       {kind === VIDEO_GENERATION_KIND && settings.durations.length > 0 && (
         <section className="gen-settings__group">
           <header><span>时长</span><b>{settings.duration}s</b></header>
@@ -799,6 +807,7 @@ export function GenerationComposer({
   body?: ReactNode;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsPresence = usePresence(settingsOpen, { duration: 140 });
   return (
     <div className="gen-composer nodrag nowheel">
       <GenerationModeChips
@@ -824,8 +833,8 @@ export function GenerationComposer({
           />
         </>
       )}
-      {settingsOpen && (
-        <GenerationSettingsPopover kind={kind} settings={settings} showCount={showCount} showTemplate={showTemplate} />
+      {settingsPresence.mounted && (
+        <GenerationSettingsPopover present={settingsPresence.present} kind={kind} settings={settings} showCount={showCount} showTemplate={showTemplate} />
       )}
       <GenerationSettingsRow
         kind={kind}

@@ -11,6 +11,14 @@ describe('node library surface', () => {
     // 存量画布里的剧本节点仍要能渲染：定义还在
     expect(getNodeDefinition('script')?.title).toBe('剧本');
   });
+
+  it('hides the retired annotation node but keeps it renderable', () => {
+    const kinds = listNodeDefinitions().map((definition) => definition.kind);
+
+    expect(kinds).not.toContain('note');
+    // 存量画布里的批注节点仍要能渲染：定义还在
+    expect(getNodeDefinition('note')?.title).toBe('批注');
+  });
 });
 
 describe('image node contract', () => {

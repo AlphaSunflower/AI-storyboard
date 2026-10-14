@@ -102,6 +102,9 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
     @Override
     public AgentAsset refetch(String userId, String id) {
         AgentAsset asset = getRecord(userId, id);
+        if (isDeleted(asset)) {
+            throw new BusinessException(40001, "该记录已删除，无法重新拉取");
+        }
         if (!"video".equals(asset.getType())) {
             throw new BusinessException(40001, "图片记录无需重新拉取");
         }
@@ -195,7 +198,8 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
                 Map<String, String> result = generationService.pollVideoTask(taskId);
                 String status = result.getOrDefault("status", "unknown");
                 AgentAsset record = assetMapper.selectById(recordId);
-                if (record == null) return;
+                // 用户删掉这一条后轮询必须停下，否则完成时会把它翻回 completed 并挂上新 URL。
+                if (record == null || isDeleted(record)) return;
                 if ("completed".equals(status) || "succeeded".equals(status)) {
                     String url = result.get("videoUrl") != null && !result.get("videoUrl").isBlank()
                             ? result.get("videoUrl") : record.getUrl();
@@ -224,7 +228,7 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
                 Thread.sleep(pollBackoff.delayMillis(i));
             }
             AgentAsset record = assetMapper.selectById(recordId);
-            if (record != null) {
+            if (record != null && !isDeleted(record)) {
                 record.setStatus("failed");
                 record.setError("视频生成超时，请重试");
                 record.setDurationMs(duration(record));
@@ -235,13 +239,18 @@ public class GenerationRecordServiceImpl implements GenerationRecordService {
         } catch (Exception e) {
             log.warn("重试视频后台轮询失败: taskId={}, 原因: {}", taskId, e.getMessage());
             AgentAsset record = assetMapper.selectById(recordId);
-            if (record != null) {
+            if (record != null && !isDeleted(record)) {
                 record.setStatus("failed");
                 record.setError("视频生成失败，请稍后重试");
                 record.setDurationMs(duration(record));
                 assetMapper.updateById(record);
             }
         }
+    }
+
+    /** 软删除是异步写回的终态：已删除的记录不再接受任何轮询/重试写回。 */
+    private static boolean isDeleted(AgentAsset asset) {
+        return asset != null && AgentAsset.STATUS_DELETED.equals(asset.getStatus());
     }
 
     private void assertOwnership(String userId, AgentAsset asset) {

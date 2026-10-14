@@ -3,7 +3,7 @@ import { mockApiFallback } from './support/canvasAuth';
 
 test.beforeEach(async ({ page }) => { await mockApiFallback(page); });
 
-test('node library scrolls and the context submenu survives the hover gap', async ({ page }) => {
+test('分组节点子菜单能跨过 hover 间隙，且合并后的生成节点各只剩一个', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   // 画布启动依赖 /api/auth/refresh 换 token；这里自闭环，避免依赖本机 ApiGateway。
@@ -79,21 +79,15 @@ test('node library scrolls and the context submenu survives the hover gap', asyn
   await page.getByRole('button', { name: '小地图' }).click();
   await expect(page.locator('.react-flow__minimap.canvas-minimap')).toBeVisible();
 
+  // 节点不再收在「节点库」抽屉里，直接铺在左栏工具岛上。
   await expect(page.getByRole('button', { name: '节点库' })).toHaveCount(0);
-  await page.getByRole('button', { name: '添加节点' }).click();
-  const library = page.locator('.node-library');
-  const libraryBody = page.locator('.node-library-body');
-  await expect(library).toBeVisible();
-  await expect(libraryBody).toBeVisible();
-  expect(await libraryBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
-  await libraryBody.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  // 合并后视频/图片各只剩一个生成节点
-  const presets = libraryBody.locator('.node-preset');
-  await expect(presets.filter({ hasText: '视频生成' })).toHaveCount(1);
-  await expect(presets.filter({ hasText: '图片生成' })).toHaveCount(1);
-  await expect(libraryBody.getByText('参考物生视频', { exact: true })).toHaveCount(0);
-  await expect(libraryBody.getByText('文生图', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: '关闭节点库' }).click();
+  const rail = page.locator('.canvas-tool-island');
+  await expect(rail).toBeVisible();
+  // 合并后视频/图片各只剩一个生成节点；被合并掉的旧 kind 不再出现在左栏。
+  await expect(rail.getByRole('button', { name: '视频生成', exact: true })).toHaveCount(1);
+  await expect(rail.getByRole('button', { name: '图片生成', exact: true })).toHaveCount(1);
+  await expect(rail.getByRole('button', { name: '参考物生视频', exact: true })).toHaveCount(0);
+  await expect(rail.getByRole('button', { name: '文生图', exact: true })).toHaveCount(0);
 
   const pane = page.locator('.react-flow__pane');
   await pane.click({ button: 'right', position: { x: 140, y: 130 } });

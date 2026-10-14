@@ -30,11 +30,20 @@ public class AgentScopeCheckpointService {
 
     private final AgentRuntimeSupport support;
     private final AgentCheckpointMapper checkpointMapper;
+    private final AgentScopeProperties properties;
 
     public AgentScopeCheckpointService(AgentRuntimeSupport support,
                                        AgentCheckpointMapper checkpointMapper) {
+        this(support, checkpointMapper, new AgentScopeProperties());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AgentScopeCheckpointService(AgentRuntimeSupport support,
+                                       AgentCheckpointMapper checkpointMapper,
+                                       AgentScopeProperties properties) {
         this.support = support;
         this.checkpointMapper = checkpointMapper;
+        this.properties = properties == null ? new AgentScopeProperties() : properties;
     }
 
     public String pauseForExternalInput(OrchestrationRequest request, String replyId,
@@ -130,7 +139,7 @@ public class AgentScopeCheckpointService {
         return latestPendingToken(request.getConversation().getId());
     }
 
-    static String confirmationPrompt(AgentApprovalMode mode, List<ToolUseBlock> toolCalls) {
+    String confirmationPrompt(AgentApprovalMode mode, List<ToolUseBlock> toolCalls) {
         AgentApprovalMode effective = mode == null ? AgentApprovalMode.PLAN_APPROVAL : mode;
         String heading = effective == AgentApprovalMode.PLAN_APPROVAL
                 ? (hasGenerationTool(toolCalls) ? "生成方案待确认" : "执行方案待确认")
@@ -147,7 +156,7 @@ public class AgentScopeCheckpointService {
         return heading + "\n\n" + intro + "\n\n" + summary;
     }
 
-    private static String planApproveTitle(List<ToolUseBlock> toolCalls) {
+    private String planApproveTitle(List<ToolUseBlock> toolCalls) {
         return hasGenerationTool(toolCalls) ? "按方案生成" : "按方案执行";
     }
 
@@ -155,10 +164,12 @@ public class AgentScopeCheckpointService {
         if (toolCalls == null) return false;
         return toolCalls.stream()
                 .map(ToolUseBlock::getName)
-                .anyMatch(name -> name != null && name.contains("generate"));
+                .anyMatch(name -> name != null
+                        && (name.contains("generate")
+                        || AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY.equals(name)));
     }
 
-    private static String summarizeToolCall(ToolUseBlock call) {
+    private String summarizeToolCall(ToolUseBlock call) {
         String toolName = call == null ? "" : call.getName();
         Map<String, Object> input = call == null || call.getInput() == null
                 ? Map.of() : call.getInput();
@@ -167,6 +178,8 @@ public class AgentScopeCheckpointService {
             case AgentScopeImageTools.GENERATE_IMAGE -> imageSummary(input, false);
             case AgentScopeImageTools.GENERATE_IMAGE_BATCH -> imageSummary(input, true);
             case AgentScopeVideoTools.GENERATE_VIDEO -> videoSummary(input);
+            // 复合旅程：确认卡片必须逐条列出真正会执行的步骤，而不是只说"执行一个工具"。
+            case AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY -> journeySummary(input);
             default -> genericSummary(toolName, input);
         };
         StringBuilder out = new StringBuilder("• ").append(displayName);
@@ -174,6 +187,41 @@ public class AgentScopeCheckpointService {
             out.append("\n  - ").append(line);
         }
         return out.toString();
+    }
+
+    /**
+     * 复合旅程的确认方案：按阈值判定分支并逐条列举具体步骤。
+     *
+     * <p>与 {@code AgentScopeJourneyTools.start} 共用 {@link AgentScopeJourneyPlanner}，
+     * 因此卡片上给出的步骤和工具真正调度的步骤是同一份清单。
+     */
+    private List<String> journeySummary(Map<String, Object> input) {
+        List<String> lines = new ArrayList<>();
+        List<String> shotPrompts = stringList(input.get("shot_prompts"));
+        int imageCount = shotPrompts.isEmpty()
+                ? Math.max(1, positiveInt(input.get("image_count"), 1))
+                : shotPrompts.size();
+        String duration = stringValue(input.get("target_duration_seconds"));
+        boolean wantStoryboard = Boolean.TRUE.equals(input.get("want_storyboard"));
+        AgentScopeJourneyPlanner.JourneyPlan plan = AgentScopeJourneyPlanner.plan(
+                duration, wantStoryboard, properties.getJourneyDirectVideoMaxSeconds(),
+                imageCount, shotPrompts.size());
+        lines.add("分支：" + AgentScopeJourneyPlanner.branchLabel(plan.branch()));
+        lines.add("阈值：" + plan.thresholdSeconds() + " 秒（目标时长 "
+                + (duration.isBlank() ? "未指定" : duration) + "）");
+        lines.add("将执行以下 " + plan.steps().size() + " 个步骤：");
+        for (AgentScopeJourneyPlanner.JourneyStep step : plan.steps()) {
+            lines.add("  " + step.display());
+        }
+        lines.add("画幅：" + valueOr(input.get("aspect_ratio"), "自动")
+                + "；分辨率：" + valueOr(input.get("resolution"), "自动")
+                + "；模型：" + valueOr(input.get("model"), "系统默认"));
+        int references = stringList(input.get("source_asset_ids")).size()
+                + stringList(input.get("source_urls")).size();
+        lines.add("参考素材：" + references + " 项");
+        lines.add("提示词：" + truncate(stringValue(input.get("prompt")), 320));
+        lines.add("批准后仅执行以上列出的步骤；新增操作需再次确认。");
+        return lines;
     }
 
     private static List<String> imageSummary(Map<String, Object> input, boolean batch) {

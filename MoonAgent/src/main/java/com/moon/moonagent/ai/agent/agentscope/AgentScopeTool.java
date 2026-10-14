@@ -1,12 +1,12 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -15,8 +15,6 @@ import java.util.Map;
  * keeps Spring AI's Jackson 3 schema generator isolated from AgentScope.
  */
 final class AgentScopeTool extends ToolBase {
-
-    private static final ObjectMapper JSON = new ObjectMapper();
 
     interface Handler {
         Object call(Map<String, Object> input, ToolCallParam param);
@@ -42,10 +40,16 @@ final class AgentScopeTool extends ToolBase {
         if (isExternalTool()) return Mono.empty();
         return Mono.fromCallable(() -> {
             Object output = handler.call(param.getInput() == null ? Map.of() : param.getInput(), param);
+            // 模型可见结果唯一出口：确保是契约信封后严格序列化（null/序列化失败不再退化为 "{}" 或 Object@hash）。
+            // 管线内部已经归一过的信封直接复用，只有外部调用方递进来的原始 Map 才在这里补一次归一。
+            Map<String, Object> alreadyCanonical = asEnvelope(output);
+            Map<String, Object> normalized = ToolResultContract.isCanonical(alreadyCanonical)
+                    ? alreadyCanonical
+                    : ToolResultContract.normalize(getName(), output);
             return ToolResultBlock.of(
                     param.getToolUseBlock().getId(),
                     getName(),
-                    TextBlock.builder().text(toJson(output)).build());
+                    TextBlock.builder().text(ToolResultContract.serialize(normalized)).build());
         });
     }
 
@@ -59,22 +63,20 @@ final class AgentScopeTool extends ToolBase {
         return handler.call(input == null ? Map.of() : input, param);
     }
 
+    /** 已归一信封必须是字符串键 Map；其它类型（含 null、List、String）一律交给契约归一。 */
+    private static Map<String, Object> asEnvelope(Object output) {
+        if (!(output instanceof Map<?, ?> map)) return null;
+        Map<String, Object> out = new LinkedHashMap<>();
+        map.forEach((key, item) -> out.put(String.valueOf(key), item));
+        return out;
+    }
+
     static Map<String, Object> schema(Map<String, Object> properties, List<String> required) {
         return Map.of(
                 "type", "object",
                 "properties", properties == null ? Map.of() : properties,
                 "required", required == null ? List.of() : required,
                 "additionalProperties", false);
-    }
-
-    private static String toJson(Object value) {
-        if (value == null) return "{}";
-        if (value instanceof String text) return text;
-        try {
-            return JSON.writeValueAsString(value);
-        } catch (Exception e) {
-            return String.valueOf(value);
-        }
     }
 
 }

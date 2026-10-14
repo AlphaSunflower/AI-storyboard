@@ -27,6 +27,7 @@ import {
 import { createId } from '../utils/id';
 import { GenFooter } from './nodes/ImageGenNode';
 import { useObjectUrl } from '../hooks/useObjectUrl';
+import { usePresence } from '../hooks/usePresence';
 import { buildReferenceToken } from '../canvas/referenceTokenEditing';
 
 type MaskTool = 'select' | 'brush' | 'rectangle';
@@ -376,6 +377,7 @@ export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorP
   const [draftIntent, setDraftIntent] = useState('');
   const [draftColor, setDraftColor] = useState<string>(REDRAW_REGION_COLORS[0]);
   const [executionOpen, setExecutionOpen] = useState(false);
+  const executionPresence = usePresence(executionOpen, { duration: 140 });
   const [executionData, setExecutionData] = useState<Record<string, unknown>>({});
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -608,7 +610,7 @@ export function RedrawEditor({ asset, node, onClose, onFeedback }: RedrawEditorP
       </ContainedRedrawStage>
     </div>, document.body)}
 
-    {executionOpen && createPortal(<div className="redraw-execution-dialog" role="dialog" aria-modal="true" aria-label="执行重绘" onClick={(event) => { if (event.target === event.currentTarget) setExecutionOpen(false); }}>
+    {executionPresence.mounted && createPortal(<div className="redraw-execution-dialog motion-fade" data-present={executionPresence.present} role="dialog" aria-modal="true" aria-label="执行重绘" onClick={(event) => { if (event.target === event.currentTarget) setExecutionOpen(false); }}>
       <section>
         <header>
           <div><strong>执行重绘</strong><span>{intentRegions.length} 个区域，单次图生图请求</span></div>

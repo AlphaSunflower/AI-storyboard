@@ -1,5 +1,9 @@
 import { ChevronRight } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import type { AgentTraceEvent } from '../../api/agent';
+import type { ToolTone } from './toolCallPresentation';
+import { toolTimelineStyle } from './toolTimelineTheme';
+import './ToolCallTimeline.css';
 
 function statusLabel(status: string) {
   switch (status) {
@@ -30,75 +34,110 @@ function phaseLabel(phase: string) {
   }
 }
 
-/** 交接轨迹时间线：Moon → 分镜专家 → 审查专家 等阶段，左点右文，不嵌套卡片。 */
+/** 轨迹状态 → 与工具节点同一套语气色阶，两处视觉不再各自为政。 */
+function traceTone(status: string): ToolTone {
+  switch (status) {
+    case 'node_failed':
+    case 'failed':
+    case 'node_error':
+    case 'error':
+      return 'failed';
+    case 'node_started':
+      return 'running';
+    case 'node_completed':
+    case 'completed':
+    case 'node_success':
+    case 'success':
+    case 'route_changed':
+      return 'done';
+    default:
+      return 'idle';
+  }
+}
+
+/** 轨迹链里的执行者名：`agentscope` 与时间线行使用同一可读名。 */
+function chainName(event: AgentTraceEvent): string {
+  const name = event.specialist || event.agent || '';
+  return name === 'agentscope' ? 'AIGC 执行器' : name;
+}
+
+/**
+ * 交接链：只在**连续不同的执行者**之间画箭头。
+ *
+ * <p>旧实现是 `events.map((e) => e.specialist || e.agent).join(' → ')`，即把每条事件都串一遍。
+ * 但 AgentScope 运行时给每条事件写死同一个 specialist：`AgentTraceBridgeMiddleware` 传
+ * `"agentscope"`、`AgentTraceAccumulator` 把 agent 写死 `"moon"`。于是任何一次普通推理都会
+ * 渲染成 `agentscope → agentscope → agentscope → …`（截图里那一行），既没有信息也把真正的
+ * 交接盖住了。现在：连续重复折叠，且只剩一个执行者时不显示链（此时它不携带任何信息）。
+ */
+export function traceChain(events: AgentTraceEvent[]): string {
+  const names: string[] = [];
+  for (const event of events) {
+    const name = chainName(event);
+    if (!name || names[names.length - 1] === name) continue;
+    names.push(name);
+  }
+  return names.length > 1 ? names.join(' → ') : '';
+}
+
+/**
+ * 交接轨迹时间线：Moon → 分镜专家 → 审查专家 等阶段。
+ *
+ * 复用工具节点的脊线骨架（`.tool-node` + 圆点 + 状态胶囊），只是行内没有折叠按钮：
+ * 轨迹和工具调用本来就是同一段工作的两个切面，不应该长成两种东西。
+ */
 export function AgentTraceTimeline({ events }: { events: AgentTraceEvent[] }) {
   if (!events || events.length === 0) return null;
-  const chain = events.map((e) => e.specialist || e.agent || '').filter(Boolean).join(' → ');
+  const chain = traceChain(events);
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-muted-soft)', letterSpacing: 1, marginBottom: 8 }}>
-        <ChevronRight size={12} strokeWidth={1.8} />
+    <div className="tool-timeline" style={toolTimelineStyle() as CSSProperties}>
+      <div className="tool-timeline__head">
+        <span className="tool-timeline__head-icon" aria-hidden="true">
+          <ChevronRight size={12} strokeWidth={2} />
+        </span>
         <span>Agent 轨迹{chain ? ` · ${chain}` : ''}</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {events.map((ev, i) => {
-          const ok = ['completed', 'success', 'node_completed', 'route_changed', 'node_started'].includes(ev.status);
-          return (
-            <div
-              key={ev.id || i}
-              className="reasoning-trace-item"
-              style={{
-                '--item-index': i,
-                display: 'flex', gap: 10, position: 'relative',
-                paddingBottom: i < events.length - 1 ? 12 : 0,
-              } as React.CSSProperties}
-            >
-              {i < events.length - 1 && (
-                <div style={{ position: 'absolute', left: 5, top: 16, bottom: -4, width: 1, background: 'var(--color-hairline)' }} />
-              )}
-              <div
-                style={{
-                  width: 11, height: 11, borderRadius: '50%', flexShrink: 0, marginTop: 4,
-                  background: i === 0 ? 'var(--color-primary)' : ok ? 'var(--color-success)' : 'var(--color-surface-cream-strong)',
-                  border: '1px solid var(--color-hairline)',
-                }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-ink)' }}>{ev.agent || 'Agent'}</span>
-                  {ev.specialist && <span style={{ fontSize: 11, color: 'var(--color-muted)' }}>
+      {events.map((ev, i) => {
+        const tone = traceTone(ev.status);
+        return (
+          <div
+            key={ev.id || i}
+            className="tool-node reasoning-trace-item"
+            data-tone={tone}
+            data-trace-status={ev.status}
+            style={toolTimelineStyle(tone, {
+              '--item-index': String(i),
+            }) as CSSProperties}
+          >
+            <span className="tool-node__dot" aria-hidden="true" />
+            <div className="tool-node__body">
+              <div className="tool-node__trace-head">
+                <span className="tool-node__trace-agent">{ev.agent || 'Agent'}</span>
+                {ev.specialist && (
+                  <span className="tool-node__trace-meta">
                     {ev.specialist === 'agentscope' ? 'AIGC 执行器' : ev.specialist}
-                  </span>}
-                  {ev.phase && <span style={{ fontSize: 11, color: 'var(--color-muted-soft)' }}>{phaseLabel(ev.phase)}</span>}
-                  <span
-                    style={{
-                      fontSize: 11, padding: '1px 6px', borderRadius: 999,
-                      background: ok ? 'rgba(93,184,114,0.12)' : 'rgba(212,160,23,0.12)',
-                      color: ok ? 'var(--color-success)' : 'var(--color-warning)',
-                    }}
-                  >
-                    {statusLabel(ev.status)}
                   </span>
-                </div>
-                {ev.title && <div style={{ fontSize: 13, color: 'var(--color-body)', fontWeight: 500, marginTop: 2 }}>{ev.title}</div>}
-                {ev.summary && (
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                    {ev.summary}
-                  </div>
                 )}
-                {(ev.currentIntent || ev.targetIntent) && (
-                  <div style={{ fontSize: 11, color: 'var(--color-muted-soft)', marginTop: 2 }}>
-                    {ev.currentIntent && <>意图: {ev.currentIntent}</>}
-                    {ev.currentIntent && ev.targetIntent && <> → </>}
-                    {ev.targetIntent && <>{ev.targetIntent}</>}
-                  </div>
-                )}
+                {ev.phase && <span className="tool-node__trace-meta">{phaseLabel(ev.phase)}</span>}
+                <span className="tool-node__chip">
+                  <span className="tool-node__chip-dot" aria-hidden="true" />
+                  {statusLabel(ev.status)}
+                </span>
               </div>
+              {ev.title && <div className="tool-node__trace-title">{ev.title}</div>}
+              {ev.summary && <div className="tool-node__trace-summary">{ev.summary}</div>}
+              {(ev.currentIntent || ev.targetIntent) && (
+                <div className="tool-node__trace-intent">
+                  {ev.currentIntent && <>意图: {ev.currentIntent}</>}
+                  {ev.currentIntent && ev.targetIntent && <> → </>}
+                  {ev.targetIntent && <>{ev.targetIntent}</>}
+                </div>
+              )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

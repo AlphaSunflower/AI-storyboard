@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { AgentReasoning, AgentTraceEvent } from '../../api/agent';
 import { AgentTraceTimeline } from './AgentTraceTimeline';
 import { usePresence } from '../../hooks/usePresence';
+import { agentChatTokens as DS } from './agentChatTokens';
 import LatticeLoader from '../ui/LatticeLoader';
 
 /** 用时格式化：ms →  X.X 秒 / X 分 Y 秒 */
@@ -35,7 +36,9 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
   const durationMs = live ? undefined : reasoning?.durationMs;
   const hasDuration = durationMs != null;
   const duration = formatDuration(durationMs);
-  const inkColor = live ? 'var(--color-primary)' : 'var(--color-muted)';
+  // /chat 的品牌语言是 DS 蓝：思考中要用和工具调用、状态胶囊同一种蓝，
+  // 否则蓝色对话里会冒出一个珊瑚色的「思考中」。
+  const inkColor = live ? DS.brand : DS.textSecondary;
   const announce = live
     ? '思考中'
     : hasDuration
@@ -91,7 +94,7 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
             <div
               style={{
                 marginTop: 8, padding: '10px 12px', borderRadius: 12,
-                border: '1px solid var(--color-hairline)', background: 'var(--color-canvas)',
+                border: `1px solid ${DS.border}`, background: DS.surfaceSoft,
                 maxWidth: '100%', overflowWrap: 'anywhere',
               }}
             >
@@ -100,8 +103,8 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
                   className="reasoning-detail-item"
                   style={{ '--item-index': 0 } as React.CSSProperties}
                 >
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)', lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 240, overflowY: 'auto' }}>
-                    <span style={{ color: 'var(--color-muted-soft)', fontSize: 11, letterSpacing: 1, display: 'block', marginBottom: 4 }}>推理详情</span>
+                  <div style={{ fontSize: 12, color: DS.textSecondary, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 240, overflowY: 'auto' }}>
+                    <span style={{ color: DS.textSecondary, fontSize: 11, letterSpacing: 1, display: 'block', marginBottom: 4 }}>推理详情</span>
                     {reasoning.details}
                   </div>
                 </div>

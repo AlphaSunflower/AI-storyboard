@@ -81,6 +81,59 @@ class SandboxArtifactPublisherTest {
     }
 
     @Test
+    void publishPathIfNewSkipsContentThatWasAlreadyPublished() {
+        AgentAsset existing = new AgentAsset();
+        existing.setId("existing-id");
+        existing.setUrl("/api/files/files/report.md?token=x");
+        AgentAssetMapper mapper = mock(AgentAssetMapper.class);
+        when(mapper.selectOne(any())).thenReturn(existing);
+        FileStorageService storage = mock(FileStorageService.class);
+        AssetOutputOutboxService outbox = mock(AssetOutputOutboxService.class);
+        MoonSandboxClient client = mock(MoonSandboxClient.class);
+        when(client.download(eq("c1"), any())).thenReturn(new byte[]{1, 2, 3});
+        SandboxArtifactPublisher publisher =
+                new SandboxArtifactPublisher(client, storage, mapper, outbox);
+
+        var full = publisher.publishPath(conversation(), "turn-1", "output/report.md",
+                3, "text/markdown");
+        var onlyNew = publisher.publishPathIfNew(conversation(), "turn-1", "output/report.md",
+                3, "text/markdown");
+
+        // 旧语义不变：全量发布仍会返回既有资产。
+        assertThat(full.assetIds()).containsExactly("existing-id");
+        // 补扫语义：既有内容不算本次新增，避免把历史产物重新挂到后续回合（红线 5）。
+        assertThat(onlyNew.assetIds()).isEmpty();
+        verify(storage, never()).saveGeneratedFile(any(), any(), any());
+        verify(mapper, never()).insert(any(AgentAsset.class));
+        verify(outbox, never()).enqueue(any());
+    }
+
+    @Test
+    void publishPathIfNewReturnsFreshlyCreatedArtifact() {
+        AgentAssetMapper mapper = mock(AgentAssetMapper.class);
+        when(mapper.selectOne(any())).thenReturn(null);
+        FileStorageService storage = mock(FileStorageService.class);
+        when(storage.saveGeneratedFile(any(), eq("report.md"), eq("text/markdown")))
+                .thenReturn("/api/files/files/report.md");
+        doAnswer(invocation -> {
+            AgentAsset asset = invocation.getArgument(0);
+            asset.setId("new-id");
+            return 1;
+        }).when(mapper).insert(any(AgentAsset.class));
+        AssetOutputOutboxService outbox = mock(AssetOutputOutboxService.class);
+        MoonSandboxClient client = mock(MoonSandboxClient.class);
+        when(client.download(eq("c1"), any())).thenReturn(new byte[]{1, 2, 3});
+        SandboxArtifactPublisher publisher =
+                new SandboxArtifactPublisher(client, storage, mapper, outbox);
+
+        var onlyNew = publisher.publishPathIfNew(conversation(), "turn-1", "output/report.md",
+                3, "text/markdown");
+
+        assertThat(onlyNew.assetIds()).containsExactly("new-id");
+        verify(outbox).enqueue(any(AgentAsset.class));
+    }
+
+    @Test
     void deliverRejectsNameConflictWhenForceIsFalse() {
         AgentAssetMapper mapper = mock(AgentAssetMapper.class);
         when(mapper.selectOne(any())).thenReturn(null);

@@ -28,6 +28,7 @@ public class AgentScopeToolkitFactory {
     private final AgentScopeAssetGroupTools assetGroupTools;
     private final AgentScopeImageTools imageTools;
     private final AgentScopeVideoTools videoTools;
+    private final AgentScopeJourneyTools journeyTools;
     private final AgentScopeStoryboardTools storyboardTools;
     private final AgentScopeWorkflowTools workflowTools;
     private final AgentScopeVideoMergeTools videoMergeTools;
@@ -50,6 +51,7 @@ public class AgentScopeToolkitFactory {
                                     AgentScopeAssetGroupTools assetGroupTools,
                                     AgentScopeImageTools imageTools,
                                     AgentScopeVideoTools videoTools,
+                                    AgentScopeJourneyTools journeyTools,
                                     AgentScopeStoryboardTools storyboardTools,
                                     AgentScopeWorkflowTools workflowTools,
                                     AgentScopeVideoMergeTools videoMergeTools,
@@ -66,6 +68,7 @@ public class AgentScopeToolkitFactory {
         this.assetGroupTools = assetGroupTools;
         this.imageTools = imageTools;
         this.videoTools = videoTools;
+        this.journeyTools = journeyTools;
         this.storyboardTools = storyboardTools;
         this.workflowTools = workflowTools;
         this.videoMergeTools = videoMergeTools;
@@ -126,6 +129,10 @@ public class AgentScopeToolkitFactory {
                 VIDEO_TOOLS, "Asynchronous video generation tools", false, "video");
         toolkit.registration()
                 .agentTool(toolPipeline.wrap(videoTools.tool()))
+                .group(VIDEO_TOOLS).apply();
+        // 复合旅程与视频同组：用户提到「生图然后视频 / 超过 15 秒走分镜」时由它一次编排完成。
+        toolkit.registration()
+                .agentTool(toolPipeline.wrap(journeyTools.tool()))
                 .group(VIDEO_TOOLS).apply();
         return toolkit;
     }

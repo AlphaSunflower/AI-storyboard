@@ -128,6 +128,24 @@ describe('ChatGenerationPreferences', () => {
     expect(stored.image.aspectRatio).toBe('16:9');
   });
 
+  it('窄栏（画布内嵌小窗）把「自定义」缩成「自定」，完整语义留在可访问名里', () => {
+    useAgentStore.setState({
+      generationPreferences: { ...defaultGenerationPreferences(), auto: false },
+    });
+    render(<ChatGenerationPreferences compactLabel />);
+
+    const trigger = screen.getByRole('button', { name: '生成偏好：自定义' });
+    expect(trigger.textContent).toBe('自定');
+  });
+
+  it('极窄栏只留图标，可访问名与悬浮提示仍是完整的「自动」', () => {
+    render(<ChatGenerationPreferences iconOnly />);
+
+    const trigger = screen.getByRole('button', { name: '生成偏好：自动' });
+    expect(trigger.textContent).toBe('');
+    expect(trigger.getAttribute('title')).toBe('生成偏好：自动');
+  });
+
   it('切换图片 / 视频标签各自独立保存偏好', async () => {
     render(<ChatGenerationPreferences />);
     open();

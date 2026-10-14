@@ -350,4 +350,138 @@ class AgentScopeCheckpointServiceTest {
                 .containsExactly("允许执行", "拒绝");
     }
 
+    // ------------------------------------------------------------------
+    // 复合旅程（produce_video_journey）的逐条审批方案
+    // ------------------------------------------------------------------
+
+    @Test
+    void journeyPlanItemizesShortBranchStepsInApprovalCard() {
+        CapturedConfirmation captured = confirmJourney(Map.of(
+                "prompt", "雨夜街头短片",
+                "target_duration_seconds", "12",
+                "aspect_ratio", "16:9",
+                "resolution", "1080p",
+                "model", "MiniMax-H3"), new AgentScopeProperties());
+
+        assertThat(captured.planText())
+                .contains("一键成片")
+                .contains("分支：生图 → 视频")
+                .contains("阈值：15 秒")
+                .contains("将执行以下 2 个步骤")
+                .contains("① 生成 1 张图片")
+                .contains("② 生成视频")
+                .contains("画幅：16:9")
+                .contains("分辨率：1080p")
+                .contains("模型：MiniMax-H3")
+                .contains("批准后仅执行以上列出的步骤");
+        // 一次批准 = 批准的正是列出的这些操作。
+        assertThat(captured.actions())
+                .extracting(action -> action.get("title"))
+                .containsExactly("按方案生成", "取消");
+    }
+
+    @Test
+    void journeyPlanItemizesLongBranchStepsForDurationOverThreshold() {
+        CapturedConfirmation captured = confirmJourney(Map.of(
+                "prompt", "40 秒完整宣传片",
+                "target_duration_seconds", "40",
+                "shot_prompts", List.of("开场", "中段", "收尾")), new AgentScopeProperties());
+
+        assertThat(captured.planText())
+                .contains("分支：分镜 → 逐镜图片 → 逐镜视频 → 合成")
+                .contains("阈值：15 秒")
+                .contains("将执行以下 4 个步骤")
+                .contains("① 生成分镜 3 个镜头")
+                .contains("② 逐镜配图 3 个镜头")
+                .contains("③ 逐镜视频 3 个镜头")
+                .contains("④ 合成成片 3 个片段");
+    }
+
+    @Test
+    void journeyPlanItemizesLongBranchWhenUserExplicitlyAsksForStoryboard() {
+        CapturedConfirmation captured = confirmJourney(Map.of(
+                "prompt", "走分镜流程",
+                "target_duration_seconds", "8",
+                "want_storyboard", true), new AgentScopeProperties());
+
+        assertThat(captured.planText())
+                .contains("分支：分镜 → 逐镜图片 → 逐镜视频 → 合成")
+                .contains("① 生成分镜")
+                .contains("④ 合成成片");
+    }
+
+    @Test
+    void journeyPlanFollowsConfiguredThresholdInsteadOfHardCodedFifteen() {
+        AgentScopeProperties properties = new AgentScopeProperties();
+        properties.setJourneyDirectVideoMaxSeconds(60);
+
+        CapturedConfirmation captured = confirmJourney(Map.of(
+                "prompt", "20 秒但阈值 60",
+                "target_duration_seconds", "20"), properties);
+
+        assertThat(captured.planText())
+                .contains("阈值：60 秒")
+                .contains("分支：生图 → 视频")
+                .contains("① 生成 1 张图片")
+                .doesNotContain("合成成片");
+    }
+
+    @Test
+    void journeyApprovalKeepsRejectTerminalAndPassesToolCallsThrough() {
+        CapturedConfirmation captured = confirmJourney(Map.of(
+                "prompt", "需要确认的旅程",
+                "target_duration_seconds", "8"), new AgentScopeProperties());
+
+        assertThat(captured.actions())
+                .extracting(action -> action.get("id"))
+                .containsExactly("approve", "reject");
+        // 权限恢复仍按 checkpoint 里记录的原始 toolCalls 执行，没有新增 HITL 协议。
+        assertThat(captured.service().permissionToolCalls(captured.created()))
+                .extracting(ToolUseBlock::getName)
+                .containsExactly(AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY);
+    }
+
+    private record CapturedConfirmation(String planText,
+                                        List<Map<String, Object>> actions,
+                                        AgentCheckpoint created,
+                                        AgentScopeCheckpointService service) {
+    }
+
+    /** 用指定的属性（阈值）与工具输入触发一次确认卡片，捕获其中的方案与动作。 */
+    private static CapturedConfirmation confirmJourney(Map<String, Object> input,
+                                                       AgentScopeProperties properties) {
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentCheckpointMapper mapper = mock(AgentCheckpointMapper.class);
+        when(support.runHITLStage(any(), any(), any(Consumer.class))).thenReturn("journey-token");
+        AgentCheckpoint persisted = new AgentCheckpoint();
+        persisted.setFormToken("journey-token");
+        persisted.setStatus("pending");
+        when(mapper.selectOne(any())).thenReturn(persisted);
+        AgentScopeCheckpointService service =
+                new AgentScopeCheckpointService(support, mapper, properties);
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setApprovalMode(AgentApprovalMode.PLAN_APPROVAL.name());
+        OrchestrationRequest request = new OrchestrationRequest(
+                conversation, "帮我做一条完整短片", List.of(), null);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-journey")
+                .name(AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY)
+                .input(input)
+                .build();
+
+        service.pauseForConfirmation(request, "reply-journey", List.of(call));
+
+        ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<AgentCheckpoint>> customizer =
+                ArgumentCaptor.forClass(Consumer.class);
+        verify(support).runHITLStage(any(), stage.capture(), customizer.capture());
+        AgentCheckpoint created = new AgentCheckpoint();
+        customizer.getValue().accept(created);
+        return new CapturedConfirmation(
+                stage.getValue().planText(), stage.getValue().actions(), created, service);
+    }
+
 }

@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.audit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.moon.moonagent.ai.agent.agentscope.ToolResultContract;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -51,6 +52,8 @@ public class ToolAuditSummarizer {
         putSafeValues(summary, values);
         putReferenceCounts(summary, values);
         copy(summary, values, "ok");
+        copy(summary, values, "resultStatus");
+        copy(summary, values, "truncated");
         copy(summary, values, "status");
         copy(summary, values, "replayed");
         copy(summary, values, "needsClarification");
@@ -64,21 +67,38 @@ public class ToolAuditSummarizer {
         return json(summary);
     }
 
+    /**
+     * 审计状态。数据库词表保持不变（COMPLETED|WAITING|REJECTED|FAILED|UNKNOWN），
+     * 但口径改为与模型一致：契约 {@code ok=false} 一律 FAILED，包括原本被
+     * {@code {ok:true, result:{ok:false}}} 掩盖的嵌套失败。
+     */
     public String status(Object output) {
         Map<String, Object> values = asMap(output);
         if ("unknown".equalsIgnoreCase(String.valueOf(values.get("status")))) return "UNKNOWN";
-        if (Boolean.FALSE.equals(values.get("needsClarification"))) {
-            return "COMPLETED";
+        String canonical = ToolResultContract.resultStatusOf(values);
+        if (ToolResultContract.REJECTED.equals(canonical)
+                || Boolean.TRUE.equals(values.get("rejected"))) {
+            return "REJECTED";
         }
-        if (Boolean.TRUE.equals(values.get("needsClarification"))) return "WAITING";
-        if (Boolean.TRUE.equals(values.get("rejected"))) return "REJECTED";
-        if (values.containsKey("ok") && !Boolean.TRUE.equals(values.get("ok"))) return "FAILED";
+        if (ToolResultContract.NEEDS_CONFIRMATION.equals(canonical)
+                || Boolean.TRUE.equals(values.get("needsClarification"))) {
+            return "WAITING";
+        }
+        if (Boolean.FALSE.equals(values.get("ok"))
+                || ToolResultContract.ERROR.equals(canonical)) {
+            return "FAILED";
+        }
         return "COMPLETED";
     }
 
     public String errorCode(Object output) {
         Map<String, Object> values = asMap(output);
         if ("unknown".equalsIgnoreCase(String.valueOf(values.get("status")))) return "EXTERNAL_ACTION_UNKNOWN";
+        Object error = values.get("error");
+        if (error instanceof Map<?, ?> map) {
+            String code = scalar(map.get("code"));
+            if (!code.isBlank()) return code;
+        }
         if (Boolean.TRUE.equals(values.get("needsClarification"))) return "NEEDS_CLARIFICATION";
         if (Boolean.TRUE.equals(values.get("rejected"))) return "REJECTED";
         if (values.containsKey("ok") && !Boolean.TRUE.equals(values.get("ok"))) return "TOOL_FAILED";
@@ -88,6 +108,12 @@ public class ToolAuditSummarizer {
     public String errorMessage(Object output) {
         Map<String, Object> values = asMap(output);
         Object error = values.get("error");
+        // 契约错误是 Map：只读 message，绝不 String.valueOf 整个 Map
+        if (error instanceof Map<?, ?> map) {
+            String message = scalar(map.get("message"));
+            if (message.isBlank()) message = scalar(values.get("message"));
+            return truncate(message, 2000);
+        }
         if (error == null || String.valueOf(error).isBlank()) error = values.get("message");
         return truncate(error == null ? "" : String.valueOf(error), 2000);
     }
@@ -204,6 +230,12 @@ public class ToolAuditSummarizer {
         Object value = source.get(key);
         if (value == null) return;
         target.put(key, value instanceof CharSequence text ? truncate(text.toString(), 2000) : value);
+    }
+
+    /** 只取标量文本，Map / Collection 一律返回空串，避免把容器渲染成 {k=v} 污染审计。 */
+    private static String scalar(Object value) {
+        if (value == null || value instanceof Map<?, ?> || value instanceof Collection<?>) return "";
+        return String.valueOf(value);
     }
 
     @SuppressWarnings("unchecked")

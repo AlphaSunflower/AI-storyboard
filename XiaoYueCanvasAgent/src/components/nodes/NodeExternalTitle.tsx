@@ -14,7 +14,8 @@ export function NodeExternalTitle({ nodeId, label, kind, dragHandle = false }: {
   nodeId: string;
   label: string;
   kind: string;
-  /** 旧行为：某些节点可以用标题条拖动（视频节点） */
+  /** 标题条是否带抓取光标。注意：整块节点本来就是拖动面（见 CanvasWorkspace.flowNodes），
+     这个 prop 现在只影响 cursor 提示，不再决定「能不能拖」。 */
   dragHandle?: boolean;
 }) {
   const updateNode = useCanvasStore((state) => state.updateNode);

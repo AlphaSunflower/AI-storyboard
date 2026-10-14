@@ -108,7 +108,7 @@ export function reconcileStoryboardShots(
         label: `镜头 ${plan.shotOrdinal}`,
         prompt: plan.sceneDescription,
         status: 'idle',
-        accent: '#ffb3a1',
+        accent: '#c2c2c2',
         shotId: identity.shotId,
         shotKey: identity.shotKey,
         shotOrdinal: plan.shotOrdinal,

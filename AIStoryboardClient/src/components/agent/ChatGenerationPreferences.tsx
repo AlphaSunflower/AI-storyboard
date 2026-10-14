@@ -58,7 +58,20 @@ function RatioGlyph({ ratio }: { ratio: string }) {
   );
 }
 
-export function ChatGenerationPreferences({ disabled = false }: { disabled?: boolean }) {
+export function ChatGenerationPreferences({
+  disabled = false,
+  compactLabel = false,
+  iconOnly = false,
+}: {
+  disabled?: boolean;
+  /**
+   * 窄栏（画布 /canvas 内嵌小窗）：入口文字缩成两个字，避免底部行被折行。
+   * 只影响显示宽度，aria-label 仍是完整的「自动 / 自定义」。
+   */
+  compactLabel?: boolean;
+  /** 极窄栏：连短标签也放不下时只留图标（悬浮提示与 aria-label 保留完整语义） */
+  iconOnly?: boolean;
+}) {
   const { generationPreferences, updateGenerationPreferences } = useAgentStore();
   /**
    * 模型列表只认网关：store 里的 imageModelOptions 是 config.ts 的静态兜底（/chat 不调
@@ -210,6 +223,8 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
   const ratioOptions = capability?.ratioOptions ?? [];
   const clarityOptions = capability?.clarity?.options ?? [];
   const clarityLabel = capability?.clarity?.label ?? '清晰度';
+  /** 窄栏下「自定义」缩成「自定」：标签永远只占一行两字，底部行不会因此折行 */
+  const triggerLabel = generationPreferences.auto ? '自动' : (compactLabel ? '自定' : '自定义');
   const modelsHint = models.length > 0
     ? ''
     : modelsError || (modelsState === 'failed' ? '模型列表请求失败' : '');
@@ -223,14 +238,15 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-label={`生成偏好：${generationPreferences.auto ? '自动' : '自定义'}`}
+          title={`生成偏好：${generationPreferences.auto ? '自动' : '自定义'}`}
           disabled={disabled}
           onClick={() => setOpen((value) => !value)}
-          className="chat-generation-prefs__trigger"
+          className={`chat-generation-prefs__trigger${iconOnly ? ' is-icon-only' : ''}`}
           data-open={open ? '' : undefined}
           data-custom={generationPreferences.auto ? undefined : ''}
         >
           <SlidersHorizontal size={15} strokeWidth={1.8} />
-          <span>{generationPreferences.auto ? '自动' : '自定义'}</span>
+          {!iconOnly && <span>{triggerLabel}</span>}
         </button>
       </div>
       {open && placement && createPortal(

@@ -37,6 +37,40 @@ class SandboxOutputReconcilerTest {
         assertThat(result.urls()).containsExactly("/api/files/files/report.md");
     }
 
+    @Test
+    void reconcileNewSkipsFilesThatWereAlreadyPublished() {
+        MoonSandboxClient client = mock(MoonSandboxClient.class);
+        SandboxArtifactPublisher publisher = mock(SandboxArtifactPublisher.class);
+        AgentConversation conversation = conversation();
+        when(client.enabled()).thenReturn(true);
+        when(client.list("c1", "output")).thenReturn(List.of(
+                new SandboxFileEntry("output/old.md", false, 10, "text/markdown",
+                        OffsetDateTime.now()),
+                new SandboxFileEntry("output/new.md", false, 10, "text/markdown",
+                        OffsetDateTime.now())));
+        when(publisher.publishPathIfNew(
+                org.mockito.ArgumentMatchers.eq(conversation),
+                org.mockito.ArgumentMatchers.eq("turn-1"),
+                org.mockito.ArgumentMatchers.eq("output/old.md"),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(SandboxArtifactPublisher.PublishedArtifacts.EMPTY);
+        when(publisher.publishPathIfNew(
+                org.mockito.ArgumentMatchers.eq(conversation),
+                org.mockito.ArgumentMatchers.eq("turn-1"),
+                org.mockito.ArgumentMatchers.eq("output/new.md"),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new SandboxArtifactPublisher.PublishedArtifacts(
+                        List.of("asset-new"), List.of("/api/files/files/new.md")));
+        SandboxOutputReconciler reconciler = new SandboxOutputReconciler(client, publisher);
+
+        var result = reconciler.reconcileNew(conversation, "turn-1");
+
+        assertThat(result.assetIds()).containsExactly("asset-new");
+        assertThat(result.urls()).containsExactly("/api/files/files/new.md");
+    }
+
     private static AgentConversation conversation() {
         AgentConversation conversation = new AgentConversation();
         conversation.setId("c1");

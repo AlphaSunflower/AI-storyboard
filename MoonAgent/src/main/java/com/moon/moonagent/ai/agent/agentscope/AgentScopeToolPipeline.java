@@ -2,6 +2,9 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.audit.AgentInvocationContext;
 import com.moon.moonagent.ai.agent.audit.AgentInvocationContextHolder;
 import com.moon.moonagent.ai.agent.audit.ToolExecutionTemplate;
@@ -25,13 +28,16 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
 @Component
 @RequiredArgsConstructor
 public class AgentScopeToolPipeline {
 
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     /**
      * 画布编辑模式下不加载的分镜工具：画布回合内调用直接被拒绝，用户需要分镜时先退出画布模式。
@@ -57,6 +63,9 @@ public class AgentScopeToolPipeline {
     private static final String CANVAS_MODE_STORYBOARD_MESSAGE =
             "画布编辑模式下不加载分镜工具，也无法生成或修改分镜。"
                     + "请改用画布节点编排完成需求；如确实需要分镜，请通过 / 菜单退出画布模式后再试。";
+
+    /** 非 Map 工具结果在管线内部传递时使用的装箱键，只在 {@link #rawResult} 拆箱，绝不外泄到模型。 */
+    private static final String RAW_RESULT_KEY = "__moonRawToolResult";
 
     private static final Map<String, ToolPolicy> POLICIES = Map.ofEntries(
             Map.entry(AgentScopeImageTools.GENERATE_IMAGE,
@@ -119,6 +128,7 @@ public class AgentScopeToolPipeline {
     private final MediaToolPreflightService preflight;
     private final GenerationPreferenceDefaults generationPreferenceDefaults;
     private final AgentWorkflowService workflows;
+    private final ToolCallStateGuard callStates;
 
     public AgentScopeTool wrap(AgentScopeTool tool) {
         AgentScopeTool original = tool;
@@ -133,11 +143,15 @@ public class AgentScopeToolPipeline {
                                    Map<String, Object> input,
                                    ToolCallParam param) {
         Map<String, Object> rejected = canvasModeRejection(tool.getName(), param);
-        if (rejected != null) return rejected;
+        if (rejected != null) return ToolResultContract.normalize(tool.getName(), rejected);
         // 生成偏好作为缺省值补齐（只补空值，不覆盖模型/用户已给的值；自动模式原样返回）
         Map<String, Object> effectiveInput = generationPreferenceDefaults.applyDefaults(
                 tool.getName(), input, preferencesOf(param));
         ToolInvocationContext context = context(tool, effectiveInput, param);
+        String guardedTurnId = turnId(param);
+        String guardedToolCallId = toolCallId(param);
+        // 生命周期守卫：真正执行前进入 RUNNING（放在 ledger.start 之前，越界时不留孤儿审计行）
+        callStates.begin(guardedTurnId, guardedToolCallId);
         AgentToolInvocation record = ledger.start(context, effectiveInput);
         long started = System.nanoTime();
         try (ToolInvocationScopeHolder.Scope ignored =
@@ -149,17 +163,75 @@ public class AgentScopeToolPipeline {
                     ? () -> preflight.guard(tool.getName(), effectiveInput, param,
                     effective -> externalAction(tool, context, effective, param, invocation))
                     : () -> externalAction(tool, context, effectiveInput, param, invocation);
-            Map<String, Object> output = guarded.get();
+            // 自研工具全链唯一一次归一：rawResult 只保留 null 掩码修复，不再提前归一
+            Map<String, Object> output = ToolResultContract.normalize(tool.getName(), rawResult(guarded.get()));
             workflows.afterTool(context.getConversationId(), tool.getName(), output, null,
                     context(param) == null ? null : context(param).turnState());
             finish(record, context, effectiveInput, output, null, started);
+            // 成功终态写在审计收尾之后，位于 try 内、catch 之外：这里抛错不会被下面的
+            // catch 吞成 ERROR，守卫的显式失败一定能送达调用方。
+            callStates.complete(guardedTurnId, guardedToolCallId,
+                    ToolResultContract.resultStatusOf(output));
             return output;
         } catch (RuntimeException e) {
+            // 与成功出口互斥：调用已经以 SUCCESS 落定后这里不会再写终态
+            if (callStates.state(guardedTurnId, guardedToolCallId)
+                    == ToolCallStateGuard.ToolCallState.RUNNING) {
+                callStates.complete(guardedTurnId, guardedToolCallId,
+                        interrupted(e) ? ToolCallStateGuard.INTERRUPTED
+                                : ToolResultContract.ERROR);
+            }
             workflows.afterTool(context.getConversationId(), tool.getName(), null, e,
                     context(param) == null ? null : context(param).turnState());
             finish(record, context, input, null, e, started);
             throw e;
         }
+    }
+
+    /**
+     * 工具原始返回值保持不变，只把 {@code null} 掩码成契约错误信封。
+     *
+     * <p>这里不再调用 {@link ToolResultContract#normalize}：非 Map 返回值（String/List 等）
+     * 必须保持原形状，交给 {@code executeMap} 里唯一一次归一，避免包成
+     * {@code {result:{result:...}}} 改变模型可见 JSON。
+     */
+    static Object rawResult(Object value) {
+        if (value instanceof Map<?, ?> map && map.size() == 1 && map.containsKey(RAW_RESULT_KEY)) {
+            return ((RawToolResult) map.get(RAW_RESULT_KEY)).value();
+        }
+        return value == null ? ToolResultContract.normalize(null, null) : value;
+    }
+
+    /**
+     * 非 Map 工具结果的形状保持包装：{@link #asMap} 的返回类型必须是 Map（外部幂等执行与
+     * preflight 都按 Map 签名），但 String/List 等结果不能在这里被改形状或提前归一，
+     * 因此先原样装箱，由 {@link #rawResult} 拆箱后走 {@code executeMap} 里唯一一次归一。
+     */
+    private record RawToolResult(Object value) {
+    }
+
+    /** 工具结果转 Map；非 Map 值（含 {@code null}）形状保持地装箱，不做归一。 */
+    private static Map<String, Object> asMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            map.forEach((key, item) -> out.put(String.valueOf(key), item));
+            return out;
+        }
+        return Map.of(RAW_RESULT_KEY, new RawToolResult(value));
+    }
+
+    /** 异常链里出现中断/取消时记入中断终态，其它异常记失败终态。 */
+    private static boolean interrupted(Throwable error) {
+        Throwable cursor = error;
+        for (int depth = 0; cursor != null && depth < 8; depth++) {
+            if (cursor instanceof AgentInterruptException
+                    || cursor instanceof InterruptedException
+                    || cursor instanceof CancellationException) {
+                return true;
+            }
+            cursor = cursor.getCause();
+        }
+        return false;
     }
 
     Mono<ToolBaseResult> executeGeneric(ToolBase tool,
@@ -193,7 +265,7 @@ public class AgentScopeToolPipeline {
                 || runContext.externalActions() == null
                 || runContext.checkpointId() == null
                 || runContext.checkpointId().isBlank()) {
-            return invocation.get();
+            return asMap(invocation.get());
         }
         String toolCallId = toolCallId(param);
         Map<String, Object> result = runContext.externalActions().executeOnce(
@@ -315,6 +387,13 @@ public class AgentScopeToolPipeline {
                 ? "" : param.getToolUseBlock().getId();
     }
 
+    /** 生命周期守卫的 turn 键，复用本轮 OrchestrationRequest 的 turnId（不新造关联 ID）。 */
+    private static String turnId(ToolCallParam param) {
+        AgentScopeRunContext runContext = context(param);
+        return runContext == null || runContext.request() == null
+                ? "" : runContext.request().getTurnId();
+    }
+
     private static String value(Map<String, Object> values, String key) {
         Object value = values == null ? null : values.get(key);
         return value == null ? "" : String.valueOf(value);
@@ -328,16 +407,6 @@ public class AgentScopeToolPipeline {
         return "";
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asMap(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> out = new LinkedHashMap<>();
-            map.forEach((key, item) -> out.put(String.valueOf(key), item));
-            return out;
-        }
-        return Map.of("ok", true, "result", value == null ? "" : value);
-    }
-
     private record ToolPolicy(
             String toolKind,
             String actionType,
@@ -349,16 +418,30 @@ public class AgentScopeToolPipeline {
     record ToolBaseResult(Object value, Object auditValue) {
     }
 
-    private static Object auditValue(ToolResultBlock block) {
-        if (block == null || block.getOutput().isEmpty()) return null;
+    /**
+     * 解析框架工具的文本结果用于审计。解析失败不再静默返回 {@code null}（审计行会变成空白）：
+     * 看起来是信封 JSON 却解析不了 → 契约错误；纯文本（MCP 文本结果）→ 归一为文本结果。
+     */
+    private static Object auditValue(String toolName, ToolResultBlock block) {
+        if (block == null) return null;
+        if (block.getOutput().isEmpty()) return ToolResultContract.normalize(toolName, null);
         Object first = block.getOutput().getFirst();
-        if (!(first instanceof TextBlock textBlock)) return null;
+        if (!(first instanceof TextBlock textBlock)) return ToolResultContract.normalize(toolName, null);
         String text = textBlock.getText();
-        if (text == null || text.isBlank()) return null;
+        if (text == null || text.isBlank()) return ToolResultContract.normalize(toolName, null);
         try {
             return JSON.readValue(text, new TypeReference<Map<String, Object>>() {});
         } catch (Exception ignored) {
-            return null;
+            if (text.trim().startsWith("{")) {
+                Map<String, Object> broken = new LinkedHashMap<>();
+                broken.put("ok", false);
+                broken.put("code", ToolResultContract.CODE_UNPARSEABLE_TOOL_RESULT);
+                broken.put("message", "工具返回的信封 JSON 无法解析，结果可能被截断或不是合法 JSON。");
+                broken.put("hint", "请缩小单次返回的数据量或改用其它工具，不要把非法 JSON 直接返回给模型。");
+                broken.put("result", text);
+                return ToolResultContract.normalize(toolName, broken);
+            }
+            return ToolResultContract.normalize(toolName, text);
         }
     }
 
@@ -388,7 +471,7 @@ public class AgentScopeToolPipeline {
         @Override
         public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
             return pipeline.executeGeneric(delegate, param, delegate.callAsync(param)
-                    .map(block -> new ToolBaseResult(block, auditValue(block))))
+                    .map(block -> new ToolBaseResult(block, auditValue(delegate.getName(), block))))
                     .map(result -> (ToolResultBlock) result.value());
         }
     }

@@ -2,16 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_AGENT_APPROVAL_MODE,
   agentApi,
+  type AgentAttachment,
   type AgentConversation,
   type AgentTaskView,
   type AgentTurnEventType,
 } from '../api/agent';
 import {
   AgentTurnEventSequencer,
+  TURN_GAP_MAX_ATTEMPTS,
+  TURN_GAP_TIMEOUT_MS,
   applyAgentTurnEnvelope,
+  clearTurnGapRecovery,
   taskStatusLabel,
+  turnGapRecoverySnapshot,
+  turnGapTimeoutForAttempt,
   useAgentStore,
 } from './agentStore';
+import { dedupeAttachments, attachmentKey } from '../lib/attachmentDedupe';
+import { collectRenderIntents, parseRenderIntent } from '../lib/renderIntent';
 import { useProjectStore } from './projectStore';
 import { setAccessToken } from '../lib/authSession';
 import { defaultGenerationPreferences } from '../lib/generationPreferences';
@@ -1471,7 +1479,6 @@ describe('AgentScope turn envelope reduction', () => {
       pendingAssistantId: null,
       waitingHumanInput: null,
       streamError: null,
-      timelineByConversation: {},
     });
     useProjectStore.setState({ currentProject: null });
   });
@@ -1849,6 +1856,165 @@ describe('AgentScope turn envelope reduction', () => {
     expect(useAgentStore.getState().messages[0].metadata?.hitl?.formToken).toBe('form-1');
     expect(useAgentStore.getState().waitingHumanInput?.formContent)
       .toBe('请选择片尾视频的设计方案：');
+  });
+
+  /**
+   * 回归：HITL 暂停轮的工具明细只活在 `generating.toolDrafts` 里，而流一结束（暂停即结束）
+   * `generating` 就被删除。若不把草稿折进暂停卡片 metadata，工具调用会在暂停瞬间被吞掉，
+   * 只有刷新（服务端 metadata 回放）才重新出现——正是「一开始有的，后面就被吞了」。
+   */
+  it('暂停轮把直播工具草稿折进卡片 metadata，流结束后仍可渲染', () => {
+    const turnId = 'turn-pause-tools';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-pause-tools' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-pause-tools',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-pause-tools' },
+      },
+      streaming: true,
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', {
+        eventType: 'TOOL_RESULT_END',
+        data: {
+          toolName: 'run_python_script',
+          toolCallId: 'call-pause',
+          state: 'SUCCESS',
+          delta: 'done',
+        },
+      }, turnId),
+      context,
+    );
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'hitl-pause-tools',
+        content: '请确认',
+        hitl: {
+          formToken: 'form-pause-tools',
+          formContent: '请确认',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, turnId),
+      context,
+    );
+
+    // 流的收尾（sendMessage/submitHumanInput 的 finally）会删除本轮的 generating 快照
+    useAgentStore.setState((state) => {
+      const generating = { ...state.generating };
+      delete generating['conversation-1'];
+      return { generating, streaming: false };
+    });
+
+    const paused = useAgentStore.getState().messages[0];
+    expect(paused.id).toBe('hitl-pause-tools');
+    expect(paused.metadata?.hitl?.formToken).toBe('form-pause-tools');
+    expect(paused.metadata?.toolDrafts?.['call-pause']?.name).toBe('run_python_script');
+    expect(paused.metadata?.toolDrafts?.['call-pause']?.status).toBe('node_completed');
+  });
+
+  it('暂停轮缺 payload.metadata 时用直播草稿补齐 renders', () => {
+    const turnId = 'turn-pause-renders';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-pause-renders' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-pause-renders',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: {
+        'conversation-1': { hint: '', turnId, assistantId: 'assistant-pause-renders' },
+      },
+      streaming: true,
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', {
+        eventType: 'TOOL_RESULT_END',
+        data: {
+          toolName: 'query_table',
+          toolCallId: 'call-render-pause',
+          state: 'SUCCESS',
+          delta: 'done',
+          render: { kind: 'table', id: 'render-pause', status: 'completed', items: [{ 名称: '甲' }], version: 1 },
+        },
+      }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'turn_paused', {
+        messageId: 'hitl-pause-renders',
+        content: '请确认',
+        hitl: {
+          formToken: 'form-pause-renders',
+          formContent: '请确认',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, turnId),
+      context,
+    );
+
+    const metadata = useAgentStore.getState().messages[0].metadata;
+    expect(metadata?.toolDrafts?.['call-render-pause']?.render?.kind).toBe('table');
+    expect(metadata?.renders?.map((intent) => intent.kind)).toEqual(['table']);
+  });
+
+  it('端到端：暂停轮的流结束后工具调用仍留在卡片上（刷新前后一致）', async () => {
+    const turnId = 'turn-pause-tools-e2e';
+    const pauseBody = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }, turnId),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TOOL_RESULT_END',
+        data: {
+          toolName: 'web_search',
+          toolCallId: 'call-e2e',
+          state: 'SUCCESS',
+          delta: '{"ok":true}',
+        },
+      }, turnId),
+      sseEnvelope(3, 'turn_paused', {
+        messageId: 'hitl-e2e',
+        content: '请确认',
+        hitl: {
+          formToken: 'form-e2e',
+          formContent: '请确认',
+          actions: [{ id: 'approve', title: '批准' }],
+          expirationTime: Date.now() + 60_000,
+        },
+      }, turnId),
+    ]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(pauseBody, { status: 200 })));
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [],
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      refImageUrls: [],
+      pickedAssetIds: [],
+    });
+
+    await useAgentStore.getState().sendMessage('搜一下 GitHub Trending');
+
+    const paused = useAgentStore.getState().messages.find((message) => message.metadata?.hitl);
+    expect(paused?.metadata?.toolDrafts?.['call-e2e']?.name).toBe('web_search');
+    expect(paused?.metadata?.toolDrafts?.['call-e2e']?.status).toBe('node_completed');
+    // 直播快照已被回收：卡片自身的 metadata 是唯一渲染来源
+    expect(useAgentStore.getState().generating['conversation-1']).toBeUndefined();
   });
 
   it('does not copy the HITL prompt into an empty assistant placeholder body', () => {
@@ -2669,6 +2835,402 @@ describe('agentStore 生成偏好下发', () => {
       image: {},
       video: {},
     });
+  });
+});
+
+describe('agentStore seq 缺口主动补偿', () => {
+  let listTurnEvents: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    listTurnEvents = vi.spyOn(agentApi, 'listTurnEvents')
+      .mockResolvedValue({ data: { data: [] } } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      generating: {},
+      streaming: true,
+      streamError: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    clearTurnGapRecovery();
+    useAgentStore.setState({
+      activeConversationId: null,
+      messages: [],
+      generating: {},
+      streaming: false,
+      streamError: null,
+    });
+  });
+
+  it('缺口超过超时时间才触发一次 afterSeq 补偿，且不会轮询成死循环', async () => {
+    const turnId = 'turn-gap-timeout';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-gap' };
+    useAgentStore.setState({
+      messages: [{
+        id: 'assistant-gap',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-gap' } },
+    });
+
+    // seq=1 到达，seq=2 丢失，seq=3 先到 → sequencer 只放行 1，缺口停在 2。
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'a' } }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'c' } }, turnId),
+      context,
+    );
+
+    // 缺口未超时前不补拉（不猜序号、不提前放行）
+    await vi.advanceTimersByTimeAsync(TURN_GAP_TIMEOUT_MS - 1);
+    expect(listTurnEvents).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().messages[0].content).toBe('a');
+
+    // 超时后正好补拉一次（afterSeq 取 sequencer.lastSeq = 1，仍由 store 内部统一给出）
+    await vi.advanceTimersByTimeAsync(1);
+    expect(listTurnEvents).toHaveBeenCalledTimes(1);
+    expect(listTurnEvents).toHaveBeenCalledWith('conversation-1', turnId, 1);
+
+    // 缺口仍在：再来一次乱序事件才会按退避补第二次
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'c' } }, turnId),
+      context,
+    );
+    await vi.advanceTimersByTimeAsync(turnGapTimeoutForAttempt(1));
+    expect(listTurnEvents).toHaveBeenCalledTimes(2);
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'c' } }, turnId),
+      context,
+    );
+    await vi.advanceTimersByTimeAsync(turnGapTimeoutForAttempt(2));
+    expect(listTurnEvents).toHaveBeenCalledTimes(TURN_GAP_MAX_ATTEMPTS);
+    expect(turnGapRecoverySnapshot(turnId).attempts).toBe(TURN_GAP_MAX_ATTEMPTS);
+
+    // 到达上限后彻底停止：新的乱序事件也不再排期补偿
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'c' } }, turnId),
+      context,
+    );
+    await vi.advanceTimersByTimeAsync(turnGapTimeoutForAttempt(5));
+    expect(listTurnEvents).toHaveBeenCalledTimes(TURN_GAP_MAX_ATTEMPTS);
+
+    // 整个过程中没有猜测序号：seq=3 的正文始终没有被提前放行
+    expect(useAgentStore.getState().messages[0].content).toBe('a');
+  });
+
+  it('补偿事件补齐缺口后归并放行且停止补偿', async () => {
+    const turnId = 'turn-gap-heal';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-heal' };
+    useAgentStore.setState({
+      messages: [{
+        id: 'assistant-heal',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-heal' } },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'a' } }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'c' } }, turnId),
+      context,
+    );
+    expect(useAgentStore.getState().messages[0].content).toBe('a');
+
+    // 补偿拉回缺失的 seq=2：必须按序补进正文，然后才放行已到达的 seq=3
+    listTurnEvents.mockResolvedValue({
+      data: {
+        data: [sseEnvelope(2, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'b' } }, turnId)],
+      },
+    } as never);
+    await vi.advanceTimersByTimeAsync(TURN_GAP_TIMEOUT_MS);
+
+    expect(listTurnEvents).toHaveBeenCalledTimes(1);
+    expect(useAgentStore.getState().messages[0].content).toBe('abc');
+    expect(turnGapRecoverySnapshot(turnId).scheduled).toBe(false);
+
+    // 缺口已补齐：后续再推进时间不再产生补偿拉取
+    await vi.advanceTimersByTimeAsync(TURN_GAP_TIMEOUT_MS * 4);
+    expect(listTurnEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('正常按序到达时不安排任何补偿', async () => {
+    const turnId = 'turn-no-gap';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-ok' };
+    useAgentStore.setState({
+      messages: [{
+        id: 'assistant-ok',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-ok' } },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'a' } }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'agent_event', { eventType: 'TEXT_BLOCK_DELTA', data: { delta: 'b' } }, turnId),
+      context,
+    );
+
+    expect(turnGapRecoverySnapshot(turnId).scheduled).toBe(false);
+    await vi.advanceTimersByTimeAsync(TURN_GAP_TIMEOUT_MS * 3);
+    expect(listTurnEvents).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().messages[0].content).toBe('ab');
+  });
+});
+
+describe('产物卡片幂等（assetId）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      activeConversationId: null,
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+    });
+  });
+
+  it('按 assetId 去重并给出稳定 key，缺 assetId 时退化到 url', () => {
+    const attachments: AgentAttachment[] = [
+      { url: '/api/files/a.png', name: 'a.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-1' },
+      // 同一资产的不同 url（重新签名 / CDN 换链）不能变成第二张卡
+      { url: '/api/files/a-signed.png', name: 'a.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-1' },
+      { url: '/api/files/b.png', name: 'b.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-2' },
+      // 无 assetId：按 url 去重
+      { url: '/api/files/c.md', name: 'c.md', mimeType: 'text/markdown', kind: 'file' },
+      { url: '/api/files/c.md', name: 'c.md', mimeType: 'text/markdown', kind: 'file' },
+    ];
+
+    const deduped = dedupeAttachments(attachments);
+
+    expect(deduped).toHaveLength(3);
+    expect(deduped.map((item) => item.url)).toEqual([
+      '/api/files/a.png',
+      '/api/files/b.png',
+      '/api/files/c.md',
+    ]);
+    expect(attachmentKey(deduped[0], 0)).toBe('asset-asset-1');
+    expect(attachmentKey(deduped[2], 2)).toBe('url-/api/files/c.md');
+  });
+
+  it('重放同一个 terminal envelope 不会复制或重排产物卡片', () => {
+    const turnId = 'turn-attachments';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-attachments' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-attachments',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-attachments' } },
+    });
+
+    const sandboxAttachments = [
+      { url: '/api/files/a.png', name: 'a.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-1' },
+      { url: '/api/files/a-signed.png', name: 'a.png', mimeType: 'image/png', kind: 'image', assetId: 'asset-1' },
+      { url: '/api/files/b.md', name: 'b.md', mimeType: 'text/markdown', kind: 'file', assetId: 'asset-2' },
+    ];
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_completed', { content: '产物已发布', metadata: { sandboxAttachments } }, turnId),
+      context,
+    );
+    expect(dedupeAttachments(useAgentStore.getState().messages[0].metadata?.sandboxAttachments ?? []))
+      .toHaveLength(2);
+
+    // 同一 turn 再重放一遍（afterSeq 补偿 / 刷新后的恢复轮询）：顺序与数量都不变
+    useAgentStore.setState({
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-attachments' } },
+    });
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_completed', { content: '产物已发布', metadata: { sandboxAttachments } }, turnId),
+      context,
+    );
+
+    const replayed = dedupeAttachments(
+      useAgentStore.getState().messages[0].metadata?.sandboxAttachments ?? [],
+    );
+    expect(replayed.map((item) => attachmentKey(item, 0))).toEqual(['asset-asset-1', 'asset-asset-2']);
+  });
+});
+
+describe('空 formToken 的 HITL 卡片重放后不可点击', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      activeConversationId: null,
+      messages: [],
+      generating: {},
+      streaming: false,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      hitlVideoPlan: {},
+      pendingAssistantId: null,
+    });
+  });
+
+  const replayPaused = (hitl: Record<string, unknown>, turnId: string) => {
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-blank' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      waitingHumanInput: null,
+      messages: [{
+        id: 'assistant-blank',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-blank' } },
+    });
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'turn_paused', { messageId: 'hitl-blank', content: '请确认', hitl }, turnId),
+      context,
+    );
+    return useAgentStore.getState();
+  };
+
+  it('formToken 为空字符串时不装配待确认状态，并标记卡片为只读', () => {
+    const state = replayPaused({
+      formToken: '',
+      formContent: '请确认是否继续',
+      actions: [{ id: 'approve', title: '批准' }],
+      expirationTime: Date.now() + 60_000,
+    }, 'turn-blank-token');
+
+    expect(state.waitingHumanInput).toBeNull();
+    expect(state.waitingVideoPlan).toBeNull();
+    expect(state.messages[0].metadata?.hitl?.inactive).toBe(true);
+    expect(state.messages[0].metadata?.hitl?.formToken).toBe('');
+  });
+
+  it('formToken 全为空白字符时同样不可交互', () => {
+    const state = replayPaused({
+      formToken: '   ',
+      formContent: '请确认是否继续',
+      actions: [{ id: 'approve', title: '批准' }],
+    }, 'turn-whitespace-token');
+
+    expect(state.waitingHumanInput).toBeNull();
+    expect(state.messages[0].metadata?.hitl?.inactive).toBe(true);
+  });
+
+  it('有 formToken 的卡片行为不变：仍然装配待确认状态且可交互', () => {
+    const state = replayPaused({
+      formToken: 'form-live',
+      formContent: '请确认是否继续',
+      actions: [{ id: 'approve', title: '批准' }],
+      expirationTime: Date.now() + 60_000,
+    }, 'turn-live-token');
+
+    expect(state.waitingHumanInput?.formToken).toBe('form-live');
+    expect(state.messages[0].metadata?.hitl?.inactive).toBeUndefined();
+  });
+});
+
+describe('render 意图分派', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({ activeConversationId: null, generating: {}, messages: [], streaming: false });
+  });
+
+  it('缺 kind 的载荷不算渲染意图', () => {
+    expect(parseRenderIntent({ id: 'x', items: [] })).toBeNull();
+    expect(parseRenderIntent('table')).toBeNull();
+    expect(parseRenderIntent(null)).toBeNull();
+  });
+
+  it('按 id 去重同时保留未知 kind', () => {
+    const intents = collectRenderIntents([
+      { kind: 'table', id: 'r1', items: [{ a: 1 }], version: 1 },
+      { kind: 'table', id: 'r1', items: [{ a: 1 }], version: 2 },
+      { kind: 'timeline-future', id: 'r2', items: [] },
+      { kind: 'list', id: 'r3', items: ['一'] },
+    ], []);
+
+    // 去重按 id；排序把带 version 的意图排在后面（version 越大越新），未知 kind 原样保留
+    expect(intents.map((intent) => intent.kind)).toEqual(['timeline-future', 'list', 'table']);
+    expect(intents).toHaveLength(3);
+    expect(intents[2].version).toBe(1);
+  });
+
+  it('合并 metadata.renders 与工具草稿里的 render 并去重', () => {
+    const merged = collectRenderIntents(
+      [{ kind: 'gallery', id: 'g1', items: [{ url: '/a.png' }] }],
+      [{ kind: 'table', id: 't1', items: [] }, { kind: 'gallery', id: 'g1', items: [{ url: '/a.png' }] }],
+    );
+
+    // 结果 metadata 在前（服务端权威），草稿里的重复项被去掉，只会各出现一次
+    expect(merged.map((intent) => intent.id)).toEqual(['g1', 't1']);
+    expect(merged).toHaveLength(2);
+  });
+
+  it('工具结果携带 render 时落进草稿，终态 metadata 汇总 renders', () => {
+    const turnId = 'turn-render-intent';
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-render' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-render',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+      generating: { 'conversation-1': { hint: '', turnId, assistantId: 'assistant-render' } },
+    });
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'agent_event', {
+        eventType: 'TOOL_RESULT_END',
+        data: {
+          toolName: 'run_python_script',
+          toolCallId: 'call-1',
+          state: 'SUCCESS',
+          delta: 'done',
+          render: { kind: 'table', id: 'render-1', status: 'completed', items: [{ 名称: 'A', 数量: 1 }], version: 1 },
+        },
+      }, turnId),
+      context,
+    );
+
+    const draft = useAgentStore.getState().generating['conversation-1']?.toolDrafts?.['call-1'];
+    expect(draft?.name).toBe('run_python_script');
+    expect(draft?.render?.kind).toBe('table');
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'turn_completed', { content: '完成' }, turnId),
+      context,
+    );
+
+    const metadata = useAgentStore.getState().messages[0].metadata;
+    expect(metadata?.renders?.map((intent) => intent.kind)).toEqual(['table']);
+    expect(metadata?.toolDrafts?.['call-1']?.status).toBe('node_completed');
   });
 });
 

@@ -14,7 +14,16 @@
   font-family: inherit;
   cursor: pointer;
   flex-shrink: 0;
+  /* 标签只占一行：窄栏下交给 compactLabel 缩短，不靠折行凑宽度 */
+  white-space: nowrap;
   transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+/* 极窄栏：只留图标，宽度与相邻的圆形图标按钮对齐 */
+.chat-generation-prefs__trigger.is-icon-only {
+  width: 36px;
+  padding: 0;
+  justify-content: center;
 }
 
 .chat-generation-prefs__trigger:hover:not(:disabled),

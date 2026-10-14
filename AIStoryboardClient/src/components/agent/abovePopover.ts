@@ -90,11 +90,21 @@ export function useAbovePopoverPlacement(
     const reposition = () => setPlacement(measure());
     window.addEventListener('resize', reposition);
     window.addEventListener('scroll', reposition, true);
+    // 锚点自己也会变宽：输入卡从收缩态展开有 260ms 的 max-width 过渡（480→780），
+    // 只在打开那一刻量一次会把浮层停在中间宽度上，比输入框窄一截。
+    // ResizeObserver 跟随锚点尺寸，浮层始终与输入卡同宽。
+    const node = anchorRef.current;
+    let observer: ResizeObserver | undefined;
+    if (node && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(reposition);
+      observer.observe(node);
+    }
     return () => {
       window.removeEventListener('resize', reposition);
       window.removeEventListener('scroll', reposition, true);
+      observer?.disconnect();
     };
-  }, [open, measure]);
+  }, [open, measure, anchorRef]);
 
   // 卸载兜底：锚点消失时清掉残留浮层
   useEffect(() => {

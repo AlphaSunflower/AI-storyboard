@@ -157,7 +157,7 @@ class AgentChatServiceImplTurnTest {
     }
 
     @Test
-    void hitlPauseMergesReasoningAndTraceIntoThePersistedCard() {
+    void hitlPauseMergesReasoningTraceAndToolDraftsIntoThePersistedCard() {
         AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         AgentMessage persisted = message("message-1", "assistant", "请确认");
         persisted.setMetadata(Map.of(
@@ -179,12 +179,19 @@ class AgentChatServiceImplTurnTest {
                         "trace-1", "model_reasoning", "moon", "agentscope",
                         "node_completed", "模型推理", "推理完成", "", "",
                         java.time.OffsetDateTime.now(), 1200L);
+        // 暂停轮不走 persistAssistant，所以工具明细必须在这里显式带上，
+        // 否则"暂停过一次"的回合刷新后工具调用明细仍然消失。
+        Map<String, Object> toolDrafts = Map.of("call-1", Map.of(
+                "name", "generate_image",
+                "text", "{\"ok\":true}",
+                "input", "",
+                "status", "node_completed"));
 
         service.mergeHitlMessageThinking(
                 "message-1",
                 new AgentTurnResult(
                         "请确认",
-                        Map.of("metrics", Map.of("durationMs", 1200)),
+                        Map.of("metrics", Map.of("durationMs", 1200), "toolDrafts", toolDrafts),
                         List.of(traceEvent),
                         reasoning,
                         List.of(),
@@ -198,6 +205,7 @@ class AgentChatServiceImplTurnTest {
         assertThat(updated.getValue().getMetadata().get("agentTrace")).isEqualTo(List.of(traceEvent));
         assertThat(updated.getValue().getMetadata().get("metrics"))
                 .isEqualTo(Map.of("durationMs", 1200));
+        assertThat(updated.getValue().getMetadata().get("toolDrafts")).isEqualTo(toolDrafts);
         @SuppressWarnings("unchecked")
         Map<String, Object> hitl = (Map<String, Object>) updated.getValue().getMetadata().get("hitl");
         assertThat(hitl.get("formToken")).isEqualTo("token-1");
@@ -329,13 +337,7 @@ class AgentChatServiceImplTurnTest {
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
         when(turnStore.start(any(), eq("修改后的问题"), anyString())).thenReturn(turn);
-        AtomicInteger sequence = new AtomicInteger();
-        when(turnStore.append(anyString(), anyString(), any())).thenAnswer(invocation ->
-                new AgentTurnEventEnvelope(
-                        invocation.getArgument(0),
-                        sequence.incrementAndGet(),
-                        invocation.getArgument(1),
-                        Map.of("ok", true)));
+        when(turnStore.appendBatch(anyString(), any())).thenAnswer(envelope("turn-1"));
         when(runtime.runTurn(any(), any(), any(), any())).thenReturn(
                 new AgentTurnResult("新回复", Map.of(), List.of(), null,
                         List.of(), false, ""));
@@ -381,8 +383,7 @@ class AgentChatServiceImplTurnTest {
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
         when(turnStore.start(any(), eq("带参考图的问题"), anyString())).thenReturn(turn);
-        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
-                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(turnStore.appendBatch(anyString(), any())).thenAnswer(envelope("turn-1"));
         when(runtime.runTurn(any(), any(), any(), any())).thenReturn(
                 new AgentTurnResult("回复", Map.of(), List.of(), null,
                         List.of(), false, ""));
@@ -434,8 +435,7 @@ class AgentChatServiceImplTurnTest {
         AgentTurnEntity turn = new AgentTurnEntity();
         turn.setId("turn-1");
         when(turnStore.start(any(), anyString(), anyString())).thenReturn(turn);
-        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
-                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(turnStore.appendBatch(anyString(), any())).thenAnswer(envelope("turn-1"));
         when(runtime.runTurn(any(), any(), any(), any())).thenReturn(
                 new AgentTurnResult("回复", Map.of(), List.of(), null,
                         List.of(), false, ""));
@@ -532,8 +532,7 @@ class AgentChatServiceImplTurnTest {
         when(support.isInterrupted("conversation-1")).thenReturn(false);
         when(turnStore.find("turn-1")).thenReturn(originalTurn);
         when(turnStore.resume("turn-1")).thenReturn(originalTurn);
-        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
-                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(turnStore.appendBatch(anyString(), any())).thenAnswer(envelope("turn-1"));
         when(checkpoints.claim(eq("conversation-1"), eq("token-1"), any()))
                 .thenReturn(claim);
         when(runtime.resumeTurn(any(), any(), any(), any(), any(), any(), any()))
@@ -586,18 +585,26 @@ class AgentChatServiceImplTurnTest {
         when(support.isInterrupted("conversation-1")).thenReturn(false);
         when(turnStore.find("turn-1")).thenReturn(originalTurn);
         when(turnStore.resume("turn-1")).thenReturn(originalTurn);
-        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
-                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
-        when(turnStore.appendBatch(anyString(), any())).thenReturn(List.of());
+        when(turnStore.appendBatch(anyString(), any())).thenAnswer(envelope("turn-1"));
         when(checkpoints.claim(eq("conversation-1"), eq("token-1"), any()))
                 .thenReturn(claim);
         AtomicInteger sinkChecks = new AtomicInteger();
+        List<com.moon.moonagent.ai.agent.AgentTraceEvent> traceSinkEvents =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        com.moon.moonagent.ai.agent.AgentTraceEvent traceEvent =
+                new com.moon.moonagent.ai.agent.AgentTraceEvent(
+                        "trace-1", "model_reasoning", "moon", "agentscope",
+                        "node_started", "模型推理", "", "", "",
+                        java.time.OffsetDateTime.parse("2026-10-10T08:00:00Z"), null);
         when(runtime.resumeTurn(any(), any(), any(), any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
                     com.moon.moonagent.ai.agent.handler.OrchestrationRequest request =
                             invocation.getArgument(2);
                     if (request.getTrace() != null && request.getTrace().hasEventSink()) {
                         sinkChecks.incrementAndGet();
+                        // runtime 运行期间真实 sink 必须可用：推送一条 AGENT_TRACE，它必须经 publisher 落库
+                        request.getTrace().setEventSink(traceSinkEvents::add);
+                        request.getTrace().setEventSink(null);
                     }
                     return new AgentTurnResult("已完成", Map.of(), List.of(), null,
                             List.of(), false, "");
@@ -616,6 +623,8 @@ class AgentChatServiceImplTurnTest {
         verify(runtime, timeout(2_000)).resumeTurn(
                 any(), any(), any(), any(), any(), any(), any());
         assertThat(sinkChecks).hasValue(1);
+        // turn_started 与 AGENT_TRACE 都必须由 publisher 走 appendBatch（不再有直接 append）
+        verify(turnStore, timeout(2_000).times(2)).appendBatch(anyString(), any());
     }
 
     @Test
@@ -657,15 +666,14 @@ class AgentChatServiceImplTurnTest {
         when(support.isInterrupted("conversation-1")).thenReturn(false);
         when(turnStore.find("turn-1")).thenReturn(originalTurn);
         when(turnStore.resume("turn-1")).thenReturn(originalTurn);
-        when(turnStore.append(anyString(), anyString(), any())).thenReturn(
-                new AgentTurnEventEnvelope("turn-1", 1, "turn_started", Map.of()));
+        when(turnStore.appendBatch(anyString(), any())).thenAnswer(envelope("turn-1"));
         when(checkpoints.claim(eq("conversation-1"), eq("token-1"), any()))
                 .thenReturn(claim);
         when(runtime.resumeTurn(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new AgentTurnResult("文档已生成", Map.of(), List.of(), null,
                         List.of(), false, ""));
         when(assetMapper.selectById("asset-1")).thenReturn(asset);
-        when(reconciler.reconcile(conversation, "turn-1")).thenReturn(
+        when(reconciler.reconcileNew(conversation, "turn-1")).thenReturn(
                 new SandboxArtifactPublisher.PublishedArtifacts(
                         List.of("asset-1"), List.of("/api/files/files/report.docx")));
 
@@ -784,6 +792,15 @@ class AgentChatServiceImplTurnTest {
         message.setRole(role);
         message.setContent(content);
         return message;
+    }
+
+    /**
+     * 所有 turn 事件现在都经 publisher 走 {@code appendBatch}；这里模拟 store 只回一条已分配序号的信封。
+     * 断言重点是事件是否走了唯一有序通道，不依赖具体序号。
+     */
+    private static org.mockito.stubbing.Answer<List<AgentTurnEventEnvelope>> envelope(String turnId) {
+        return invocation -> List.of(new AgentTurnEventEnvelope(
+                turnId, 1, "turn_started", Map.of("ok", true)));
     }
 
     private static void inject(Object target, String fieldName, Object value) throws Exception {

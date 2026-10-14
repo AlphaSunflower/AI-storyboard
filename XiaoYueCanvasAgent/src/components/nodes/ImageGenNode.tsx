@@ -6,6 +6,7 @@ import { buildReferenceImagePool } from '../../canvas/referenceImagePool';
 import { submitImageGeneration, submitImageMultiAngle, submitImageRedraw } from '../../services/jobRunner';
 import { useMediaStore } from '../../store/mediaStore';
 import { useAssetPreviewUrl } from '../../hooks/useAssetPreviewUrl';
+import { usePresence } from '../../hooks/usePresence';
 import { ImagePreviewOverlay } from '../ImagePreviewOverlay';
 import {
   DEFAULT_IMAGE_PRESET_KEY,
@@ -45,6 +46,7 @@ function RedrawReferencePreview({
   const url = useAssetPreviewUrl(assetId);
   const asset = useMediaStore((state) => state.assets[assetId] ?? state.metadata[assetId]);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const previewPresence = usePresence(previewOpen, { duration: 140 });
   const paintMarks = marks.filter((mark) => mark.operation === 'paint');
   const aspect = asset && asset.width > 0 && asset.height > 0 ? asset.width / asset.height : 1;
   return (
@@ -105,8 +107,8 @@ function RedrawReferencePreview({
           <span>{paintMarks.length ? `@1 · ${paintMarks.length} 个区域` : '@1 源图片'}</span>
         </div>
       </div>
-      {previewOpen && (
-        <ImagePreviewOverlay target={{ assetId, label }} onClose={() => setPreviewOpen(false)} />
+      {previewPresence.mounted && (
+        <ImagePreviewOverlay target={{ assetId, label }} present={previewPresence.present} onClose={() => setPreviewOpen(false)} />
       )}
     </>
   );

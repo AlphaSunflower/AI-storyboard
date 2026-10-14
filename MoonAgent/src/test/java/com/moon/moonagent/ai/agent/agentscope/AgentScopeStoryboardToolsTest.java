@@ -53,9 +53,8 @@ class AgentScopeStoryboardToolsTest {
         Map<String, Object> result = (Map<String, Object>) tools.tools().getFirst()
                 .invoke(Map.of("prompt", "生成分镜"), param("project-1"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> choice = (Map<String, Object>) result.get("result");
-        assertThat(choice)
+        // guard 已摊平：内层失败直接成为顶层结果，ok:false 不再被 {ok:true,result:{...}} 伪装
+        assertThat(result)
                 .containsEntry("ok", false)
                 .containsEntry("needsChoice", true)
                 .containsEntry("existingSceneCount", 1);
@@ -131,9 +130,8 @@ class AgentScopeStoryboardToolsTest {
                 .invoke(Map.of("prompt", "生成分镜", "commit_mode", "delete"),
                         param("project-1"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> deleted = (Map<String, Object>) result.get("result");
-        assertThat(deleted)
+        // guard 已摊平：删除成功的结果直接在顶层
+        assertThat(result)
                 .containsEntry("ok", true)
                 .containsEntry("deleted", true);
         verify(storyboardClient).deleteProjectScenes("project-1");
@@ -195,9 +193,8 @@ class AgentScopeStoryboardToolsTest {
                         "image_size", "1024x1024",
                         "duration", 8), param("project-1"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> payload = (Map<String, Object>) result.get("result");
-        assertThat(payload)
+        // guard 已摊平：更新结果直接在顶层
+        assertThat(result)
                 .containsEntry("ok", true)
                 .containsEntry("sceneId", "scene-3")
                 .containsEntry("sceneNumber", 3);
@@ -234,13 +231,13 @@ class AgentScopeStoryboardToolsTest {
                 storyboardClient);
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> envelope = (Map<String, Object>) tool(
+        Map<String, Object> result = (Map<String, Object>) tool(
                 tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO)
                 .invoke(Map.of("scene_number", 3), param("project-1"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>) envelope.get("result");
+        // guard 已摊平：排队结果直接在顶层
         assertThat(result)
+                .containsEntry("ok", true)
                 .containsEntry("taskId", "video-task-1")
                 .containsEntry("taskKind", "long-tool");
         verify(asyncTasks).startStoryboardVideoTask(
@@ -331,9 +328,8 @@ class AgentScopeStoryboardToolsTest {
         Map<String, Object> result = (Map<String, Object>) tool(tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES)
                 .invoke(Map.of(), param("project-1"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> queued = (Map<String, Object>) result.get("result");
-        assertThat(queued)
+        // guard 已摊平：入队结果直接在顶层
+        assertThat(result)
                 .containsEntry("ok", true)
                 .containsEntry("queued", true)
                 .containsEntry("count", 1)
@@ -405,9 +401,8 @@ class AgentScopeStoryboardToolsTest {
                 tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES)
                 .invoke(Map.of("overwrite", true), param("project-1", true));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> queued = (Map<String, Object>) result.get("result");
-        assertThat(queued)
+        // guard 已摊平：覆盖入队结果直接在顶层
+        assertThat(result)
                 .containsEntry("ok", true)
                 .containsEntry("queued", true)
                 .containsEntry("taskId", "task-overwrite");
@@ -435,12 +430,11 @@ class AgentScopeStoryboardToolsTest {
                 storyboardClient);
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> envelope = (Map<String, Object>) tool(
+        Map<String, Object> result = (Map<String, Object>) tool(
                 tools, AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS)
                 .invoke(Map.of(), param("project-1"));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>) envelope.get("result");
+        // guard 已摊平：批量入队结果直接在顶层
         assertThat(result)
                 .containsEntry("ok", true)
                 .containsEntry("status", "queued")
@@ -468,10 +462,9 @@ class AgentScopeStoryboardToolsTest {
         Map<String, Object> result = (Map<String, Object>) tool(tools, AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD)
                 .invoke(Map.of(), param("project-1"));
 
+        // guard 已摊平：列表载荷直接在顶层
         @SuppressWarnings("unchecked")
-        Map<String, Object> payload = (Map<String, Object>) result.get("result");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> scenes = (List<Map<String, Object>>) payload.get("scenes");
+        List<Map<String, Object>> scenes = (List<Map<String, Object>>) result.get("scenes");
         assertThat(scenes.getFirst())
                 .containsEntry("imageCount", 2)
                 .containsEntry("videoCount", 1)
@@ -568,15 +561,14 @@ class AgentScopeStoryboardToolsTest {
                 .build();
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> envelope = (Map<String, Object>) tool(
+        Map<String, Object> result = (Map<String, Object>) tool(
                 tools, AgentScopeStoryboardTools.REVISE_STORYBOARD)
                 .invoke(Map.of(
                         "run_id", "run-1",
                         "stage", "PLOT_REVIEW",
                         "instruction", "不要出现人物"), param);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>) envelope.get("result");
+        // guard 已摊平：修订入队结果直接在顶层
         assertThat(result)
                 .containsEntry("ok", true)
                 .containsEntry("taskId", "task-revision")

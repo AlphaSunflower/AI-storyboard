@@ -35,7 +35,7 @@ export function LoginScreen({ onLogin, message }: { onLogin: () => void; message
   const inputClass = 'h-10 w-full rounded-[10px] border border-[var(--border-light)] bg-[rgba(255,255,255,0.05)] px-3.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-[var(--acid)] focus:ring-2 focus:ring-[rgba(244,244,245,0.18)]';
 
   return (
-    <div className="login-shell min-h-dvh flex items-center justify-center px-6"
+    <div className="login-shell view-shell min-h-dvh flex items-center justify-center px-6"
       style={{ background: 'radial-gradient(circle at 18% 12%, rgba(244,244,245,0.10), transparent 34%), radial-gradient(circle at 84% 88%, rgba(24,24,24,0.9), transparent 46%), var(--canvas)' }}>
       <div className="login-card w-full max-w-sm rounded-2xl border border-[var(--border-dark)] bg-card p-7 shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
         <span className="flex items-center gap-2 font-mono text-[11px] tracking-[0.2em] text-acid">
@@ -44,7 +44,7 @@ export function LoginScreen({ onLogin, message }: { onLogin: () => void; message
         </span>
         <h2 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">欢迎回来</h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">登录后继续你的创作（同一账号数据）</p>
-        {message && <p className="mt-3 rounded-lg border border-[rgba(255,118,95,.24)] bg-[rgba(255,118,95,.08)] px-3 py-2 text-[12px] text-[#ffab9d]" role="alert">{message}</p>}
+        {message && <p className="mt-3 rounded-lg border border-[rgba(145,145,145,.24)] bg-[rgba(145,145,145,.08)] px-3 py-2 text-[12px] text-[#bcbcbc]" role="alert">{message}</p>}
         <form onSubmit={submit} className="mt-6">
           <label className="text-[13px] text-muted-foreground">邮箱</label>
           <input type="email" value={email} required autoFocus onChange={(e) => setEmail(e.target.value)} className={`mt-1.5 ${inputClass}`} placeholder="you@example.com" />

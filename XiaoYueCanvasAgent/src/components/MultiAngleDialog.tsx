@@ -14,11 +14,13 @@ export function MultiAngleDialog({
   sourceName,
   onClose,
   onConfirm,
+  present = true,
 }: {
   sourceLabel: string;
   sourceName: string;
   onClose: () => void;
   onConfirm: (request: MultiAngleRequest) => Promise<void>;
+  present?: boolean;
 }) {
   const { models, loading, error } = useGatewayModels('image');
   const [mode, setMode] = useState<MultiAngleMode>('grid');
@@ -42,7 +44,8 @@ export function MultiAngleDialog({
 
   return createPortal(
     <div
-      className="multi-angle-dialog"
+      className="multi-angle-dialog motion-fade"
+      data-present={present}
       role="dialog"
       aria-modal="true"
       aria-label="多角度"

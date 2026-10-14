@@ -19,7 +19,7 @@ interface Props {
 
 const DROPDOWN_STYLE: React.CSSProperties = {
   position: 'fixed',
-  backgroundColor: '#1c2a25',
+  backgroundColor: '#272727',
   border: '1px solid rgba(244,244,245,.16)',
   borderRadius: '8px',
   boxShadow: '0 4px 12px rgba(0,0,0,.5)',
@@ -35,7 +35,7 @@ const ITEM_STYLE = (active: boolean): React.CSSProperties => ({
   border: 'none',
   borderRadius: '4px',
   backgroundColor: active ? 'rgba(244,244,245,.12)' : 'transparent',
-  color: active ? 'var(--acid)' : 'rgba(238,240,223,.85)',
+  color: active ? 'var(--acid)' : 'rgba(238,238,238,.85)',
   fontSize: '12px',
   cursor: 'pointer',
   textAlign: 'left',
@@ -47,7 +47,7 @@ const Trigger = ({ open, onClick, label }: { open: boolean; onClick: () => void;
   <span
     className="flex items-center gap-1 cursor-pointer nodrag"
     onClick={onClick}
-    style={{ color: 'rgba(238,240,223,.75)', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap' }}
+    style={{ color: 'rgba(238,238,238,.75)', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap' }}
   >
     {label}
     <ChevronDown size={11} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
@@ -97,7 +97,7 @@ export const ChannelModelSelector = memo(function ChannelModelSelector({
     <div ref={containerRef} className="flex items-center gap-1.5 nodrag" style={{ position: 'relative', flexShrink: 0 }}>
       <div ref={channelTriggerRef} className="flex items-center gap-1">
         {singleChannel ? (
-          <span style={{ color: 'rgba(238,240,223,.55)', fontSize: '12px' }} title={currentChannel?.label}>{currentChannel?.label}</span>
+          <span style={{ color: 'rgba(238,238,238,.55)', fontSize: '12px' }} title={currentChannel?.label}>{currentChannel?.label}</span>
         ) : (
           <Trigger open={openMenu === 'channel'} onClick={() => { placeMenu(channelTriggerRef.current); setOpenMenu(openMenu === 'channel' ? null : 'channel'); }} label={currentChannel?.label ?? '通道'} />
         )}
@@ -119,11 +119,11 @@ export const ChannelModelSelector = memo(function ChannelModelSelector({
               {m.label}
             </button>
           ))}
-          {(currentChannel?.models ?? []).length === 0 && <div style={{ padding: '8px 10px', fontSize: '12px', color: 'rgba(238,240,223,.5)' }}>该通道暂无模型</div>}
+          {(currentChannel?.models ?? []).length === 0 && <div style={{ padding: '8px 10px', fontSize: '12px', color: 'rgba(238,238,238,.5)' }}>该通道暂无模型</div>}
         </div>,
         document.body
       )}
-      <Layers size={11} style={{ color: 'rgba(238,240,223,.35)', flexShrink: 0 }} />
+      <Layers size={11} style={{ color: 'rgba(238,238,238,.35)', flexShrink: 0 }} />
     </div>
   );
 });

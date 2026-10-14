@@ -20,11 +20,19 @@ test('input, planner, shot, and merge nodes share one panel surface', async ({ p
   await page.route('**/api/auth/stream-ticket', (route) =>
     route.fulfill({ json: { data: { ticket: 'test-ticket' } } }));
   const nodes = [
-    // 节点框下方要留出面板的位置；节点之间、节点与顶部项目栏/左侧工具岛之间都不互相遮挡
-    { id: 'panel-image', type: 'image', position: { x: 200, y: 160 }, width: 460, height: 420, data: { kind: 'image', label: '图片', status: 'idle' } },
-    { id: 'panel-planner', type: 'storyboardPlanner', position: { x: 200, y: 900 }, width: 520, height: 520, data: { kind: 'storyboardPlanner', label: '分镜拆解', prompt: '', status: 'idle' } },
-    { id: 'panel-shot', type: 'shot', position: { x: 900, y: 160 }, width: 520, height: 480, data: { kind: 'shot', label: '镜头 01', shotOrdinal: 1, status: 'idle' } },
-    { id: 'panel-merge', type: 'videoMerge', position: { x: 900, y: 900 }, width: 520, height: 480, data: { kind: 'videoMerge', label: '视频合并', status: 'idle' } },
+    // 必须单排铺开：浮动面板挂在节点下方且约 418 流单位高，两排布局无论取什么缩放
+    // 都无法同时满足「顶排避开顶部项目栏」和「底排面板落进 900px 视口」（推导见下）。
+    // 之前是 2×2，底排面板一直挂在视口外，只靠 Playwright 自动滚动才点得到，
+    // 满载时滚动失败就 30s 超时 —— 这是该用例偶发失败的根因。
+    //
+    // 约束：面板底 ≈ (bottomY + nodeH + 418)·z ≤ 876（视口 900 减去边距）
+    //       顶排标题 ≥ topY·z ≥ 90（避开项目栏）
+    //       两排还需 bottomY ≥ topY + nodeH + 418 不重叠
+    //       → 90/z ≤ topY 且 bottomY ≤ 876/z − 938，代入不重叠式得 z ≤ 0.41，且 topY 仅剩 ~20 流单位的窗口。
+    { id: 'panel-image', type: 'image', position: { x: 260, y: 300 }, width: 460, height: 420, data: { kind: 'image', label: '图片', status: 'idle' } },
+    { id: 'panel-planner', type: 'storyboardPlanner', position: { x: 840, y: 300 }, width: 520, height: 520, data: { kind: 'storyboardPlanner', label: '分镜拆解', prompt: '', status: 'idle' } },
+    { id: 'panel-shot', type: 'shot', position: { x: 1480, y: 300 }, width: 520, height: 480, data: { kind: 'shot', label: '镜头 01', shotOrdinal: 1, status: 'idle' } },
+    { id: 'panel-merge', type: 'videoMerge', position: { x: 2120, y: 300 }, width: 520, height: 480, data: { kind: 'videoMerge', label: '视频合并', status: 'idle' } },
   ];
   await page.route('**/api/canvas/**', async (route) => {
     const request = route.request();
@@ -33,7 +41,7 @@ test('input, planner, shot, and merge nodes share one panel surface', async ({ p
     if (path === '/projects/panel-project') return route.fulfill({ json: { id: 'panel-project', title: '面板测试' } });
     if (path === '/projects/panel-project/canvases') return route.fulfill({ json: [{ id: 'panel-canvas', projectId: 'panel-project', title: '默认画布' }] });
     if (path === '/canvases/panel-canvas/graph') {
-      const graph = { schemaVersion: 2, nodes, edges: [], viewport: { x: 0, y: 0, zoom: .62 } };
+      const graph = { schemaVersion: 2, nodes, edges: [], viewport: { x: 0, y: 0, zoom: .5 } };
       return route.fulfill({ json: request.method() === 'GET' ? { graph, revision: 1 } : { graph, revision: 2 } });
     }
     return route.fulfill({ json: {} });
@@ -54,13 +62,17 @@ test('input, planner, shot, and merge nodes share one panel surface', async ({ p
     });
     const transaction = db.transaction(['legacyProjects', 'canvases'], 'readwrite');
     transaction.objectStore('legacyProjects').put({ schemaVersion: 2, id: 'panel-project', title: '面板测试', canvases: ['panel-canvas'], createdAt: now, updatedAt: now });
-    transaction.objectStore('canvases').put({ schemaVersion: 1, id: 'panel-canvas', projectId: 'panel-project', title: '默认画布', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: .62 }, createdAt: now, updatedAt: now });
+    transaction.objectStore('canvases').put({ schemaVersion: 1, id: 'panel-canvas', projectId: 'panel-project', title: '默认画布', nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: .5 }, createdAt: now, updatedAt: now });
     await new Promise<void>((resolve, reject) => { transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); });
     db.close();
   });
   await page.goto('/?token=test-token&userId=test-user#project=panel-project&canvas=panel-canvas');
   await expect(page.locator('.canvas-workspace')).toBeVisible();
   await page.getByRole('button', { name: '展开全部节点' }).click();
+  // 收起右侧 Moon 面板：这排节点铺得比视口宽，最右边那个节点的标题正好落在面板底下，
+  // 不收起就只能靠浏览器把画布容器偷偷滚一下才点得到（那不是我们要测的东西）。
+  await page.getByRole('button', { name: '收起面板' }).click();
+  await expect(page.locator('.app-shell')).toHaveClass(/side-is-closed/);
 
   // 图片节点：上传组件挂在节点框下面板里，选中节点即可拿到
   const imageNode = page.locator('.react-flow__node[data-id="panel-image"]');

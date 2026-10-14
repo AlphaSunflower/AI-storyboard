@@ -22,6 +22,11 @@
   animation: embedded-app-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
+/* 拉伸窗口期间：子站 iframe 让出指针事件，光标压到画布上也能继续拖（否则 pointermove 被 iframe 吃掉） */
+.embedded-app-window.is-resizing iframe {
+  pointer-events: none;
+}
+
 .embedded-app-window.is-fullscreen {
   inset: 0;
   width: 100vw;

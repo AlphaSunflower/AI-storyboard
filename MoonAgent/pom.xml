@@ -259,6 +259,13 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
         </dependency>
+        <!-- jsoup：web_fetch 的 HTML 解析与白名单清洗（见 WebHtmlMarkdown）。版本显式声明：
+             根 pom 未统一管理它，不能依赖传递；1.23.2 已在本地仓库，离线可构建。 -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.23.2</version>
+        </dependency>
 
         <!-- Lombok -->
         <dependency>
@@ -340,6 +347,22 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            <!--
+              JDK 25 下 Byte Buddy 无法自附加（"Could not self-attach to current VM using
+              external process"），Mockito 的 inline mock maker 因此初始化失败，会让整套
+              Mockito 测试报 MockMaker 初始化错误。显式把 byte-buddy-agent 挂到 fork 的测试
+              JVM 上即可恢复 inline（final 类 / 静态）mock 能力。
+
+              注意：不要再加 src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker
+              指到 SubclassByteBuddyMockMaker——显式插件配置会覆盖 agent，导致 final 类无法 mock。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-javaagent:${maven.repo.local}/net/bytebuddy/byte-buddy-agent/1.18.11/byte-buddy-agent-1.18.11.jar</argLine>
                 </configuration>
             </plugin>
         </plugins>

@@ -16,6 +16,12 @@ public record AgentTaskView(
         String resultSummary,
         String error,
         String parentTaskId,
+        /**
+         * 工具卡归属：复合旅程父任务为自身的 {@code toolCallId}，
+         * 复合旅程子任务为其父任务的 {@code toolCallId}；
+         * 非旅程任务一律为空字符串（前端保持既有独立卡片渲染）。
+         */
+        String parentToolCallId,
         String anchorMessageId,
         long version,
         OffsetDateTime createdAt,

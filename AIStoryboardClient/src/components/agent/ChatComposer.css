@@ -25,6 +25,18 @@
   pointer-events: none;
 }
 
+/*
+ * 收缩态下输入卡是 flex-direction: row，这块附加行会作为横向兄弟排布，
+ * 而上面的 grid-template-rows: 0fr 只收高度、不收宽度 —— 结果是它虽然看不见，
+ * 却仍然按内容宽占位，把输入框往右挤（拖素材进来后最明显：附加行有参考图缩略图）。
+ * 只在输入卡自身收缩时才横向收掉；展开态的 column 布局保持整宽（那时它已经靠 0fr 隐掉了）。
+ */
+.chat-composer-card.is-collapsed .chat-composer-extra.is-collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 /* 横向收缩：底部同行内的左右两组控件（方案批准 / 上传、上下文占用 / 麦克风） */
 .chat-composer-extra--inline {
   display: inline-flex;

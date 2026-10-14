@@ -9,6 +9,7 @@ import {
 } from '../canvas/referenceTokenEditing';
 import type { ReferenceImageEntry, ReferenceImagePoolResult } from '../canvas/referenceImagePool';
 import { ReferenceStrip } from './ReferenceStrip';
+import { usePresence } from '../hooks/usePresence';
 
 /**
  * 即梦式富提示词输入：contenteditable，@图N token 渲染成内联 chip。
@@ -225,6 +226,7 @@ export const RichPromptInput = memo(function RichPromptInput({
   const cursorPosRef = useRef(0);
 
   const [showPicker, setShowPicker] = useState(false);
+  const pickerPresence = usePresence(showPicker, { duration: 140 });
   const [pickerAnchorRect, setPickerAnchorRect] = useState<DOMRect | null>(null);
   const atPositionRef = useRef<number | null>(null);
 
@@ -246,7 +248,7 @@ export const RichPromptInput = memo(function RichPromptInput({
         const compactToken = buildReferenceToken(token.imageNumber);
         html += `<span contenteditable="false" data-token="${compactToken}" data-image-number="${token.imageNumber}" data-media-type="${token.mediaType || 'image'}" title="${escapeHTML(raw)}" class="rt-chip nodrag" style="display:inline-flex;align-items:center;gap:4px;max-width:54px;min-width:38px;justify-content:center;overflow:hidden;box-sizing:border-box;background:rgba(244,244,245,0.16);border:1px solid rgba(244,244,245,0.35);border-radius:6px;padding:1px 6px 1px 8px;font-size:12px;line-height:20px;color:var(--acid);font-weight:500;white-space:nowrap;vertical-align:middle;user-select:none;margin:0 1px">${label}<span data-chip-delete style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex:0 0 14px;border-radius:50%;font-size:10px;color:var(--acid);cursor:pointer;margin-left:2px;opacity:0.7">×</span></span>`;
       } else {
-        html += `<span style="background:rgba(234,88,12,0.15);border:1px solid rgba(234,88,12,0.3);border-radius:4px;padding:0 4px;color:var(--text-muted);text-decoration:line-through;font-size:12px">${escapeHTML(token.text)}</span>`;
+        html += `<span style="background:rgba(114,114,114,0.15);border:1px solid rgba(114,114,114,0.3);border-radius:4px;padding:0 4px;color:var(--text-muted);text-decoration:line-through;font-size:12px">${escapeHTML(token.text)}</span>`;
       }
       lastIndex = token.end;
     }
@@ -465,13 +467,13 @@ export const RichPromptInput = memo(function RichPromptInput({
           }}
         />
         {!value && (
-          <div style={{ position: 'absolute', top: '6px', left: '8px', fontSize: '14px', lineHeight: '22px', color: 'rgba(238,240,223,.4)', pointerEvents: 'none', padding: 0 }}>
+          <div style={{ position: 'absolute', top: '6px', left: '8px', fontSize: '14px', lineHeight: '22px', color: 'rgba(238,238,238,.4)', pointerEvents: 'none', padding: 0 }}>
             {placeholder}
           </div>
         )}
       </div>
-      {showPicker && createPortal(
-        <div style={{ position: 'fixed', left: (pickerAnchorRect?.left ?? 0), top: (pickerAnchorRect?.top ?? 0) + 2, zIndex: 999 }} className="nodrag">
+      {pickerPresence.mounted && createPortal(
+        <div data-present={pickerPresence.present} className="nodrag motion-presence">
           <ReferencePicker entries={pool.entries} onSelect={handlePickerSelect} onClose={handlePickerClose} filterText={filterText} />
         </div>,
         document.body

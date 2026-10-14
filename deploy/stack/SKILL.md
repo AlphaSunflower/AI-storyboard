@@ -70,7 +70,7 @@ metadata:
 
 ### 其它外部依赖
 
-- Agent 联网检索：Firecrawl `https://api.firecrawl.dev/v2/search`（`AGENTSCOPE_FIRECRAWL_API_KEY`）
+- Agent 联网检索：默认自托管 SearXNG（`AGENTSCOPE_SEARXNG_URL`，`settings.yml` 需开 `search.formats: [html, json]`）；可选 DeepSeek 原生 `web_search`（Anthropic 兼容 Messages + `web_search_20250305`，`AGENTSCOPE_WEB_SEARCH_API_KEY`）
 - 沙箱出网白名单（经 squid 代理）：`.pypi.org`、`.pythonhosted.org`（其它域名一律拒绝）
 - 仅构建期使用：npm 镜像 `registry.npmmirror.com`、apt 镜像 `mirrors.aliyun.com`、Docker 基础镜像（迁移后无需联网）
 
@@ -83,7 +83,7 @@ metadata:
 - 图像生成与改图（文生图/图生图/批量），视频生成与合并（ffmpeg 已内置）
 - 画布编排与执行（建节点/连线/布局/结果槽 + 触发执行；执行命令经 canvas 服务的信箱投给浏览器落地）
 - 文档解析（Tika：docx/pdf/xlsx/pptx/md）、资产库检索与引用
-- 联网检索（Firecrawl web_search / web_fetch）
+- 联网检索（SearXNG 自托管 web_search / web_fetch，抓取页转 Markdown；可切 DeepSeek 原生搜索）
 - 沙箱执行（Python/shell，`sandbox-runner` 容器内，只读根文件系统 + 出网白名单）
 - 异步任务与任务中心（task_list/output/cancel、wait_async_results）、HITL 人工确认（request_human_input）
 - 多智能体协作（agent_spawn / agent_send / agent_list）、计划模式（plan_enter/plan_write）、todo 清单

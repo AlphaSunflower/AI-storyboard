@@ -1,5 +1,5 @@
 import {
-  Clapperboard, FileText, Image as ImageIcon, LayoutGrid, Layers, Merge, MessageSquare,
+  Clapperboard, FileText, Film, Image as ImageIcon, LayoutGrid, Layers, ListVideo, MessageSquare,
   Sparkles, Type, Video, Wand2,
 } from 'lucide-react';
 
@@ -28,8 +28,14 @@ const KIND_ICONS: Record<string, typeof Type> = {
   imageToVideo: Video,
   firstLastFrameToVideo: Video,
   referenceToVideo: Video,
-  videoGeneration: Video,
-  videoMerge: Merge,
+  // 左侧工具栏只有图标没有文字，撞图就等于认不出来：
+  // 生成类走「AI 生成」语义（Sparkles / Wand2），与「图片」「视频」本体区分开。
+  videoGeneration: Wand2,
+  // shot 原先落到 ImageIcon 兜底，和「图片」是同一个图标。镜头用胶片格。
+  shot: Film,
+  // videoMerge 原先用 Merge——它渲染出来是一支朝上的箭头，看着像「上传」。
+  // 合并多段视频用「片段列表」更直白。
+  videoMerge: ListVideo,
 };
 
 export function nodeKindIcon(kind: string | undefined) {

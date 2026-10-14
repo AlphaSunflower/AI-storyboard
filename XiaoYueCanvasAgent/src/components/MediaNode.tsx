@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Handle, NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
+import { NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
 import { Image as ImageIcon, Minimize2, PanelRightOpen } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import type { CanvasNode } from '../types';
@@ -16,12 +16,14 @@ import { StoryboardPlannerView } from './nodes/StoryboardPlannerView';
 import { ShotNodeView } from './nodes/ShotNodeView';
 import { BatchImageRefineView } from './nodes/BatchImageRefineView';
 import { GroupedNodeMenu } from './ui/GroupedNodeMenu';
-import { getNodeDefinition } from '../canvas/graphContracts';
+import { TEXT_EDIT_NODE_KINDS, getNodeDefinition } from '../canvas/graphContracts';
 import { useCanvasUi } from '../canvas/CanvasUiContext';
 import { useNodeTextDraft } from '../hooks/useNodeTextDraft';
+import { usePresence } from '../hooks/usePresence';
 import { VideoMergeNode } from './VideoMergeNode';
 import { CompactNodeView } from './nodes/CompactNodeView';
 import { NodeExternalTitle } from './nodes/NodeExternalTitle';
+import { NodePortHandles } from './nodes/NodePortHandles';
 
 type MediaNodeProps = NodeProps<CanvasNode> & {
   displayCollapsed?: boolean;
@@ -51,6 +53,8 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
   const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const [draftFeedback, setDraftFeedback] = useState<string | null>(null);
   const [childMenu, setChildMenu] = useState(false);
+  // 节点下方「+ 添加子节点」菜单：关闭时先退场再卸载
+  const childMenuPresence = usePresence(childMenu, { duration: 140 });
   const { openInspector } = useCanvasUi();
   const promptDraft = useNodeTextDraft({
     nodeId: `${id}:prompt`,
@@ -156,7 +160,7 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
           <ImageGenNode id={id} data={data} selected={selected} updateNode={updateNode} textDraft={promptDraft.value} setTextDraft={promptDraft.setValue} referencePool={referencePool!} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
         ) : data.kind === 'videoGen' || data.kind === 'textToVideo' || data.kind === 'imageToVideo' || data.kind === 'firstLastFrameToVideo' || data.kind === 'referenceToVideo' || data.kind === 'videoGeneration' ? (
           <VideoGenNode id={id} data={data} selected={selected} updateNode={updateNode} textDraft={promptDraft.value} setTextDraft={promptDraft.setValue} referencePool={referencePool} deleteReference={deleteReference} draftFeedback={draftFeedback} setDraftFeedback={setDraftFeedback} />
-        ) : data.kind === 'text' || data.kind === 'note' || data.kind === 'prompt' ? (
+        ) : TEXT_EDIT_NODE_KINDS.has(String(data.kind)) ? (
           <TextNotePromptNode id={id} data={data} updateNode={updateNode} />
         ) : data.kind === 'sequence' ? (
           <SequenceNode id={id} data={data} updateNode={updateNode} onOpenChildMenu={() => setChildMenu(true)} />
@@ -169,28 +173,9 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
         )}
         </div>
       </div>
-      {definition ? definition.inputs.map((input, index) => (
-        <Handle
-          key={input.id}
-          className="node-handle"
-          id={input.id}
-          type="target"
-          position={Position.Left}
-          style={{ top: `${((index + 1) / (definition.inputs.length + 1)) * 100}%` }}
-        />
-      )) : <Handle className="node-handle" id="left" type="target" position={Position.Left} />}
-      {definition ? definition.outputs.map((output, index) => (
-        <Handle
-          key={output.id}
-          className="node-handle"
-          id={output.id}
-          type="source"
-          position={Position.Right}
-          style={{ top: `${((index + 1) / (definition.outputs.length + 1)) * 100}%` }}
-        />
-      )) : <Handle className="node-handle" id="right" type="source" position={Position.Right} />}
-      {childMenu && (
-        <NodeToolbar nodeId={id} isVisible position={Position.Bottom} align="center" offset={12} className="node-add-toolbar nodrag nowheel" onPointerDown={(e) => e.stopPropagation()}>
+      <NodePortHandles nodeId={id} nodeKind={data.kind} definition={definition} />
+      {childMenuPresence.mounted && (
+        <NodeToolbar nodeId={id} isVisible position={Position.Bottom} align="center" offset={12} className="node-add-toolbar motion-presence nodrag nowheel" data-present={childMenuPresence.present} onPointerDown={(e) => e.stopPropagation()}>
           <GroupedNodeMenu onAdd={(kind) => {
             const cid = addNode(kind as any, { x: node.position.x + 40, y: node.position.y + (height ?? 250) + 60 });
             updateNode(id, { children: [...((data.children ?? []) as string[]), cid] });
@@ -218,7 +203,7 @@ function FullMediaNodeComponent({ id, data, selected, width, height, positionAbs
 
 function MediaNodeComponent(props: MediaNodeProps) {
   if (props.displayCollapsed) {
-    return <CompactNodeView data={props.data} selected={Boolean(props.selected)} />;
+    return <CompactNodeView nodeId={props.id} data={props.data} selected={Boolean(props.selected)} />;
   }
   return <FullMediaNodeComponent {...props} />;
 }

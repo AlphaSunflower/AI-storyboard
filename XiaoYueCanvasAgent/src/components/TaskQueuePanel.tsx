@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CircleStop, Clock3, History, ListTodo, LoaderCircle, X } from 'lucide-react';
+import { AlertTriangle, CircleStop, Clock3, ListTodo, LoaderCircle, X } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { cancelCanvasGeneration } from '../services/jobRunner';
 import { generationRecordProgress, selectActiveGenerationRecords } from '../canvas/generationRecords';
 import { multiAngleLabel } from '../canvas/multiAngle';
+import { usePresence } from '../hooks/usePresence';
 import type { GenerationRecord } from '../types';
 
 const STATUS_LABEL: Record<GenerationRecord['status'], string> = {
@@ -25,12 +26,9 @@ const actionLabel: Record<string, string> = {
   'agent.request': '设计助理',
 };
 
-export const TaskQueuePanel = memo(function TaskQueuePanel({
-  onOpenRecords,
-}: {
-  onOpenRecords?: () => void;
-}) {
+export const TaskQueuePanel = memo(function TaskQueuePanel() {
   const [open, setOpen] = useState(false);
+  const panel = usePresence(open, { duration: 140 });
   const [notice, setNotice] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
   const rootRef = useRef<HTMLDivElement>(null);
@@ -69,20 +67,15 @@ export const TaskQueuePanel = memo(function TaskQueuePanel({
   const nodeLabel = (nodeId: string) => nodes.find((node) => node.id === nodeId)?.data.label ?? '画布任务';
   return (
     <div ref={rootRef} className="task-queue-shell">
-      <button className="task-queue-trigger" aria-label="任务队列" aria-expanded={open}
+      <button className="canvas-quick-action" aria-label="任务队列" aria-expanded={open}
         onClick={() => setOpen((value) => !value)}>
         <ListTodo size={18} />
-        {active.length > 0 && <span className="task-queue-trigger__badge">{active.length}</span>}
+        {active.length > 0 && <span className="canvas-quick-action__badge">{active.length}</span>}
       </button>
-      {open && (
-        <div className="task-queue-panel" role="dialog" aria-label="任务队列">
+      {panel.mounted && (
+        <div className="task-queue-panel motion-presence" data-present={panel.present} role="dialog" aria-label="任务队列">
           <header className="task-queue-panel__head">
             <div><strong>任务队列</strong><small>{active.length ? `${active.length} 个真实任务执行中` : '当前空闲'}</small></div>
-            {onOpenRecords && (
-              <button className="task-queue-panel__records" onClick={onOpenRecords}>
-                <History size={13} /> 生成记录
-              </button>
-            )}
             <button aria-label="关闭任务队列" onClick={() => setOpen(false)}><X size={15} /></button>
           </header>
           {notice && <div className="task-queue-panel__notice"><AlertTriangle size={13} />{notice}</div>}

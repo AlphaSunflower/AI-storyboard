@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { NodeToolbar, Position } from '@xyflow/react';
+import { NodeToolbar, Position, useStore } from '@xyflow/react';
+import { usePresence } from '../../hooks/usePresence';
 
 /**
  * 画布节点统一外壳（除文字节点外全部节点共用）：
@@ -61,17 +62,31 @@ export function NodeFloatPanel({
   className?: string;
   children: ReactNode;
 }) {
+  // 复刻 React Flow 的原生显示规则（单选本节点才显示），但把「显示」拆成
+  // mounted / present 两步，取消选中时先播退场再卸载，而不是直接消失。
+  const selected = useStore((state) => state.nodes?.find((node) => node.id === nodeId)?.selected ?? false);
+  const singleSelection = useStore((state) => (state.nodes ?? []).filter((node) => node.selected).length === 1);
+  // 进场：keyframe 动画（见 CSS .motion-presence）；退场：立即卸载。
+  // 节点面板是画布上最频繁切换的浮层，多留的挂载窗口会把画布容器撑出额外的可滚动区域，
+  // 让浏览器/自动化的一次 scrollIntoView 静默移动整张画布（React Flow 并不知情）。
+  const presence = usePresence(isVisible ?? (selected && singleSelection), { duration: 130 });
   return (
     <NodeToolbar
       nodeId={nodeId}
-      isVisible={isVisible}
+      isVisible={presence.mounted}
       position={Position.Bottom}
       align="center"
       offset={14}
-      className="node-float-toolbar"
+      // 外壳只带「让开点击」的退场态（自带 pointer-events:auto，不退场的话关闭后还能挡住画布点击）；
+      // 位移/缩放交给里面那层，避免外壳和面板各动一次互相抵消。
+      className="node-float-toolbar motion-passthrough"
+      data-present={presence.present}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className={`node-float-panel nodrag nowheel${className ? ` ${className}` : ''}`}>
+      <div
+        className={`node-float-panel nodrag nowheel motion-presence${className ? ` ${className}` : ''}`}
+        data-present={presence.present}
+      >
         {children}
       </div>
     </NodeToolbar>

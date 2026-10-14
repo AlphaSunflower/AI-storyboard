@@ -17,6 +17,8 @@ vi.mock('@xyflow/react', () => ({
   NodeToolbar: ({ children, className, isVisible }: { children?: React.ReactNode; className?: string; isVisible?: boolean }) =>
     isVisible === false ? null : <div className={className}>{children}</div>,
   Position: { Top: 'top', Bottom: 'bottom' },
+  useStore: (selector: (state: { nodes: unknown }) => unknown) =>
+    selector({ nodes: { find: () => ({ id: 'node', selected: true }), filter: () => [{}] } }),
 }));
 
 vi.mock('../RichPromptInput', () => ({

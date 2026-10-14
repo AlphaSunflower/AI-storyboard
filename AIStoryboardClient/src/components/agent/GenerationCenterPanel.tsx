@@ -449,6 +449,8 @@ export function GenerationCenterPanel({
                 active={open}
                 onOpenEditor={openEditor}
                 conversationId={activeConversationId ?? '__no_active_conversation__'}
+                /* 侧边栏贴屏幕右缘，预览只能往左展开才不会盖住网格本身。 */
+                previewPlacement="left"
               />
             </div>
           )}

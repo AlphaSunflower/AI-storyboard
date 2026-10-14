@@ -9,24 +9,42 @@ import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.ai.agent.agentscope.workflow.AgentWorkflowService;
 import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
 import com.moon.moonagent.ai.agent.creative.ConstraintLedger;
-import com.moon.moonagent.ai.agent.creative.CreativeMode;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.middleware.MiddlewareBase;
 import reactor.core.publisher.Mono;
-import lombok.RequiredArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
 
-@RequiredArgsConstructor
 final class TurnContextMiddleware implements MiddlewareBase {
 
     private final AgentWorkflowService workflows;
     private final ProjectCreativeContextService creativeContext;
     private final ConstraintExtractionService constraints;
     private final AgentDocumentService documents;
+    /** 能力可用性上报器；未接线时为 null，此时不注入能力块。 */
+    private final TurnCapabilityReporter capabilities;
+
+    TurnContextMiddleware(AgentWorkflowService workflows,
+                          ProjectCreativeContextService creativeContext,
+                          ConstraintExtractionService constraints,
+                          AgentDocumentService documents) {
+        this(workflows, creativeContext, constraints, documents, null);
+    }
+
+    TurnContextMiddleware(AgentWorkflowService workflows,
+                          ProjectCreativeContextService creativeContext,
+                          ConstraintExtractionService constraints,
+                          AgentDocumentService documents,
+                          TurnCapabilityReporter capabilities) {
+        this.workflows = workflows;
+        this.creativeContext = creativeContext;
+        this.constraints = constraints;
+        this.documents = documents;
+        this.capabilities = capabilities;
+    }
 
     @Override
     public Mono<String> onSystemPrompt(Agent agent, RuntimeContext context, String prompt) {
@@ -133,14 +151,64 @@ final class TurnContextMiddleware implements MiddlewareBase {
         }
         ConstraintLedger ledger = constraints.extract(request.getContent());
         lines.add("Creative mode: " + ledger.mode());
-        if (ledger.mode() == CreativeMode.STRICT) {
-            lines.add("Strict mode: preserve all HARD constraints. Do not silently weaken, drop "
-                    + "or reinterpret them. If a hard constraint conflicts or is unverifiable, "
-                    + "ask the user before generating.");
-        }
+        appendConstraintLedger(lines, ledger);
+        appendCapabilityContext(lines);
         if (lines.isEmpty()) return Mono.just(prompt);
         return Mono.just((prompt == null ? "" : prompt)
                 + "\n\n<turn-context>\n" + String.join("\n", lines) + "\n</turn-context>");
+    }
+
+    /**
+     * 把机器已判定的约束账本原样交给模型，替代提示词里「自行区分 HARD 与 SOFT」的散文化要求。
+     * 无可验证硬约束且未识别到任何条目时声明 CLARIFY，由全局提示词触发一次澄清。
+     */
+    private static void appendConstraintLedger(List<String> lines, ConstraintLedger ledger) {
+        boolean clarify = ledger.hard().isEmpty() && ledger.all().isEmpty()
+                && !ledger.unresolved().isEmpty();
+        String mode = clarify ? "CLARIFY" : ledger.mode().name();
+        List<String> body = new ArrayList<>();
+        if (!ledger.hard().isEmpty()) {
+            body.add("Hard (不可修改、不可替换、不可删除):");
+            ledger.hard().forEach(item -> body.add("- " + ledgerItem(item)));
+        }
+        if (!ledger.soft().isEmpty()) {
+            body.add("Soft (可调整，但需说明理由):");
+            ledger.soft().forEach(item -> body.add("- " + ledgerItem(item)));
+        }
+        if (!ledger.unresolved().isEmpty()) {
+            body.add("Needs clarification (生成前必须与用户确认):");
+            ledger.unresolved().forEach(item -> body.add("- " + item));
+        }
+        lines.add("<constraint-ledger mode=\"" + mode + "\">");
+        if (body.isEmpty()) {
+            lines.add("本轮没有识别到可验证的硬约束或软约束。");
+        } else {
+            lines.addAll(body);
+        }
+        lines.add("</constraint-ledger>");
+    }
+
+    private static String ledgerItem(ConstraintLedger.ConstraintItem item) {
+        StringBuilder value = new StringBuilder(item.statement());
+        if (item.value() != null && !item.value().isBlank()) {
+            value.append("（取值：").append(item.value()).append("）");
+        }
+        if (item.verifier() != null && !item.verifier().isBlank()) {
+            value.append("（校验方式：").append(item.verifier()).append("）");
+        }
+        return value.toString();
+    }
+
+    /**
+     * 声明本轮真实可用的能力与子智能体，避免提示词静态点名在能力缺席时制造虚假承诺。
+     */
+    private void appendCapabilityContext(List<String> lines) {
+        if (capabilities == null) return;
+        String report = capabilities.capabilityReport();
+        if (report == null || report.isBlank()) return;
+        lines.add("<capabilities>");
+        lines.add(report);
+        lines.add("</capabilities>");
     }
 
     /**
