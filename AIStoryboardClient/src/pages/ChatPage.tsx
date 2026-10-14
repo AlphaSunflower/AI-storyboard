@@ -813,8 +813,8 @@ export function ChatPage() {
   /** 输入卡宽度：收缩态横向收窄，「回到底部」跟着卡片右边缘走 */
   const composerCardMax = composerCollapsed ? DS.maxContentCompact : DS.maxContent;
   /** 消息列底部留白：输入卡 + 底部状态栏是覆盖层，留够高度让最后一条能完整滚出来；小窗收紧一些 */
-  const stageBottomPad = embed ? 182 : 216;
-  const mobileStageBottomPad = 200;
+  const stageBottomPad = embed ? 150 : 176;
+  const mobileStageBottomPad = 164;
   const scrollToBottomRight = (padLeft: number, padRight: number, cardMax: number = DS.maxContent) =>
     `calc(${padRight}px + max(0px, (100% - ${padLeft}px - ${padRight}px - ${cardMax}px) / 2))`;
 
@@ -1726,7 +1726,7 @@ export function ChatPage() {
                 </button>
               )}
               <div className="chat-composer-dock" style={{
-                padding: '8px 16px 10px',
+                padding: '8px 16px 4px',
                 paddingRight: dockPadRight,
                 background: 'transparent',
                 transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
