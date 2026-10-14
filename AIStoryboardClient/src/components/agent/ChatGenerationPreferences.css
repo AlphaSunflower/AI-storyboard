@@ -180,16 +180,21 @@
 }
 
 .chat-generation-prefs__selects {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 横向自适应：模型 chip 按内容撑开（模型名完整显示、不省略），清晰度吃掉剩余宽度 */
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
-/* 下拉根节点默认 inline-block 会按内容撑宽、压住旁边的控件：这里占满整列，超长名走省略 */
+/* 下拉根节点按内容宽度参与 flex 布局：既不会按内容溢出压住旁边控件，也不写死等分宽度 */
 .chat-generation-prefs__selects > .glide-select {
-  display: block;
-  width: 100%;
+  display: inline-block;
+  flex: 0 1 auto;
   min-width: 0;
+}
+
+.chat-generation-prefs__selects > .glide-select:last-child {
+  flex: 1 1 auto;
 }
 
 .chat-generation-prefs__hint {
