@@ -95,6 +95,11 @@ public class AIController {
         result.put("videoModels",
                 GenerationPreferenceCapabilities.decorate(gatewayModelService.fetchModels("video"), "video"));
         result.put("understandingModels", gatewayModelService.fetchModels("vision"));
+        // 拉取失败时说明原因（否则「网关没配模型」与「网关不可达」在界面上无法区分）
+        String modelsError = gatewayModelService.lastModelFetchError("image");
+        if (modelsError != null && !modelsError.isBlank()) {
+            result.put("modelsError", modelsError);
+        }
         return ApiResponse.ok(result);
     }
 }

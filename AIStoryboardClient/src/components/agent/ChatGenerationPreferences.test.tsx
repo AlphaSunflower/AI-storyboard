@@ -97,6 +97,18 @@ describe('ChatGenerationPreferences', () => {
     expect((screen.getByRole('combobox', { name: '清晰度' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('网关拉取失败时把原因显示出来', async () => {
+    vi.spyOn(aiApi, 'aiModels').mockResolvedValue({
+      data: { data: { imageModels: [], videoModels: [], understandingModels: [], modelsError: '网关返回 401：未授权' } },
+    } as never);
+    render(<ChatGenerationPreferences />);
+    open();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toContain('网关未返回模型：网关返回 401：未授权');
+    });
+  });
+
   it('关掉自动后 chip 变「自定义」，选择比例写入本地存储', async () => {
     render(<ChatGenerationPreferences />);
     open();

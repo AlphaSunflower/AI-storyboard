@@ -38,6 +38,8 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
     video: ModelOption[];
   } | null>(null);
   const [modelsState, setModelsState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  /** 模型列表拉不到时的可读原因（网关 4xx/连接失败），直接展示，便于排障 */
+  const [modelsError, setModelsError] = useState('');
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<MediaKind>('image');
   const rootRef = useRef<HTMLDivElement>(null);
@@ -82,14 +84,17 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
           setModelsState('failed');
           return;
         }
+        setModelsError(typeof data.modelsError === 'string' ? data.modelsError : '');
         setGatewayModels({
           image: (data.imageModels ?? []) as GatewayModelOption[] as ModelOption[],
           video: (data.videoModels ?? []) as GatewayModelOption[] as ModelOption[],
         });
         setModelsState('ready');
-      } catch {
+      } catch (error) {
         // 网关不可达：列表留空，不拿静态兜底冒充真实模型
-        if (!cancelled) setModelsState('failed');
+        if (cancelled) return;
+        setModelsState('failed');
+        setModelsError(error instanceof Error ? error.message : '模型列表请求失败');
       }
     })();
     return () => {
@@ -174,6 +179,9 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
   const ratioOptions = capability?.ratioOptions ?? [];
   const clarityOptions = capability?.clarity?.options ?? [];
   const clarityLabel = capability?.clarity?.label ?? '清晰度';
+  const modelsHint = models.length > 0
+    ? ''
+    : modelsError || (modelsState === 'failed' ? '模型列表请求失败' : '');
 
   return (
     <>
@@ -308,6 +316,11 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
                 align="right"
               />
             </div>
+            {modelsHint ? (
+              <div className="chat-generation-prefs__hint" role="status">
+                网关未返回模型：{modelsHint}
+              </div>
+            ) : null}
           </div>
 
           <div className="chat-generation-prefs__foot">

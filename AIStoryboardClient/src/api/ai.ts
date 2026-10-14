@@ -66,5 +66,11 @@ export const aiApi = {
 
   // 网关模型列表（生图/生视频，来自 LLM 网关路由 type 过滤；网关不可用时为空数组；params 为 JSON 字符串）
   aiModels: () =>
-    client.get<ApiResponse<{ imageModels: GatewayModelOption[]; videoModels: GatewayModelOption[]; understandingModels: GatewayModelOption[] }>>('/ai/models'),
+    client.get<ApiResponse<{
+      imageModels: GatewayModelOption[];
+      videoModels: GatewayModelOption[];
+      understandingModels: GatewayModelOption[];
+      /** 网关模型列表拉取失败原因（成功时不带）；用于界面提示与排障 */
+      modelsError?: string;
+    }>>('/ai/models'),
 };

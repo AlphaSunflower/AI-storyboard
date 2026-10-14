@@ -64,6 +64,8 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     /** 模型名 → 上下文窗口 的短 TTL 缓存：modelName → [窗口, 过期时间毫秒] */
     private final Map<String, long[]> contextWindowCache = new ConcurrentHashMap<>();
     private final Map<String, ModelListCacheEntry> modelListCache = new ConcurrentHashMap<>();
+    /** 最近一次模型列表拉取失败原因：type → 可读原因（成功时清除） */
+    private final Map<String, String> modelFetchErrors = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<List<Map<String, String>>>>
             modelListInflight = new ConcurrentHashMap<>();
 
@@ -99,15 +101,19 @@ public class GatewayModelServiceImpl implements GatewayModelService {
 
     private List<Map<String, String>> fetchModelsRemote(String type) {
         List<Map<String, String>> models = new ArrayList<>();
+        String endpoint = config.getGatewayBaseUrl() + "/v1/models?type=" + type;
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(config.getGatewayBaseUrl() + "/v1/models?type=" + type))
+                    .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + config.getGatewayApiKey())
                     .timeout(Duration.ofSeconds(config.getGatewayModelTimeout()))
                     .GET()
                     .build();
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                String reason = "网关返回 " + resp.statusCode() + "：" + head(resp.body());
+                modelFetchErrors.put(type, reason);
+                log.warn("模型列表拉取失败: type={}, url={}, {}", type, endpoint, reason);
                 return models;
             }
             JsonNode data = objectMapper.readTree(resp.body()).path("data");
@@ -129,10 +135,46 @@ public class GatewayModelServiceImpl implements GatewayModelService {
                     }
                 }
             }
+            modelFetchErrors.remove(type);
         } catch (Exception e) {
-            // 网关不可达/解析失败：返回空列表
+            // 网关不可达/配置缺省/解析失败：返回空列表
+            String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
+            modelFetchErrors.put(type, reason);
+            log.warn("模型列表拉取异常: type={}, url={}, {}", type, endpoint, reason);
         }
         return models;
+    }
+
+    @Override
+    public String lastModelFetchError(String type) {
+        return type == null ? null : modelFetchErrors.get(type);
+    }
+
+    private static String head(String body) {
+        if (body == null || body.isBlank()) return "(空响应体)";
+        String trimmed = body.strip();
+        return trimmed.length() <= 200 ? trimmed : trimmed.substring(0, 200) + "…";
+    }
+
+    /**
+     * 出站 HttpClient：容器里注入了 {@code gatewayHttpClient} 时用它，否则就地建一个。
+     *
+     * <p>主后端（AIStoryboardBackend）只显式装配 agent-core 的服务、不扫描
+     * {@code com.moon.moonagent.config}，该 Bean 不存在；字段注入是 {@code required=false}，
+     * 直接使用会 NPE 并被吞成「模型列表为空」。这里与 ImageGenerationServiceImpl /
+     * VideoPollExecutor 保持同样的懒加载兜底。
+     */
+    private HttpClient httpClient() {
+        HttpClient client = httpClient;
+        if (client != null) return client;
+        synchronized (this) {
+            if (httpClient == null) {
+                httpClient = HttpClient.newBuilder()
+                        .connectTimeout(java.time.Duration.ofSeconds(10))
+                        .build();
+            }
+            return httpClient;
+        }
     }
 
     private record ModelListCacheEntry(List<Map<String, String>> models, long expiresAt) {
@@ -183,7 +225,7 @@ public class GatewayModelServiceImpl implements GatewayModelService {
                     .timeout(Duration.ofSeconds(config.getGatewayModelTimeout()))
                     .GET()
                     .build();
-            HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> resp = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() < 200 || resp.statusCode() >= 300) return null;
             JsonNode data = objectMapper.readTree(resp.body()).path("data");
             if (data.isArray()) {

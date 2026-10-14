@@ -33,6 +33,17 @@ public interface GatewayModelService {
     String getDefaultTextModel();
 
     /**
+     * 最近一次模型列表拉取失败的原因（网关返回非 2xx / 连接失败 / 解析失败），
+     * 供前端提示与排障；成功拉取或尚未尝试时返回 {@code null}。
+     *
+     * <p>模型列表拉取失败时接口会退化为空列表（不阻塞主流程），若没有这个原因，
+     * 「网关没数据」与「网关不可达」在界面上无法区分。
+     */
+    default String lastModelFetchError(String type) {
+        return null;
+    }
+
+    /**
      * 模型上下文窗口（token 数）：权威源为网关 {@code model_params.context_window}，
      * 经 {@code GET {gateway}/v1/models?type=text} 的 {@code data[].contextWindow} 透出。
      *

@@ -161,6 +161,13 @@
   gap: 8px;
 }
 
+.chat-generation-prefs__hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-warning, rgb(212, 160, 23));
+  word-break: break-word;
+}
+
 .chat-generation-prefs__foot {
   display: flex;
   align-items: center;
