@@ -480,6 +480,7 @@ export interface AgentPage<T> {
   imageTotal?: number;
   videoTotal?: number;
   documentTotal?: number;
+  otherTotal?: number;
   mediaTotal?: number;
   page: number;
   size: number;

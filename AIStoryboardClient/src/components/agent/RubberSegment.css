@@ -1,0 +1,99 @@
+.rubber-segment {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-canvas);
+}
+
+.rubber-segment__pill {
+  position: absolute;
+  top: 4px;
+  height: calc(100% - 8px);
+  border-radius: 8px;
+  background: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(204, 120, 92, 0.26);
+  transform-origin: center;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.rubber-segment__item {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.rubber-segment__item:hover {
+  color: var(--color-ink);
+}
+
+.rubber-segment__item.is-active,
+.rubber-segment__item.is-active:hover {
+  color: var(--color-on-primary);
+}
+
+.rubber-segment__item > svg {
+  flex-shrink: 0;
+}
+
+.rubber-segment__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rubber-segment__item b {
+  flex-shrink: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-surface-soft);
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+  text-align: center;
+}
+
+.rubber-segment__item.is-active b {
+  background: rgba(255, 255, 255, 0.24);
+  color: var(--color-on-primary);
+}
+
+/* 断点与 useIsMobile 的 MOBILE_BREAKPOINT 保持一致。 */
+@media (max-width: 768px) {
+  .rubber-segment__item {
+    padding: 0 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rubber-segment__item {
+    transition: none;
+  }
+
+  .rubber-segment__pill {
+    will-change: auto;
+  }
+}

@@ -2,7 +2,29 @@ import type { AgentAsset, AgentAttachment, AgentPage } from '../../api/agent';
 import { documentMimeType } from '../../lib/documentPreview';
 import { parseResultUrls } from '../../stores/generationRecordsStore';
 
-export type AssetsTab = 'image' | 'video' | 'document' | 'storyboard';
+export type AssetsTab = 'all' | 'image' | 'video' | 'document' | 'storyboard' | 'other';
+
+/** 会话资产的类型分桶；other 兜住 image/video/document 之外的资产（上传参考图等）。 */
+export interface AgentAssetBuckets {
+  all: AgentAsset[];
+  image: AgentAsset[];
+  video: AgentAsset[];
+  document: AgentAsset[];
+  other: AgentAsset[];
+}
+
+const MEDIA_TYPES = new Set<AgentAsset['type']>(['image', 'video', 'document']);
+
+export function splitAgentAssets(assets: AgentPage<AgentAsset> | null): AgentAssetBuckets {
+  const records = assets?.records ?? [];
+  return {
+    all: records,
+    image: records.filter((asset) => asset.type === 'image'),
+    video: records.filter((asset) => asset.type === 'video'),
+    document: records.filter((asset) => asset.type === 'document'),
+    other: records.filter((asset) => !MEDIA_TYPES.has(asset.type)),
+  };
+}
 
 export function assetUrls(asset: AgentAsset): string[] {
   const parsed = parseResultUrls(asset.resultUrls ?? null);
@@ -32,14 +54,16 @@ export function documentAttachmentForAsset(asset: AgentAsset, url: string): Agen
 }
 
 export function getAgentAssetCounts(assets: AgentPage<AgentAsset> | null) {
-  const records = assets?.records ?? [];
-  const imageRecords = records.filter((asset) => asset.type === 'image');
-  const videoRecords = records.filter((asset) => asset.type === 'video');
-  const documentRecords = records.filter((asset) => asset.type === 'document');
-  return {
-    image: assets?.imageTotal ?? imageRecords.reduce((total, asset) => total + assetUrls(asset).length, 0),
-    video: assets?.videoTotal ?? videoRecords.reduce((total, asset) => total + assetUrls(asset).length, 0),
-    document: assets?.documentTotal
-      ?? documentRecords.reduce((total, asset) => total + assetUrls(asset).length, 0),
-  };
+  const buckets = splitAgentAssets(assets);
+  const countUrls = (list: AgentAsset[]) =>
+    list.reduce((total, asset) => total + assetUrls(asset).length, 0);
+
+  const image = assets?.imageTotal ?? countUrls(buckets.image);
+  const video = assets?.videoTotal ?? countUrls(buckets.video);
+  const document = assets?.documentTotal ?? countUrls(buckets.document);
+  const other = assets?.otherTotal ?? countUrls(buckets.other);
+
+  // 「全部」按各分类求和，而不是分页 total：total 按记录行算，分类计数按 URL 展开算，
+  // 两者单位不同，混用会让筛选栏的角标对不上。
+  return { all: image + video + document + other, image, video, document, other };
 }

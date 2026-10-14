@@ -244,9 +244,13 @@ export function EditorPage() {
         <PreviewPanel />
       </div>
 
-      {/* 子窗口内不展示生成中心，避免与外部应用窗口重复。 */}
+      {/* 子窗口内不展示生成中心，避免与外部应用窗口重复。
+          编辑器不挤压三栏，生成中心在这里是覆盖式抽屉，不参与内容让位。 */}
       {!embedded && (
-        <GenerationCenterPanel onOpenRecords={() => setRecordsOpen(true)} />
+        <GenerationCenterPanel
+          onOpenRecords={() => setRecordsOpen(true)}
+          recordsOpen={recordsOpen}
+        />
       )}
       {!embedded && (
         <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />

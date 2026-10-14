@@ -2,20 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
-import { Check, ChevronRight, CircleAlert, CircleStop, FileText, Film, History, Images, LayoutList, ListTodo, LoaderCircle, X } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, CircleStop, History, Images, ListTodo, LoaderCircle, X } from 'lucide-react';
 import { isActiveTask, taskStatusLabel, useAgentStore } from '../../stores/agentStore';
+import { MOBILE_BREAKPOINT } from '../../hooks/useIsMobile';
 import { useProjectStore } from '../../stores/projectStore';
 import { agentApi, type GenerationRecord } from '../../api/agent';
 import { useDragSnap } from '../../hooks/useDragSnap';
 import { Tooltip } from '../common/Tooltip';
-import {
-  AgentAssetBrowser,
-} from './AgentAssetsPanel';
-import { getAgentAssetCounts, type AssetsTab } from './assetBrowserModel';
+import { AgentAssetBrowser } from './AgentAssetsPanel';
+import { AssetFilterNav } from './AssetFilterNav';
+import { RubberSegment, type RubberSegmentItem } from './RubberSegment';
+import type { AssetsTab } from './assetBrowserModel';
 import { partitionImageQueueTasks } from './generationCenterImageTasks';
 import './GenerationCenterPanel.css';
 
 export type GenerationCenterTab = 'active' | 'tasks' | AssetsTab;
+
+/** 停靠侧边栏宽度：宿主按这个值给消息列留白，必须与 CSS 保持一致。 */
+export const GENERATION_CENTER_WIDTH = 380;
+
+/** 窄屏断点与页面手机端断点共用，否则 721-768px 会「页面进了手机壳、侧边栏却还是非模态停靠」。 */
+const NARROW_VIEWPORT_QUERY = `(max-width: ${MOBILE_BREAKPOINT}px)`;
 
 const STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
@@ -27,8 +34,45 @@ const STATUS_LABEL: Record<string, string> = {
 
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 
+type SegmentKey = 'tasks' | 'assets' | 'records';
+type TaskView = 'active' | 'tasks';
+
+/** 把外部传入的 defaultTab 拆成「顶部段位 + 段内视图」。 */
+function resolveDefaultTab(tab: GenerationCenterTab): {
+  segment: SegmentKey;
+  taskView: TaskView;
+  assetFilter: AssetsTab;
+} {
+  if (tab === 'active') return { segment: 'tasks', taskView: 'active', assetFilter: 'all' };
+  if (tab === 'tasks') return { segment: 'tasks', taskView: 'tasks', assetFilter: 'all' };
+  return { segment: 'assets', taskView: 'active', assetFilter: tab };
+}
+
+/** jsdom 等宿主可能没有 matchMedia，缺失时按桌面布局处理。 */
+function matchesNarrowViewport(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia(NARROW_VIEWPORT_QUERY).matches;
+}
+
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(matchesNarrowViewport);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia(NARROW_VIEWPORT_QUERY);
+    const sync = () => setNarrow(query.matches);
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
+
+  return narrow;
+}
+
 /**
- * 生成中心：统一查看进行中的生成任务、图片、视频和分镜素材。
+ * 生成中心：右侧停靠侧边栏，统一查看进行中的生成任务、会话资产和生成记录。
+ * 顶部三段（生成任务 / 会话资产 / 生成记录），会话资产再按类型筛选。
  */
 export function GenerationCenterPanel({
   onOpenChange,
@@ -37,6 +81,8 @@ export function GenerationCenterPanel({
   bottom = 104,
   onOpenRecords,
   taskConversationId,
+  recordsOpen,
+  rightOffset = 0,
 }: {
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
@@ -45,22 +91,31 @@ export function GenerationCenterPanel({
   onOpenRecords?: () => void;
   /** 传入时会话内只展示该会话的智能体任务；传 null 表示当前没有会话。省略时保持项目范围。 */
   taskConversationId?: string | null;
+  /** 生成记录弹窗的开关；宿主传入后，弹窗关闭时记录段会自动回弹到上一段。 */
+  recordsOpen?: boolean;
+  /** 右侧让位（px）：有 app 子窗口时把侧边栏推到它左边，避免被固定定位的子窗口整条压住。 */
+  rightOffset?: number;
 }) {
   const navigate = useNavigate();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
-  const [tab, setTab] = useState<GenerationCenterTab>(defaultTab);
+  const [segment, setSegment] = useState<SegmentKey>('tasks');
+  const [taskView, setTaskView] = useState<TaskView>('active');
+  const [assetFilter, setAssetFilter] = useState<AssetsTab>('all');
+  const [recordsPill, setRecordsPill] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const hasOpenedRef = useRef(false);
+  const narrow = useNarrowViewport();
+
   const queue = useAgentStore((state) => state.storyboardVideoQueue);
   const refetch = useAgentStore((state) => state.refetchStoryboardVideoQueue);
   const cancel = useAgentStore((state) => state.cancelStoryboardVideoQueue);
   const imageQueue = useAgentStore((state) => state.storyboardImageQueue);
   const refetchImage = useAgentStore((state) => state.refetchStoryboardImageQueue);
   const cancelImage = useAgentStore((state) => state.cancelStoryboardImageQueue);
-  const assets = useAgentStore((state) => state.assets);
-  const loadAssets = useAgentStore((state) => state.loadAssets);
   const activeConversationId = useAgentStore((state) => state.activeConversationId);
   const agentTasksMap = useAgentStore((state) => state.tasks);
   const openTaskDrawer = useAgentStore((state) => state.openTaskDrawer);
@@ -108,11 +163,24 @@ export function GenerationCenterPanel({
     + activeImage.length + activeGenerationImage.length;
   const activeCount = generationActiveCount + activeAgentTasks.length;
   const isGenerating = activeCount > 0;
-  const assetCounts = getAgentAssetCounts(assets);
 
+  // defaultTab 同时决定段位和段内视图，外部每次要求打开时都重新对齐；关闭时清掉记录段占位。
   useEffect(() => {
-    if (open) setTab(defaultTab);
+    if (!open) {
+      setRecordsPill(false);
+      return;
+    }
+    const resolved = resolveDefaultTab(defaultTab);
+    setSegment(resolved.segment);
+    setTaskView(resolved.taskView);
+    setAssetFilter(resolved.assetFilter);
+    setRecordsPill(false);
   }, [defaultTab, open]);
+
+  // 记录弹窗关掉之后，滑块回弹到真正的段位，避免停在「生成记录」上。
+  useEffect(() => {
+    if (recordsOpen === false) setRecordsPill(false);
+  }, [recordsOpen]);
 
   useEffect(() => {
     if (!projectId) {
@@ -137,46 +205,37 @@ export function GenerationCenterPanel({
   }, [projectId]);
 
   useEffect(() => {
-    if (open && activeConversationId) void loadAssets(1);
-  }, [activeConversationId, loadAssets, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
+    if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [open, setOpen]);
 
-  useGSAP(() => {
-    if (!open || !panelRef.current) return;
-    gsap.fromTo(
-      panelRef.current,
-      { opacity: 0, y: -6, scale: 0.98 },
-      {
-        opacity: 1,
-        y: 0,
-        scale: 1,
-        duration: 0.22,
-        ease: 'power2.out',
-        transformOrigin: 'top right',
-        clearProps: 'transform',
-      }
-    );
-  }, { dependencies: [open], scope: panelRef, revertOnUpdate: true });
+  // 窄屏是全宽覆盖式抽屉，额外锁背景滚动。
+  useEffect(() => {
+    if (!open || !narrow) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open, narrow]);
+
+  // 打开时悬浮球被隐藏，焦点会掉到 body；把焦点收进侧边栏，关闭时再还回悬浮球。
+  // 只是恢复焦点归属，不改变用户的操作对象，鼠标用户也不会因此失去已有焦点。
+  useEffect(() => {
+    if (open) {
+      hasOpenedRef.current = true;
+      closeButtonRef.current?.focus();
+      return;
+    }
+    if (hasOpenedRef.current) launcherRef.current?.focus();
+  }, [open]);
 
   useGSAP(() => {
-    if (!open || tab !== 'active' || !rowsRef.current) return;
+    if (!open || segment !== 'tasks' || !rowsRef.current) return;
     const rows = Array.from(rowsRef.current.children);
     if (rows.length === 0) return;
     gsap.fromTo(
@@ -184,10 +243,10 @@ export function GenerationCenterPanel({
       { opacity: 0, y: 6 },
       { opacity: 1, y: 0, duration: 0.24, stagger: 0.04, ease: 'power2.out', clearProps: 'transform' }
     );
-  }, { dependencies: [open, tab, activeCount], scope: rowsRef, revertOnUpdate: true });
+  }, { dependencies: [open, segment, taskView, activeCount], scope: rowsRef, revertOnUpdate: true });
 
   useEffect(() => {
-    if (!projectId || activeCount === 0) return;
+    if (!projectId || activeCount === 0) return undefined;
     const timer = window.setInterval(() => {
       void refetch(projectId);
       void refetchImage(projectId);
@@ -195,175 +254,207 @@ export function GenerationCenterPanel({
     return () => window.clearInterval(timer);
   }, [activeCount, projectId, refetch, refetchImage]);
 
-  const tabs: { key: GenerationCenterTab; label: string; icon: React.ReactNode; count: number }[] = [
-    { key: 'active', label: '生成中', icon: <ListTodo size={13} strokeWidth={1.9} />, count: generationActiveCount },
-    { key: 'image', label: '图片', icon: <Images size={13} strokeWidth={1.9} />, count: assetCounts.image },
-    { key: 'video', label: '视频', icon: <Film size={13} strokeWidth={1.9} />, count: assetCounts.video },
-    { key: 'document', label: '文档', icon: <FileText size={13} strokeWidth={1.9} />, count: assetCounts.document },
+  const segments: RubberSegmentItem<SegmentKey>[] = [
     {
-      key: 'storyboard',
-      label: '分镜',
-      icon: <LayoutList size={13} strokeWidth={1.9} />,
-      count: activeConversationId
-        ? scenes.filter((scene) => scene.conversationId === activeConversationId).length
-        : 0,
+      key: 'tasks',
+      label: '生成任务',
+      icon: <ListTodo size={13} strokeWidth={1.9} />,
+      count: activeCount,
+    },
+    { key: 'assets', label: '会话资产', icon: <Images size={13} strokeWidth={1.9} /> },
+    {
+      key: 'records',
+      label: '生成记录',
+      icon: <History size={13} strokeWidth={1.9} />,
+      opensDialog: true,
     },
   ];
+
+  const handleSegmentChange = (key: SegmentKey) => {
+    if (key === 'records') {
+      // 宿主不回报弹窗开关时别把滑块停在记录段，否则会卡在一个没有内容视图的段位上。
+      setRecordsPill(recordsOpen !== undefined);
+      onOpenRecords?.();
+      return;
+    }
+    setRecordsPill(false);
+    setSegment(key);
+  };
 
   const openEditor = () => {
     setOpen(false);
     navigate('/editor');
   };
 
+  const isTaskViewEmpty = activeVideo.length === 0 && activeRecordVideo.length === 0
+    && activeImage.length === 0 && activeGenerationImage.length === 0
+    && activeAgentTasks.length === 0;
+
   return (
-    <div
-      ref={containerRef}
-      className={`generation-center${open ? '' : ' is-collapsed'}${drag.dragging ? ' is-dragging' : ''}`}
-      style={{ bottom }}
-    >
-      <button
-        type="button"
-        onClick={drag.onClick}
-        onMouseDown={(event) => {
-          event.stopPropagation();
-          drag.onMouseDown(event);
-        }}
-        className={`generation-center__trigger${isGenerating ? ' is-generating' : ''}${open ? ' is-open' : ''}${drag.dragging ? ' is-dragging' : ''}${drag.returning ? ' is-returning' : ''}`}
-        aria-label={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
-        style={{ transform: drag.transform, transition: drag.transition }}
+    <>
+      <div
+        ref={containerRef}
+        className={`generation-center${open ? ' is-open' : ' is-collapsed'}${drag.dragging ? ' is-dragging' : ''}`}
+        style={{ bottom }}
       >
-        <ListTodo size={20} strokeWidth={1.8} />
-        <span className="generation-center__trigger-label">{isGenerating ? '生成中' : '生成中心'}</span>
-        {activeCount > 0 && (
-          <span className="generation-center__badge" aria-live="polite">{activeCount}</span>
-        )}
-      </button>
+        <button
+          ref={launcherRef}
+          type="button"
+          onClick={drag.onClick}
+          onMouseDown={(event) => {
+            event.stopPropagation();
+            drag.onMouseDown(event);
+          }}
+          className={`generation-center__trigger${isGenerating ? ' is-generating' : ''}${open ? ' is-open' : ''}${drag.dragging ? ' is-dragging' : ''}${drag.returning ? ' is-returning' : ''}`}
+          aria-label={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
+          aria-expanded={open}
+          style={{ transform: drag.transform, transition: drag.transition }}
+        >
+          <ListTodo size={20} strokeWidth={1.8} />
+          <span className="generation-center__trigger-label">{isGenerating ? '生成中' : '生成中心'}</span>
+          {activeCount > 0 && (
+            <span className="generation-center__badge" aria-live="polite">{activeCount}</span>
+          )}
+        </button>
+      </div>
 
-      {open && (
-        <div ref={panelRef} className="generation-center__panel" role="dialog" aria-label="生成中心">
-          <div className="generation-center__header">
+      {open && narrow && (
+        <div
+          className="generation-center__scrim"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`generation-center__sidebar${open ? ' is-open' : ''}`}
+        style={{
+          '--generation-center-width': `${GENERATION_CENTER_WIDTH}px`,
+          '--generation-center-right': `${narrow ? 0 : rightOffset}px`,
+        } as React.CSSProperties}
+        role="dialog"
+        aria-label="生成中心"
+        aria-hidden={!open}
+      >
+        <header className="generation-center__header">
+          <div className="generation-center__heading">
             <strong>生成中心</strong>
-            <span className="generation-center__status">{activeCount ? `${activeCount} 个进行中` : '当前空闲'}</span>
-            <button
-              type="button"
-              className="generation-center__records"
-              onClick={onOpenRecords}
-            >
-              <History size={13} strokeWidth={1.9} />
-              生成记录
-            </button>
+            <span className="generation-center__status">
+              {activeCount ? `${activeCount} 个进行中` : '当前空闲'}
+            </span>
           </div>
-
           <button
+            ref={closeButtonRef}
             type="button"
-            className={`generation-center__agent-entry${tab === 'tasks' ? ' is-active' : ''}`}
-            aria-expanded={tab === 'tasks'}
-            onClick={() => setTab((current) => current === 'tasks' ? 'active' : 'tasks')}
+            className="generation-center__close"
+            onClick={() => setOpen(false)}
+            aria-label="关闭生成中心"
           >
-            <span className="generation-center__agent-entry-icon">
-              <ListTodo size={15} strokeWidth={1.9} />
-            </span>
-            <span className="generation-center__agent-entry-copy">
-              <strong>智能体任务</strong>
-              <small>
-                {activeAgentTasks.length > 0
-                  ? `${activeAgentTasks.length} 个任务进行中`
-                  : '查看后台任务与结果'}
-              </small>
-            </span>
-            <b>{allAgentTasks.length}</b>
-            <ChevronRight
-              size={14}
-              className={tab === 'tasks' ? 'is-expanded' : undefined}
-            />
+            <X size={16} strokeWidth={2} />
           </button>
+        </header>
 
-          <div className="generation-center__body">
-            <div className="generation-center__tabs" role="tablist" aria-label="生成中心视图">
-              {tabs.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === item.key}
-                  className={tab === item.key ? 'is-active' : undefined}
-                  onClick={() => setTab(item.key)}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                  <b>{item.count}</b>
-                </button>
-              ))}
-            </div>
+        <div className="generation-center__segments">
+          <RubberSegment
+            items={segments}
+            value={recordsPill ? 'records' : segment}
+            onChange={handleSegmentChange}
+            ariaLabel="生成中心视图"
+          />
+        </div>
 
-            <div className="generation-center__content">
-          {tab === 'active' ? (
-            <div ref={rowsRef} className="generation-center__active-list">
-              {activeVideo.length === 0 && activeRecordVideo.length === 0
-                && activeImage.length === 0 && activeGenerationImage.length === 0
-                && activeAgentTasks.length === 0 ? (
-                <div className="generation-center__empty">
-                  <strong>当前没有进行中的任务</strong>
-                  <span>新任务开始后会自动出现在这里</span>
-                </div>
-              ) : (
-                <>
-                  {activeAgentTasks.length > 0 && <SectionLabel>智能体任务</SectionLabel>}
-                  {activeAgentTasks
+        {segment === 'assets' ? (
+          <div className="generation-center__filter">
+            <AssetFilterNav value={assetFilter} onChange={setAssetFilter} />
+          </div>
+        ) : null}
+
+        <div className="generation-center__body">
+          {segment === 'tasks' ? (
+            <>
+              <button
+                type="button"
+                className={`generation-center__agent-entry${taskView === 'tasks' ? ' is-active' : ''}`}
+                aria-expanded={taskView === 'tasks'}
+                onClick={() => setTaskView((current) => current === 'tasks' ? 'active' : 'tasks')}
+              >
+                <span className="generation-center__agent-entry-icon">
+                  <ListTodo size={15} strokeWidth={1.9} />
+                </span>
+                <span className="generation-center__agent-entry-copy">
+                  <strong>智能体任务</strong>
+                  <small>
+                    {activeAgentTasks.length > 0
+                      ? `${activeAgentTasks.length} 个任务进行中`
+                      : '查看后台任务与结果'}
+                  </small>
+                </span>
+                <b>{allAgentTasks.length}</b>
+                <ChevronRight size={14} className={taskView === 'tasks' ? 'is-expanded' : undefined} />
+              </button>
+
+              <div ref={rowsRef} className="generation-center__list">
+                {taskView === 'tasks' ? (
+                  allAgentTasks.length === 0 ? (
+                    <div className="generation-center__empty">
+                      <strong>暂无智能体任务</strong>
+                      <span>分镜、批量生成等后台任务会显示在这里</span>
+                    </div>
+                  ) : allAgentTasks
                     .slice()
                     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-                    .map((task) => renderAgentTaskRow(task, openTaskDrawer))}
-                  {(activeVideo.length > 0 || activeRecordVideo.length > 0) && <SectionLabel>视频生成</SectionLabel>}
-                  {activeVideo.map((task) => renderRow(task, '视频', scenes, cancel))}
-                  {activeRecordVideo.map((record) => renderRow({
-                    id: record.id,
-                    sceneId: record.sceneId ?? '',
-                    status: record.status,
-                    progress: null,
-                    error: record.error,
-                  }, '视频', scenes, undefined, record.sceneId ? undefined : '智能体视频生成中'))}
-                  {activeImageTasks.refine.length > 0 && <SectionLabel>完善图片</SectionLabel>}
-                  {activeImageTasks.refine.map((task) => renderRow(task, '图片', scenes, cancelImage))}
-                  {activeImageTasks.auto.length > 0 && <SectionLabel>自动生成图片</SectionLabel>}
-                  {activeImageTasks.auto.map((task) => renderRow(task, '图片', scenes, cancelImage))}
-                  {activeGenerationImage.length > 0 && <SectionLabel>生成图片</SectionLabel>}
-                  {activeRecordImage.map((record) => renderRow({
-                    id: record.id,
-                    sceneId: record.sceneId ?? '',
-                    status: record.status,
-                    progress: null,
-                    error: record.error,
-                  }, '图片', scenes, undefined, record.sceneId ? undefined : '智能体图片生成中'))}
-                  {activeDirectImage.map((task) => renderRow(task, '图片', scenes, cancelImage))}
-                </>
-              )}
-            </div>
-          ) : tab === 'tasks' ? (
-            <div ref={rowsRef} className="generation-center__active-list">
-              {allAgentTasks.length === 0 ? (
-                <div className="generation-center__empty">
-                  <strong>暂无智能体任务</strong>
-                  <span>分镜、批量生成等后台任务会显示在这里</span>
-                </div>
-              ) : allAgentTasks
-                .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-                .map((task) => renderAgentTaskRow(task, openTaskDrawer))}
-            </div>
+                    .map((task) => renderAgentTaskRow(task, openTaskDrawer))
+                ) : isTaskViewEmpty ? (
+                  <div className="generation-center__empty">
+                    <strong>当前没有进行中的任务</strong>
+                    <span>新任务开始后会自动出现在这里</span>
+                  </div>
+                ) : (
+                  <>
+                    {activeAgentTasks.length > 0 && <SectionLabel>智能体任务</SectionLabel>}
+                    {activeAgentTasks
+                      .slice()
+                      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+                      .map((task) => renderAgentTaskRow(task, openTaskDrawer))}
+                    {(activeVideo.length > 0 || activeRecordVideo.length > 0) && <SectionLabel>视频生成</SectionLabel>}
+                    {activeVideo.map((task) => renderRow(task, '视频', scenes, cancel))}
+                    {activeRecordVideo.map((record) => renderRow({
+                      id: record.id,
+                      sceneId: record.sceneId ?? '',
+                      status: record.status,
+                      progress: null,
+                      error: record.error,
+                    }, '视频', scenes, undefined, record.sceneId ? undefined : '智能体视频生成中'))}
+                    {activeImageTasks.refine.length > 0 && <SectionLabel>完善图片</SectionLabel>}
+                    {activeImageTasks.refine.map((task) => renderRow(task, '图片', scenes, cancelImage))}
+                    {activeImageTasks.auto.length > 0 && <SectionLabel>自动生成图片</SectionLabel>}
+                    {activeImageTasks.auto.map((task) => renderRow(task, '图片', scenes, cancelImage))}
+                    {activeGenerationImage.length > 0 && <SectionLabel>生成图片</SectionLabel>}
+                    {activeRecordImage.map((record) => renderRow({
+                      id: record.id,
+                      sceneId: record.sceneId ?? '',
+                      status: record.status,
+                      progress: null,
+                      error: record.error,
+                    }, '图片', scenes, undefined, record.sceneId ? undefined : '智能体图片生成中'))}
+                    {activeDirectImage.map((task) => renderRow(task, '图片', scenes, cancelImage))}
+                  </>
+                )}
+              </div>
+            </>
           ) : (
             <div className="generation-center__assets">
               <AgentAssetBrowser
-                tab={tab}
+                tab={assetFilter}
                 active={open}
                 onOpenEditor={openEditor}
                 conversationId={activeConversationId ?? '__no_active_conversation__'}
               />
             </div>
           )}
-            </div>
-          </div>
         </div>
-      )}
-    </div>
+      </aside>
+    </>
   );
 }
 

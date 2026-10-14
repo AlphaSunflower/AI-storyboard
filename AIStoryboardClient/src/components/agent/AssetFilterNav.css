@@ -1,0 +1,114 @@
+.asset-filter {
+  position: relative;
+}
+
+.asset-filter__defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.asset-filter__track {
+  position: relative;
+}
+
+/* goo 层与按钮层用同一套栅格，blob 与格子天然对齐，文字层不参与滤镜。 */
+.asset-filter__goo,
+.asset-filter__items {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 5px;
+}
+
+.asset-filter__goo {
+  position: absolute;
+  inset: 0;
+  filter: url(#asset-filter-goo);
+  pointer-events: none;
+}
+
+.asset-filter__blob,
+.asset-filter__chip {
+  height: 100%;
+  border-radius: 8px;
+  background: var(--color-primary);
+}
+
+.asset-filter__blob {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.asset-filter__chip {
+  opacity: 0;
+}
+
+.asset-filter__chip.is-active {
+  opacity: 1;
+}
+
+.asset-filter__items {
+  position: relative;
+  z-index: 1;
+}
+
+.asset-filter__item {
+  min-width: 0;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.asset-filter__item:hover {
+  color: var(--color-ink);
+}
+
+.asset-filter__item.is-active,
+.asset-filter__item.is-active:hover {
+  color: var(--color-on-primary);
+}
+
+.asset-filter__item > svg {
+  flex-shrink: 0;
+}
+
+.asset-filter__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 禁用 goo 时同层的色块退化为普通滑块，选中态仍然可见。 */
+@media (prefers-reduced-motion: reduce) {
+  .asset-filter__goo {
+    filter: none;
+  }
+
+  .asset-filter__blob {
+    will-change: auto;
+  }
+
+  .asset-filter__chip,
+  .asset-filter__item {
+    transition: none;
+  }
+}

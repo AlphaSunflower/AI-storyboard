@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
+import type { AgentAsset } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
@@ -10,21 +11,37 @@ import { notify } from '../../stores/toastStore';
 import { Tooltip } from '../common/Tooltip';
 import { getSceneImageUrls } from '../../lib/sceneImages';
 import { ImagePreviewModal } from './ImagePreviewModal';
-import { Download, FileText, Film, Folder, Image as ImageIcon, Images, LayoutList, Play, Sparkles, X } from 'lucide-react';
+import { Download, FileText, Film, Folder, Image as ImageIcon, Images, LayoutList, Paperclip, Play, Sparkles, X } from 'lucide-react';
 import {
   assetUrls,
   documentAttachmentForAsset,
   getAgentAssetCounts,
+  splitAgentAssets,
+  type AgentAssetBuckets,
   type AssetsTab,
 } from './assetBrowserModel';
 import './AgentAssetsPanel.css';
 
-const ASSET_TABS: { key: AssetsTab; label: string; icon: React.ReactNode }[] = [
-  { key: 'image', label: '图片', icon: <Images size={14} strokeWidth={1.8} /> },
-  { key: 'video', label: '视频', icon: <Film size={14} strokeWidth={1.8} /> },
-  { key: 'document', label: '文档', icon: <FileText size={14} strokeWidth={1.8} /> },
-  { key: 'storyboard', label: '分镜', icon: <LayoutList size={14} strokeWidth={1.8} /> },
-];
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|svg|bmp)(?:[?#]|$)/i;
+
+function gridAssetsFor(tab: AssetsTab, buckets: AgentAssetBuckets) {
+  if (tab === 'all') return buckets.all;
+  if (tab === 'video') return buckets.video;
+  if (tab === 'other') return buckets.other;
+  return buckets.image;
+}
+
+function emptyCopyFor(tab: AssetsTab, hasAnyAsset: boolean) {
+  if (hasAnyAsset) {
+    if (tab === 'image') return '暂无图片素材';
+    if (tab === 'video') return '暂无视频素材';
+    if (tab === 'other') return '暂无其他素材';
+    return '暂无产出素材';
+  }
+  if (tab === 'video') return '暂无产出素材，生成的视频会出现在这里';
+  if (tab === 'image' || tab === 'all') return '暂无产出素材，生成的图片和视频会出现在这里';
+  return '暂无产出素材，生成的文件会出现在这里';
+}
 
 interface AgentAssetBrowserProps {
   tab: AssetsTab;
@@ -49,13 +66,12 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
   const records = assets?.records ?? [];
   const total = assets?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / (assets?.size ?? 20)));
-  const imageAssets = records.filter((asset) => asset.type === 'image');
-  const videoAssets = records.filter((asset) => asset.type === 'video');
-  const documentAssets = records.filter((asset) => asset.type === 'document');
+  const buckets = splitAgentAssets(assets);
   const counts = getAgentAssetCounts(assets);
   const conversationScenes = conversationId === undefined
     ? scenes
     : scenes.filter((scene) => scene.conversationId === conversationId);
+  const tabCount = tab === 'storyboard' ? conversationScenes.length : counts[tab];
 
   useGSAP(() => {
     if (!active || tab === 'storyboard') return;
@@ -185,21 +201,13 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
         <div className="agent-assets-browser__scroll">
           {tab === 'storyboard' ? (
             renderStoryboard()
-          ) : tab === 'image' && counts.image === 0 ? (
+          ) : tabCount === 0 ? (
             <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 14, marginTop: 48 }}>
-              {records.length === 0 ? '暂无产出素材，生成的图片和视频会出现在这里' : '暂无图片素材'}
-            </p>
-          ) : tab === 'video' && counts.video === 0 ? (
-            <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 14, marginTop: 48 }}>
-              {records.length === 0 ? '暂无产出素材，生成的图片和视频会出现在这里' : '暂无视频素材'}
-            </p>
-          ) : tab === 'document' && counts.document === 0 ? (
-            <p style={{ textAlign: 'center', color: 'var(--color-muted-soft)', fontSize: 14, marginTop: 48 }}>
-              {records.length === 0 ? '暂无产出素材，生成的文件会出现在这里' : '暂无文档素材'}
+              {emptyCopyFor(tab, records.length > 0)}
             </p>
           ) : tab === 'document' ? (
             <div className="agent-assets-documents">
-              {documentAssets.flatMap((asset) => assetUrls(asset).map((url) => {
+              {buckets.document.flatMap((asset) => assetUrls(asset).map((url) => {
                 const attachment = documentAttachmentForAsset(asset, url);
                 return (
                   <div className="agent-asset-document" key={`${asset.id}-${url}`}>
@@ -230,42 +238,17 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
               }))}
             </div>
           ) : (
-            <div ref={gridRef} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(86px, 1fr))', gap: 9 }}>
-              {(tab === 'image' ? imageAssets : videoAssets).flatMap((asset) => assetUrls(asset).map((url, index) => (
-                <div
+            <div ref={gridRef} className="agent-assets-grid">
+              {gridAssetsFor(tab, buckets).flatMap((asset) => assetUrls(asset).map((url, index) => (
+                <AssetTile
                   key={`${asset.id}-${index}`}
-                  onClick={() => previewMedia(url, asset.type === 'video' ? 'video' : 'image')}
-                  title={asset.type === 'video' ? '点击预览视频' : '点击预览大图'}
-                  style={{
-                    position: 'relative', aspectRatio: '1', borderRadius: 9, overflow: 'hidden',
-                    background: 'var(--color-surface-soft)', cursor: 'zoom-in',
-                  }}
-                >
-                  {asset.type === 'video' ? (
-                    <video src={assetUrl(url)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
-                  ) : (
-                    <img src={assetUrl(url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  )}
-                  {asset.type === 'image' && (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        addRefImageUrls([url]);
-                      }}
-                      disabled={refImageUrls.includes(url)}
-                      title={refImageUrls.includes(url) ? '已设为参考图' : '设为下一条消息的参考图'}
-                      style={{
-                        position: 'absolute', bottom: 4, right: 4, padding: '3px 6px',
-                        border: 'none', borderRadius: 6, fontSize: 10, lineHeight: 1,
-                        background: refImageUrls.includes(url) ? 'rgba(93,184,114,0.9)' : 'rgba(204,120,92,0.92)',
-                        color: 'white', cursor: refImageUrls.includes(url) ? 'default' : 'pointer',
-                      }}
-                    >
-                      {refImageUrls.includes(url) ? '已设参考' : '设为参考'}
-                    </button>
-                  )}
-                </div>
+                  asset={asset}
+                  url={url}
+                  active={active}
+                  onPreview={previewMedia}
+                  onSetReference={addRefImageUrls}
+                  referenceUrls={refImageUrls}
+                />
               )))}
             </div>
           )}
@@ -301,6 +284,81 @@ export function AgentAssetBrowser({ tab, active, onOpenEditor, conversationId }:
     </>
   );
 }
+
+interface AssetTileProps {
+  asset: AgentAsset;
+  url: string;
+  /** 所在面板是否可见：不可见时不拉视频元数据，避免隐藏的侧边栏偷偷发请求。 */
+  active: boolean;
+  onPreview: (url: string, type: 'image' | 'video') => void;
+  onSetReference: (urls: string[]) => void;
+  referenceUrls: string[];
+}
+
+/**
+ * 网格里的单个资产格子。视频出胶片首帧，图片出缩略图并带「设为参考」，
+ * 文档和其他非媒体文件出图标格，避免统一网格里出现空白方块。
+ */
+function AssetTile({ asset, url, active, onPreview, onSetReference, referenceUrls }: AssetTileProps) {
+  const isVideo = asset.type === 'video';
+  const isDocument = asset.type === 'document';
+  // 其他类型（上传参考图等）多数其实是图片，能看出来就按图片渲染。
+  const isImageLike = asset.type === 'image' || (!isVideo && !isDocument && IMAGE_EXT.test(url));
+
+  if (isDocument || !isImageLike) {
+    const attachment = documentAttachmentForAsset(asset, url);
+    return (
+      <button
+        type="button"
+        className="agent-asset-tile is-file"
+        onClick={() => useDocumentPreviewStore.getState().openDocument(attachment)}
+        title={`打开 ${attachment.name}`}
+      >
+        {isDocument ? <FileText size={18} strokeWidth={1.8} /> : <Paperclip size={18} strokeWidth={1.8} />}
+        <span>{attachment.name}</span>
+      </button>
+    );
+  }
+
+  const isReferenceSet = referenceUrls.includes(url);
+
+  return (
+    <div
+      className="agent-asset-tile is-media"
+      onClick={() => onPreview(url, isVideo ? 'video' : 'image')}
+      title={isVideo ? '点击预览视频' : '点击预览大图'}
+    >
+      {isVideo ? (
+        <video src={assetUrl(url)} muted preload={active ? 'metadata' : 'none'} />
+      ) : (
+        <img src={assetUrl(url)} alt="" loading="lazy" />
+      )}
+      {/* 只对生成的图片给「设为参考」：上传参考图本身就是参考，再给这个按钮没有意义。 */}
+      {asset.type === 'image' && (
+        <button
+          type="button"
+          className={`agent-asset-tile__ref${isReferenceSet ? ' is-set' : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSetReference([url]);
+          }}
+          disabled={isReferenceSet}
+          title={isReferenceSet ? '已设为参考图' : '设为下一条消息的参考图'}
+        >
+          {isReferenceSet ? '已设参考' : '设为参考'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** 产出素材弹窗的分类，保持历史四项，不跟随生成中心的筛选扩展。 */
+const ASSET_TABS: { key: AssetsTab; label: string; icon: React.ReactNode }[] = [
+  { key: 'image', label: '图片', icon: <Images size={14} strokeWidth={1.8} /> },
+  { key: 'video', label: '视频', icon: <Film size={14} strokeWidth={1.8} /> },
+  { key: 'document', label: '文档', icon: <FileText size={14} strokeWidth={1.8} /> },
+  { key: 'storyboard', label: '分镜', icon: <LayoutList size={14} strokeWidth={1.8} /> },
+];
 
 /**
  * 原有产出素材弹窗。聊天抽屉仍可复用，但主聊天页的入口已统一到生成中心。

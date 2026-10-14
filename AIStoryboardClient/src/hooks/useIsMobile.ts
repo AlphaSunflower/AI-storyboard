@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 /** 视口宽度 ≤ 该值视为手机端 */
-const MOBILE_BREAKPOINT = 768;
+export const MOBILE_BREAKPOINT = 768;
 
 /**
  * 检测当前视口是否为手机端宽度。

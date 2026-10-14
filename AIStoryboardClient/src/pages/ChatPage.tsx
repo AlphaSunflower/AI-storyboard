@@ -10,7 +10,11 @@ import { AgentTaskDrawer } from '../components/agent/AgentTaskDrawer';
 import { VideoPlanCard } from '../components/agent/VideoPlanCard';
 import { ConfirmResultCard } from '../components/agent/ConfirmResultCard';
 import { HitlPromptCard } from '../components/agent/HitlPromptCard';
-import { GenerationCenterPanel, type GenerationCenterTab } from '../components/agent/GenerationCenterPanel';
+import {
+  GENERATION_CENTER_WIDTH,
+  GenerationCenterPanel,
+  type GenerationCenterTab,
+} from '../components/agent/GenerationCenterPanel';
 import { ChatAppActions } from '../components/agent/apps/ChatAppActions';
 import { ChatAppsHost } from '../components/agent/apps/ChatAppsHost';
 import { ChatAppsProvider } from '../components/agent/apps/ChatAppsContext';
@@ -396,9 +400,11 @@ export function ChatPage() {
     const canvasTab = chatAppTabs.find((tab) => tab.key === 'canvas');
     if (canvasTab?.canvasMode) releaseCanvasMode();
   }, [canvasPhase, releaseCanvasMode, chatAppTabs]);
-  const contentRightReserve = appWindowOpen
-    ? Math.max(chatApps.layout.width + 32, generationCenterOpen ? 420 : 0)
-    : (generationCenterOpen ? 420 : 0);
+  /** app 子窗口自身占的宽度（含右侧 16px 边距）。 */
+  const appWindowReserve = appWindowOpen ? chatApps.layout.width + 32 : 0;
+  // 子窗口固定在右上、侧边栏固定在最右，两者同时开着时必须并排：侧边栏让到子窗口左边，
+  // 消息列则要同时避开两者，所以这里是相加而不是取较大值。
+  const contentRightReserve = appWindowReserve + (generationCenterOpen ? GENERATION_CENTER_WIDTH : 0);
 
   // 登录守卫 + iframe 自登录（/chat?embed=1&token=&userId=&name=）：跨端口 iframe 靠 URL 注入 token
   useEffect(() => {
@@ -806,7 +812,8 @@ export function ChatPage() {
     setDockRequested(true);
   }, []);
 
-  const desktopRightReserve = dockMode === 'docked' ? 0 : contentRightReserve;
+  // 停靠模式下聊天被收进窄栏、窄屏又走覆盖式抽屉，两种情况都无需为侧边栏留白。
+  const desktopRightReserve = dockMode === 'docked' || showMobile ? 0 : contentRightReserve;
   /** 底部输入卡留白：与 .chat-composer-dock 实际 padding 一致，「回到底部」据此右对齐到卡片边缘 */
   const dockPadLeft = 16;
   const dockPadRight = !embed ? desktopRightReserve + 16 : 16;
@@ -1757,6 +1764,8 @@ export function ChatPage() {
           onOpenChange={setGenerationCenterOpen}
           bottom={appWindowOpen ? 20 : 104}
           onOpenRecords={() => setRecordsOpen(true)}
+          recordsOpen={recordsOpen}
+          rightOffset={appWindowReserve}
           taskConversationId={activeConversationId}
         />
       )}
