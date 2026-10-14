@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGenerationPreferences } from './ChatGenerationPreferences';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { aiApi } from '../../api/ai';
 import {
   GENERATION_PREFERENCES_STORAGE_KEY,
   defaultGenerationPreferences,
@@ -116,5 +117,35 @@ describe('ChatGenerationPreferences', () => {
     expect(trigger.disabled).toBe(true);
     fireEvent.click(trigger);
     expect(screen.queryByRole('dialog', { name: '生成偏好' })).toBeNull();
+  });
+
+  it('打开面板时拉网关模型（真实模型 + 能力），网关不可达则回落 store 兜底', async () => {
+    vi.spyOn(aiApi, 'aiModels').mockResolvedValue({
+      data: {
+        data: {
+          imageModels: [{
+            value: 'doubao-seedream-4-5-251128',
+            label: 'Seedream 4.5',
+            params: JSON.stringify({ sizes: ['2K', '4K'], sizeDefault: '4K' }),
+            preferences: {
+              ratioOptions: ['21:9', '16:9'],
+              ratioDefault: '16:9',
+              clarity: { label: '清晰度', param: 'size', options: ['2K', '4K'], default: '4K' },
+            },
+          }],
+          videoModels: [],
+        },
+      },
+    } as never);
+
+    render(<ChatGenerationPreferences />);
+    open();
+
+    expect(await screen.findByRole('combobox', { name: '生成模型' })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '生成模型' }).textContent).toContain('Seedream 4.5');
+    });
+    expect(screen.getByRole('button', { name: '比例 21:9' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: '清晰度' }).textContent).toContain('4K');
   });
 });

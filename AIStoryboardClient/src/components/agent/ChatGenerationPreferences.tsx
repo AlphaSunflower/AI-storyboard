@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Sparkles, SlidersHorizontal } from 'lucide-react';
 import { useAgentStore } from '../../stores/agentStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { aiApi, type GatewayModelOption } from '../../api/ai';
 import type { ModelOption } from '../../config';
 import {
   readModelCapability,
@@ -29,8 +30,14 @@ function isDefaultModel(model: ModelOption): boolean {
 
 export function ChatGenerationPreferences({ disabled = false }: { disabled?: boolean }) {
   const { generationPreferences, updateGenerationPreferences } = useAgentStore();
-  const imageModels = useProjectStore((state) => state.imageModelOptions);
-  const videoModels = useProjectStore((state) => state.videoModelOptions);
+  // store 里的列表是 config.ts 静态兜底（编辑器页拉过网关才会被替换）：这里自己拉一次网关，
+  // 既拿到真实模型与能力，又不去改共享 store（否则会顺带改掉编辑器里已选的模型）。
+  const storedImageModels = useProjectStore((state) => state.imageModelOptions);
+  const storedVideoModels = useProjectStore((state) => state.videoModelOptions);
+  const [gatewayModels, setGatewayModels] = useState<{
+    image: ModelOption[];
+    video: ModelOption[];
+  } | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<MediaKind>('image');
   const rootRef = useRef<HTMLDivElement>(null);
@@ -61,6 +68,30 @@ export function ChatGenerationPreferences({ disabled = false }: { disabled?: boo
     if (disabled) setOpen(false);
   }, [disabled]);
 
+  // 打开面板时拉一次网关模型列表（后端对模型列表有 60s 缓存，重复打开开销很小）
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await aiApi.aiModels();
+        const data = res.data.data;
+        if (cancelled || !data) return;
+        const image = (data.imageModels ?? []) as GatewayModelOption[];
+        const video = (data.videoModels ?? []) as GatewayModelOption[];
+        if (image.length === 0 && video.length === 0) return;
+        setGatewayModels({ image: image as ModelOption[], video: video as ModelOption[] });
+      } catch {
+        // 网关不可达：保持 store 的兜底列表，偏好面板照常可用
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const imageModels = gatewayModels?.image ?? storedImageModels;
+  const videoModels = gatewayModels?.video ?? storedVideoModels;
   const models = tab === 'image' ? imageModels : videoModels;
   const preference = tab === 'image' ? generationPreferences.image : generationPreferences.video;
 
