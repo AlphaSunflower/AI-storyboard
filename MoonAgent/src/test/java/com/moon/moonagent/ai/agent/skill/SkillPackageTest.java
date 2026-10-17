@@ -63,9 +63,14 @@ class SkillPackageTest {
             assertThat(content)
                     .as("%s 必须声明整图提交与批量连线工具", skill)
                     .contains("canvas_graph_apply_plan", "canvas_graph_create_edges");
+            // 2026-10-17 决策变更：删除版本降级分支。
+            // 原断言要求"必须保留旧服务端的降级分支"，理由是画布服务与 MoonAgent 可能版本不一致；
+            // 现改为要求"没有降级路径"——两者必须同版本发布，出现工具缺失是部署问题，必须暴露给人修，
+            // 不能用"退回逐节点建图、分批完成"把版本不一致掩盖过去（那会让线上问题静默存活）。
             assertThat(content)
-                    .as("%s 必须保留旧服务端的降级分支（不得因新工具缺失而中止本轮）", skill)
-                    .contains("服务端版本较旧", "Tool not found", "canvas_graph_create_nodes");
+                    .as("%s 必须声明没有版本降级路径（新工具缺失即判定服务不可用，不得退回逐节点建图）", skill)
+                    .contains("没有版本降级路径")
+                    .doesNotContain("服务端版本较旧", "已按节点分批完成");
 
             Map<String, Object> frontmatter = frontmatter(path);
             assertThat(String.valueOf(frontmatter.get("allowed-tools")))

@@ -11,7 +11,7 @@ metadata:
     hitl:
       - { id: execute, title: 确认执行 }
       - { id: cancel, title: 取消 }
-allowed-tools: canvas_create_run canvas_graph_get_context canvas_graph_get_state canvas_graph_list_nodes canvas_graph_get_node canvas_graph_list_edges canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph canvas_execute_node canvas_execute_graph canvas_get_execution canvas_cancel_execution request_human_input
+allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph canvas_execute_node canvas_execute_graph canvas_get_execution canvas_cancel_execution request_human_input
 ---
 
 # 画布执行
@@ -22,7 +22,7 @@ allowed-tools: canvas_create_run canvas_graph_get_context canvas_graph_get_state
 0. **调用前置检查（最高优先级，先于本文件其它条款）**：任何 `canvas_*` 调用之前，先确认系统注入的 `<capabilities>` 块把「画布设计与执行」列入「此轮可用的能力」。
    - 只有被列为可用时才允许调用 canvas_*。若被列在「此轮不可用的能力」里：立刻停手，**不要调用、不要激活工具组、不要重试、不要换工具名或换参数再试**，只如实说明「当前环境的画布工具未注册（画布 MCP 未连接），本轮无法落在画布上执行」，并给出替代路径（确认 Morrow 画布服务运行后重试）。
    - `reset_equipped_tools` 返回「The currently activated tool group(s): canvas-run-tools」**不代表工具可用**：工具组可能是空壳。若**全部** canvas_graph_* 都返回 `Tool not found`（例如 `canvas_graph_get_state` 也调不通），立即终止本轮全部 canvas_* 调用并如实说明，禁止再尝试第三个、第四个画布工具。
-   - **版本降级（不因它中止本轮）**：若只有新工具缺失——`canvas_graph_apply_plan` 或 `canvas_graph_create_edges` 返回 `Tool not found`，而 `canvas_graph_get_state`、`canvas_graph_create_nodes` 等仍可用——判定为「服务端版本较旧」：**继续本轮任务**，建图/补齐退回 `canvas_graph_create_nodes` + 逐条 `canvas_graph_create_edge`（结果槽用 `canvas_graph_create_result_slots` + 逐条连线），执行阶段照常走 `canvas_execute_graph`，并在最终回复里说明「当前画布服务版本不支持整图一次提交，已按节点分批完成」。
+   - **没有版本降级路径**：`canvas_graph_apply_plan` 返回 `Tool not found` 就等同于画布服务不可用，按上一条终止本轮。**不要**退回 `canvas_graph_create_nodes` / `canvas_graph_create_edge` 分批补齐——画布服务与 MoonAgent 必须同版本发布，出现不一致是部署问题，必须暴露给人修。
    - 能力块缺失或语焉不详时，先做一次 `canvas_graph_get_state` 探测：返回 `Tool not found` 即判定不可用，按第 0 条第 2 项处理；返回业务错误（如缺少 run）说明工具可用，正常继续。
 1. 先确认当前画布任务；画布编辑模式下服务端已自动接管当前画布（不需要先 canvas_create_run），没有画布上下文时才调用 canvas_create_run；随后用 canvas_graph_get_state 读取节点、端口、动作与连线状态。
 2. 画布 ID、userId、projectId、runId、operationKey 全部由 MoonAgent 自动注入，**禁止在工具参数里传这些内部字段**（传了也会被覆盖，且参数校验会先失败）。

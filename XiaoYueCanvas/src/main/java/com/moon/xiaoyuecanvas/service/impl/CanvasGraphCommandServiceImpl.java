@@ -649,10 +649,14 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
             List<Map<String, Object>> nodeSpecs = listOfMaps(payload.get("nodes"));
             List<Map<String, Object>> updateSpecs = listOfMaps(payload.get("updates"));
             List<Map<String, Object>> markSlotSpecs = listOfMaps(payload.get("markResultSlots"));
-            // 纯改图（只改已有节点 / 只标记结果槽）允许 nodes 为空；三种意图全空才是非法调用。
-            if (nodeSpecs.isEmpty() && updateSpecs.isEmpty() && markSlotSpecs.isEmpty()) {
+            List<Map<String, Object>> createSlotSpecs = listOfMaps(payload.get("createResultSlots"));
+            boolean hasLayout = payload.get("layout") != null;
+            // 纯改图（只改已有节点 / 只标记或补建结果槽）与纯排版都允许 nodes 为空；
+            // 所有意图全空才是非法调用。
+            if (nodeSpecs.isEmpty() && updateSpecs.isEmpty() && markSlotSpecs.isEmpty()
+                    && createSlotSpecs.isEmpty() && !hasLayout) {
                 throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
-                        "plan 至少要给 nodes、updates 或 markResultSlots 之一");
+                        "plan 至少要给 nodes、updates、markResultSlots、createResultSlots 或 layout 之一");
             }
             if (nodeSpecs.size() > MAX_BATCH_NODES) {
                 throw new CanvasGraphCommandException("LIMIT_EXCEEDED",
@@ -819,6 +823,26 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
                 }
             }
 
+            // 阶段 4e：给**已存在**的生产节点补建全新结果槽（与 nodes[].resultSlots 的区别：
+            // 后者只能作用于本批次新建的节点，这里作用于图上已有的生产节点）
+            for (int index = 0; index < createSlotSpecs.size(); index++) {
+                Map<String, Object> spec = createSlotSpecs.get(index);
+                try {
+                    ResultSlotBatch batch = createResultSlotsInternal(
+                            graph,
+                            string(spec.get("producerNodeId")),
+                            normalizeMediaKind(string(spec.get("kind"))),
+                            integer(spec.get("count"), 0),
+                            map(spec.get("position")),
+                            spec.get("gapY"));
+                    slotIds.addAll(batch.nodeIds());
+                    edgeIds.addAll(batch.edgeIds());
+                    createdEdges.addAll(batch.edges());
+                } catch (CanvasGraphCommandException error) {
+                    errors.add(batchError(index, string(spec.get("producerNodeId")), error));
+                }
+            }
+
             // 汇总：false = 一条都不落库；true = 落库成功项并在返回里报 errors/skipped
             if (!errors.isEmpty() && !continueOnError) {
                 throw new CanvasGraphCommandException("PLAN_INVALID",
@@ -846,14 +870,14 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
                 if (strings(layoutArgs.get("nodeIds")).isEmpty()) {
                     List<String> scopeIds = new ArrayList<>(nodeIds);
                     scopeIds.addAll(slotIds);
+                    // 本批次建了节点/槽 → 只排布这批；什么都没建（纯排版或纯改图）→
+                    // nodeIds 留空，按 applyLayout 既有语义排布整张画布。
                     if (!scopeIds.isEmpty()) layoutArgs.put("nodeIds", scopeIds);
                 }
-                if (!strings(layoutArgs.get("nodeIds")).isEmpty()) {
-                    LayoutOutcome outcome = applyLayout(graph, layoutArgs);
-                    layout = new LinkedHashMap<>();
-                    layout.put("movedNodeIds", outcome.movedNodeIds());
-                    layout.put("positions", outcome.positions());
-                }
+                LayoutOutcome outcome = applyLayout(graph, layoutArgs);
+                layout = new LinkedHashMap<>();
+                layout.put("movedNodeIds", outcome.movedNodeIds());
+                layout.put("positions", outcome.positions());
             }
 
             int revision = saveGraph(context, graph, loaded.revision());

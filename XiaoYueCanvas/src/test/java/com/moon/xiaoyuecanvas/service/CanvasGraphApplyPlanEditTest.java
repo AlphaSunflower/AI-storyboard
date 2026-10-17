@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -212,9 +213,74 @@ class CanvasGraphApplyPlanEditTest {
 
         Exception error = assertThrows(RuntimeException.class,
                 () -> service.applyPlan(context, Map.of(), false, false));
-        assertTrue(String.valueOf(error.getMessage()).contains("nodes")
-                        || String.valueOf(error.getMessage()).contains("updates"),
-                "错误信息应指明至少给 nodes / updates / markResultSlots 之一：" + error.getMessage());
+        assertTrue(String.valueOf(error.getMessage()).contains("nodes"),
+                "错误信息应指明至少给一种意图：" + error.getMessage());
+    }
+
+    // ── 缺口补齐：给已有生产节点补建新槽 ────────────────────────────────────
+
+    @Test
+    void createResultSlotsAddsNewSlotsToExistingProducerNode() {
+        CanvasGraphCommandContext context = context("op-create-slots");
+        Map<String, Object> graph = graphWithStandardNodes();
+        stubGraph(graph, 3, 4);
+
+        Map<String, Object> result = service.applyPlan(context, Map.of(
+                "createResultSlots", List.of(Map.of(
+                        "producerNodeId", "producer",
+                        "kind", "image",
+                        "count", 2))), false, false);
+
+        assertEquals(4, result.get("revision"));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(graphService).save(eq("user-1"), eq("canvas-1"), captor.capture(), eq(3));
+        Map<String, Object> saved = captor.getValue();
+        // 原 3 个 + 新增 2 个空槽
+        assertEquals(5, nodes(saved).size(), "必须为已有生产节点建出 2 个新槽");
+        // 每条新槽都要有 producer → slot 的边
+        long slotEdges = edges(saved).stream()
+                .filter(item -> "producer".equals(item.get("source")))
+                .count();
+        assertEquals(2, slotEdges, "两个新槽各有一条来自生产节点的连线");
+
+        List<?> slotIds = (List<?>) result.get("resultSlotIds");
+        assertEquals(2, slotIds.size());
+    }
+
+    @Test
+    void createResultSlotsRejectsUnknownProducer() {
+        CanvasGraphCommandContext context = context("op-create-slots-bad");
+        stubGraph(graphWithStandardNodes(), 3, 4);
+
+        Exception error = assertThrows(RuntimeException.class, () -> service.applyPlan(context, Map.of(
+                "createResultSlots", List.of(Map.of(
+                        "producerNodeId", "nope", "kind", "image", "count", 1))), false, false));
+        assertTrue(String.valueOf(error.getMessage()).contains("未通过校验"), error.getMessage());
+    }
+
+    // ── 缺口补齐：纯排版 plan ───────────────────────────────────────────────
+
+    @Test
+    void layoutOnlyPlanIsAcceptedAndMovesWholeCanvas() {
+        CanvasGraphCommandContext context = context("op-layout-only");
+        Map<String, Object> graph = graphWithStandardNodes();
+        stubGraph(graph, 3, 4);
+
+        Map<String, Object> result = service.applyPlan(context, Map.of(
+                "layout", Map.of("mode", "horizontal")), false, false);
+
+        assertEquals(4, result.get("revision"), "纯排版也必须真的产生一次 revision");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(graphService).save(eq("user-1"), eq("canvas-1"), captor.capture(), eq(3));
+        assertEquals(3, nodes(captor.getValue()).size(), "纯排版不新建节点");
+
+        Map<String, Object> layout = map(result.get("layout"));
+        List<?> moved = (List<?>) layout.get("movedNodeIds");
+        assertFalse(moved.isEmpty(), "纯排版必须真的移动节点，而不是被静默跳过");
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

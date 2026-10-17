@@ -16,11 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CanvasGraphMcpToolsTest {
 
     private static final Set<String> REQUIRED_TOOL_NAMES = Set.of(
-            "canvas_graph_get_context",
             "canvas_graph_get_state",
-            "canvas_graph_list_nodes",
             "canvas_graph_get_node",
-            "canvas_graph_list_edges",
             "canvas_graph_list_node_types",
             "canvas_graph_create_node",
             "canvas_graph_create_nodes",

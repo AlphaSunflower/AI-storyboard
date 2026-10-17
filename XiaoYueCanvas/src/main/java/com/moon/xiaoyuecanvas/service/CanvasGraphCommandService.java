@@ -74,15 +74,19 @@ public interface CanvasGraphCommandService {
      * {@code {mediaId?|url?,name?,mimeType?,label?}}，mediaId 与 url 二选一；素材节点按素材类型落成
      * image/video 节点，可被其它节点的 {@code refs} 引用；同一份素材在一个 plan 里只建一个节点。
      *
-     * <p><b>改图也走这里</b>：{@code updates}（改已有节点的 data，与 updateNode 同一语义）与
-     * {@code markResultSlots}（把已有空媒体节点标记为某生产节点的结果槽，与 markResultSlots 同一语义）
+     * <p><b>改图也走这里</b>：{@code updates}（改已有节点的 data，与 updateNode 同一语义）、
+     * {@code markResultSlots}（把已有空媒体节点标记为某生产节点的结果槽，与 markResultSlots 同一语义）、
+     * {@code createResultSlots}（给**已存在**的生产节点补建全新空槽，与 createResultSlots 同一语义）
      * 与建节点、建连线共用同一次 {@code saveGraph}，因此整批只 +1 revision。
-     * 三者（nodes / updates / markResultSlots）至少给一个；纯改图时 {@code nodes} 可以为空。
+     * 五种意图（nodes / updates / markResultSlots / createResultSlots / layout）至少给一个；
+     * 纯改图与纯排版时 {@code nodes} 可以为空。
      *
-     * @param plan            {@code {nodes?,edges?,updates?,markResultSlots?,layout?,pruneUnreferencedResultSlots?}}；
+     * @param plan            {@code {nodes?,edges?,updates?,markResultSlots?,createResultSlots?,layout?,pruneUnreferencedResultSlots?}}；
      *                        每个节点可选 {@code media} 与 {@code resultSlots}（两者互斥，素材节点不是生产节点）；
      *                        {@code updates[]} 形如 {@code {nodeId,patch}}；
-     *                        {@code markResultSlots[]} 形如 {@code {producerNodeId,nodeIds,startOrder?}}
+     *                        {@code markResultSlots[]} 形如 {@code {producerNodeId,nodeIds,startOrder?}}；
+     *                        {@code createResultSlots[]} 形如 {@code {producerNodeId,kind,count,position?,gapY?}}
+     *                        ——注意它只作用于**已有**生产节点，与 {@code nodes[].resultSlots} 互补
      * @param continueOnError true 时跳过失败项并落库成功项（返回 errors/skipped）；
      *                        false 时汇总**全部**错误且不落库
      * @param detail          true 时额外回显完整节点/连线对象

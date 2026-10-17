@@ -1149,11 +1149,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_get_selection",
                 "canvas_get_node_model_config",
                 "canvas_get_execution",
-                "canvas_graph_get_context",
                 "canvas_graph_get_state",
-                "canvas_graph_list_nodes",
                 "canvas_graph_get_node",
-                "canvas_graph_list_edges",
                 "canvas_graph_list_node_types",
                 "load_skill_through_path",
                 "reset_equipped_tools")) {

@@ -101,11 +101,13 @@ metadata:
 
 运行时状态接口 `GET /api/agent/conversations/{id}/runtime` 可查看 skills / globalPrompt / mcpMetadata 的来源与服务器清单。
 
-### 工具（共 84 个已注册）
+### 工具（共 81 个已注册）
 
-- 画布图操作（15）：`canvas_graph_get_state`、`canvas_graph_get_context`、`canvas_graph_list_nodes/edges/node_types`、
-  `canvas_graph_get_node`、`canvas_graph_create_node(s)`、`canvas_graph_update_node`、`canvas_graph_create_edge`、
-  `canvas_graph_import_media(_batch)`、`canvas_graph_create_result_slots`、`canvas_graph_mark_result_slots`、`canvas_graph_layout_graph`
+- 画布图操作（12）：`canvas_graph_get_state`、`canvas_graph_list_node_types`、`canvas_graph_get_node`、
+  `canvas_graph_create_node(s)`、`canvas_graph_update_node`、`canvas_graph_create_edge`、
+  `canvas_graph_import_media(_batch)`、`canvas_graph_create_result_slots`、`canvas_graph_mark_result_slots`、
+  `canvas_graph_layout_graph`、`canvas_graph_apply_plan`
+  （已删除的 3 个读工具 `get_context` / `list_nodes` / `list_edges` 由 `canvas_graph_get_state` 的分页与 `includeEdges` 覆盖）
 - 画布运行（5）：`canvas_create_run`、`canvas_execute_node`、`canvas_execute_graph`、`canvas_get_execution`、`canvas_cancel_execution`
   （后 4 个由 **canvas 服务** 提供，命令经信箱投给打开画布的浏览器执行）
 - 分镜（19）：`start/approve/revise_storyboard_production`、`generate_storyboard_image(s)`、`generate_storyboard_video(s)`、

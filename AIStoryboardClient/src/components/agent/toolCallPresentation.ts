@@ -35,11 +35,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   canvas_graph_create_result_slots: '创建结果槽',
   canvas_graph_mark_result_slots: '标记结果槽',
   canvas_graph_layout_graph: '整理画布布局',
-  canvas_graph_get_context: '读取画布状态',
   canvas_graph_get_state: '读取画布状态',
-  canvas_graph_list_nodes: '读取画布状态',
   canvas_graph_get_node: '读取画布状态',
-  canvas_graph_list_edges: '读取画布状态',
   canvas_graph_list_node_types: '读取画布状态',
   // 分镜
   start_storyboard_production: '启动剧情与分镜流程',

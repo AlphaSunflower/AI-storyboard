@@ -8,7 +8,7 @@ metadata:
     model_role: text
     version: "1.0"
     priority: 8
-allowed-tools: canvas_create_run canvas_graph_get_context canvas_graph_get_state canvas_graph_list_nodes canvas_graph_get_node canvas_graph_list_edges canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph request_human_input
+allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph request_human_input
 ---
 
 # 画布设计
@@ -19,7 +19,7 @@ allowed-tools: canvas_create_run canvas_graph_get_context canvas_graph_get_state
 0. **调用前置检查（最高优先级，先于本文件其它条款）**：任何 `canvas_*` 调用之前，先确认系统注入的 `<capabilities>` 块把「画布设计与执行」列入「此轮可用的能力」。
    - 只有被列为可用时才允许调用 canvas_*。若被列在「此轮不可用的能力」里：立刻停手，**不要调用、不要激活工具组、不要重试、不要换工具名或换参数再试**，只如实说明「当前环境的画布工具未注册（画布 MCP 未连接），本轮无法落到画布」，并给出替代路径（确认 Morrow 画布服务运行后重试）。
    - `reset_equipped_tools` 返回「The currently activated tool group(s): canvas-design-tools」**不代表工具可用**：工具组可能是空壳。若**全部** canvas_graph_* 都返回 `Tool not found`（例如 `canvas_graph_get_state` 也调不通），立即终止本轮全部 canvas_* 调用并如实说明，禁止再尝试第三个、第四个画布工具。
-   - **版本降级（不因它中止本轮）**：若只有新工具缺失——`canvas_graph_apply_plan` 或 `canvas_graph_create_edges` 返回 `Tool not found`，而 `canvas_graph_get_state`、`canvas_graph_create_nodes` 等仍可用——判定为「服务端版本较旧」：**继续本轮建图**，退回 `canvas_graph_create_nodes` + 逐条 `canvas_graph_create_edge`（结果槽仍可用 `canvas_graph_create_result_slots` 或直接在创建结果节点后连线），并在最终回复里说明「当前画布服务版本不支持整图一次提交，已按节点分批完成」。
+   - **没有版本降级路径**：`canvas_graph_apply_plan` 返回 `Tool not found` 就等同于画布服务不可用，按上一条终止本轮。**不要**退回 `canvas_graph_create_nodes` / `canvas_graph_create_edge` 分批建图——画布服务与 MoonAgent 必须同版本发布，出现不一致是部署问题，必须暴露给人修，不能用"分批完成"把版本不一致掩盖掉。
    - 能力块缺失或语焉不详时，先做一次 `canvas_graph_get_state` 探测：返回 `Tool not found` 即判定不可用，按第 0 条第 2 项处理；返回业务错误（如缺少 run）说明工具可用，正常继续。
 1. 画布编辑模式（turn-context 里已带画布）**直接在当前画布上作业**：不需要先调用 canvas_create_run，服务端已自动接管当前画布；只有用户没有打开任何画布、明确要新建画布时才调用 canvas_create_run。该工具不暂停聊天，也不打开 iframe。
 2. 已有画布编辑上下文时直接使用 canvas_graph_*；画布 ID、userId、projectId、runId、operationKey 全部由 MoonAgent 自动注入，**禁止在工具参数里传这些内部字段**（传了也会被覆盖，且参数校验会先失败）；禁止要求用户输入或展示它们。
@@ -37,7 +37,11 @@ allowed-tools: canvas_create_run canvas_graph_get_context canvas_graph_get_state
 10. 用户要求调整结构后，用 `canvas_graph_apply_plan` 的 `layout` 字段整理布局（`{ mode: "dag"|"grid"|"horizontal"|"vertical", gapX, gapY }`），与本次变更同一次保存、不额外增加 revision；只有"纯整理布局、不改任何图结构"时才单独调一次 `canvas_graph_layout_graph`。
 11. `canvas_graph_apply_plan` 的参数是 `plan` 对象：`nodes`（每项含 `ref`/`type`/`label`/`data`/`refs`/`resultSlots`，**可选 `media` 用于内联素材**）、`edges`（可选显式连线）、`updates`（可选，`[{nodeId, patch}]`）、`markResultSlots`（可选，`[{producerNodeId, nodeIds, startOrder?}]`）、可选 `layout`（`{ mode: "dag"|"grid"|"horizontal"|"vertical", gapX, gapY }`）。`resultSlots` 形如 `{ kind: "image"|"video", count }`，服务端建槽并自动连回生产节点。`media` 形如 `{ mediaId?, url?, name?, mimeType?, label? }`，**mediaId 与 url 二选一**（项目库素材必须用 mediaId，不得下载带 token 的 URL）；同一个 plan 里同一素材重复出现只会建一个节点。**不要**再逐个调用 `canvas_graph_create_node` / `create_nodes` / `create_edge` / `create_edges` / `update_node` / `mark_result_slots` 把一次提交拆成多轮。
 12. 每个会输出图片或视频的生产节点都必须有结果槽，再连接下游。结果槽是空 image/video 占位节点：它的 origin 输入口接收生产节点的生成结果，它的 image/video 输出口可继续连接下游；最终占位只保留输入连线。
-13. 默认每个生产节点 1 个结果槽；用户指定 n、数量或 variations 时按该数量创建。**首选在生产节点规格里直接写 `resultSlots: { kind, count }`**（`apply_plan` 支持），由服务端建槽并自动连回，不要为每个生产节点单独调用一次建槽工具。**已有**空 image/video 节点用 `apply_plan` 的 `markResultSlots: [{ producerNodeId, nodeIds, startOrder? }]` 标记（与 `canvas_graph_mark_result_slots` 同一语义）；只有在"给一个已存在的生产节点补建全新空槽"的场景才用 `canvas_graph_create_result_slots`（参数 `{ producerNodeId, kind: "image"|"video", count, position?, gapY? }`）。不得省略 producerNodeId，也不得使用未声明的简写参数。结果槽名称（「结果 N」）由服务端在整张画布内递增，不需要你指定 label。
+13. 默认每个生产节点 1 个结果槽；用户指定 n、数量或 variations 时按该数量创建。三种建槽方式按场景选：
+   - **新建生产节点** → 在节点规格里直接写 `resultSlots: { kind, count }`（`apply_plan` 支持），服务端建槽并自动连回。
+   - **生产节点已存在、要补建全新空槽** → `apply_plan` 的 `createResultSlots: [{ producerNodeId, kind: "image"|"video", count, position?, gapY? }]`。
+   - **画布上已有空 image/video 节点、只想把它们认作槽** → `apply_plan` 的 `markResultSlots: [{ producerNodeId, nodeIds, startOrder? }]`（不新建节点，只补连线与位次）。
+   不得省略 producerNodeId，也不得使用未声明的简写参数。结果槽名称（「结果 N」）由服务端在整张画布内递增，不需要你指定 label。
 14. 中间占位必须形成“生产节点 → 结果槽 → 下游功能节点”的完整链路，并从占位节点的输出口连接到下游必填输入。禁止把生产节点输出直接连到图生图、图生视频等下游功能节点，也禁止只创建最终占位而漏掉中间占位。
 15. 分镜使用结构化占位：storyboardPlanner → shot 承载镜头数据；shot 生成图片或视频时仍必须先创建 media 结果槽。不得把故事板产物直接当作媒体结果。
 16. **只在出错时才复读**：`apply_plan` 已经在一次返回里给出全部校验结果（端口不匹配、环、重复边、依赖失败等）。返回里**没有** `errors` / `partial` 时就不要再去读整张图确认——那会白花一整轮模型思考。出现 `errors` 时再按错误定位：缺媒体输入且只有一个明确的生产节点候选，可自动补结果槽；存在多个候选时调用 request_human_input。被拒的连线先读端口定义再决定重连，不要凭猜测重复提交同一条边。

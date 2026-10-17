@@ -87,8 +87,7 @@ final class AgentScopeToolLabels {
             case "canvas_graph_create_result_slots" -> "创建结果槽";
             case "canvas_graph_mark_result_slots" -> "标记结果槽";
             case "canvas_graph_layout_graph" -> "整理画布布局";
-            case "canvas_graph_get_context", "canvas_graph_get_state", "canvas_graph_list_nodes",
-                    "canvas_graph_get_node", "canvas_graph_list_edges",
+            case "canvas_graph_get_state", "canvas_graph_get_node",
                     "canvas_graph_list_node_types" -> "读取画布状态";
             default -> null;
         };

@@ -58,24 +58,6 @@ public class CanvasGraphMcpTools {
         this.commands = commands;
     }
 
-    @Tool(description = "Get the current canvas context, revision and graph counts.")
-    @McpTool(name = "canvas_graph_get_context",
-            description = "读取当前画布上下文：canvasId、projectId、标题、revision、节点数与连线数。"
-                    + "只读工具，不改画布；组链前后用它确认 revision 是否按预期前进。")
-    public Map<String, Object> canvasGraphGetContext(
-            @ToolParam(description = INJECTED_USER, required = false)
-            @McpToolParam(description = INJECTED_USER, required = false) String userId,
-            @ToolParam(description = INJECTED_PROJECT, required = false)
-            @McpToolParam(description = INJECTED_PROJECT, required = false) String projectId,
-            @ToolParam(description = INJECTED_CANVAS, required = false)
-            @McpToolParam(description = INJECTED_CANVAS, required = false) String canvasId,
-            @ToolParam(description = INJECTED_RUN, required = false)
-            @McpToolParam(description = INJECTED_RUN, required = false) String runId,
-            @ToolParam(description = INJECTED_OPERATION, required = false)
-            @McpToolParam(description = INJECTED_OPERATION, required = false) String operationKey) {
-        return run(() -> commands.getContext(ctx(userId, projectId, canvasId, runId, operationKey)));
-    }
-
     @Tool(description = "Get the full CanvasGraphV2 state or a paged node view.")
     @McpTool(name = "canvas_graph_get_state",
             description = "读取画布图状态（节点 + 连线），默认紧凑视图。limit/offset 只对节点分页（limit 省略时不分页），"
@@ -105,34 +87,6 @@ public class CanvasGraphMcpTools {
                 limit, offset, includeEdges, Boolean.TRUE.equals(detail)));
     }
 
-    @Tool(description = "List canvas nodes. nodeIds is optional.")
-    @McpTool(name = "canvas_graph_list_nodes",
-            description = "列出画布节点（默认紧凑视图，每次最多 100 条，按 offset 翻页）。返回 total 便于判断还有多少；"
-                    + "需要某个节点的完整 data（prompt/assetUrl）时用 canvas_graph_get_node。" + DETAIL_READ)
-    public Map<String, Object> canvasGraphListNodes(
-            @ToolParam(description = INJECTED_USER, required = false)
-            @McpToolParam(description = INJECTED_USER, required = false) String userId,
-            @ToolParam(description = INJECTED_PROJECT, required = false)
-            @McpToolParam(description = INJECTED_PROJECT, required = false) String projectId,
-            @ToolParam(description = INJECTED_CANVAS, required = false)
-            @McpToolParam(description = INJECTED_CANVAS, required = false) String canvasId,
-            @ToolParam(description = INJECTED_RUN, required = false)
-            @McpToolParam(description = INJECTED_RUN, required = false) String runId,
-            @ToolParam(description = INJECTED_OPERATION, required = false)
-            @McpToolParam(description = INJECTED_OPERATION, required = false) String operationKey,
-            @ToolParam(description = "只列这些节点 id（可选）：省略时列全部节点", required = false)
-            @McpToolParam(description = "只列这些节点 id（可选）：省略时列全部节点", required = false)
-            List<String> nodeIds,
-            @ToolParam(description = "本页条数（可选，默认 100）", required = false)
-            @McpToolParam(description = "本页条数（可选，默认 100）", required = false) Integer limit,
-            @ToolParam(description = "起始偏移（可选，默认 0）", required = false)
-            @McpToolParam(description = "起始偏移（可选，默认 0）", required = false) Integer offset,
-            @ToolParam(description = DETAIL_READ, required = false)
-            @McpToolParam(description = DETAIL_READ, required = false) Boolean detail) {
-        return run(() -> commands.listNodes(ctx(userId, projectId, canvasId, runId, operationKey),
-                nodeIds, limit, offset, Boolean.TRUE.equals(detail)));
-    }
-
     @Tool(description = "Get one canvas node by id.")
     @McpTool(name = "canvas_graph_get_node",
             description = "按 id 读取单个节点的完整对象（含全部 data）。连线前用它确认端口、data.mode 与已有素材。")
@@ -150,34 +104,6 @@ public class CanvasGraphMcpTools {
             @ToolParam(description = "节点 id（必填）", required = true)
             @McpToolParam(description = "节点 id（必填）", required = true) String nodeId) {
         return run(() -> commands.getNode(ctx(userId, projectId, canvasId, runId, operationKey), nodeId));
-    }
-
-    @Tool(description = "List canvas edges. edgeIds is optional.")
-    @McpTool(name = "canvas_graph_list_edges",
-            description = "列出画布连线（默认紧凑视图，每次最多 100 条，按 offset 翻页）。返回 total；"
-                    + "检查链路完整性用这个而不是 get_state。" + DETAIL_READ)
-    public Map<String, Object> canvasGraphListEdges(
-            @ToolParam(description = INJECTED_USER, required = false)
-            @McpToolParam(description = INJECTED_USER, required = false) String userId,
-            @ToolParam(description = INJECTED_PROJECT, required = false)
-            @McpToolParam(description = INJECTED_PROJECT, required = false) String projectId,
-            @ToolParam(description = INJECTED_CANVAS, required = false)
-            @McpToolParam(description = INJECTED_CANVAS, required = false) String canvasId,
-            @ToolParam(description = INJECTED_RUN, required = false)
-            @McpToolParam(description = INJECTED_RUN, required = false) String runId,
-            @ToolParam(description = INJECTED_OPERATION, required = false)
-            @McpToolParam(description = INJECTED_OPERATION, required = false) String operationKey,
-            @ToolParam(description = "只列这些连线 id（可选）：省略时列全部连线", required = false)
-            @McpToolParam(description = "只列这些连线 id（可选）：省略时列全部连线", required = false)
-            List<String> edgeIds,
-            @ToolParam(description = "本页条数（可选，默认 100）", required = false)
-            @McpToolParam(description = "本页条数（可选，默认 100）", required = false) Integer limit,
-            @ToolParam(description = "起始偏移（可选，默认 0）", required = false)
-            @McpToolParam(description = "起始偏移（可选，默认 0）", required = false) Integer offset,
-            @ToolParam(description = DETAIL_READ, required = false)
-            @McpToolParam(description = DETAIL_READ, required = false) Boolean detail) {
-        return run(() -> commands.listEdges(ctx(userId, projectId, canvasId, runId, operationKey),
-                edgeIds, limit, offset, Boolean.TRUE.equals(detail)));
     }
 
     @Tool(description = "List server-side canvas node types, ports and compatibility rules.")
@@ -462,8 +388,11 @@ public class CanvasGraphMcpTools {
     @McpTool(name = "canvas_graph_apply_plan",
             description = "**建图与改图的首选，也是唯一入口**：一次提交整张图的意图，只产生 1 个 revision、只重载一次画布。"
                     + "可同时包含：新建节点（nodes）、显式连线（edges）、**改已有节点**（updates:[{nodeId,patch}]）、"
-                    + "**把已有空节点标记为结果槽**（markResultSlots:[{producerNodeId,nodeIds,startOrder?}]）、收尾布局（layout）。"
-                    + "三种意图（nodes / updates / markResultSlots）至少给一个；纯改图可以不传 nodes。"
+                    + "**把已有空节点标记为结果槽**（markResultSlots:[{producerNodeId,nodeIds,startOrder?}]）、"
+                    + "**给已有生产节点补建新槽**（createResultSlots:[{producerNodeId,kind,count,position?,gapY?}]）、"
+                    + "收尾布局（layout）。"
+                    + "五种意图（nodes / updates / markResultSlots / createResultSlots / layout）至少给一个；"
+                    + "纯改图或纯排版可以不传 nodes。"
                     + "建图用法：给每个节点一个 ref（如 \"g1\"），再用 refs 声明它的上游来源——\"m1\" 表示引用该节点输出，"
                     + "\"g1.result.0\" 表示引用 g1 的第 1 个结果槽输出；"
                     + "端口与有序位次（reference/first/last/clips 的 portOrder）由服务端按端口表自动选择，按 refs 数组顺序占用。"
@@ -488,12 +417,14 @@ public class CanvasGraphMcpTools {
             @McpToolParam(description = INJECTED_OPERATION, required = false) String operationKey,
             @ToolParam(description = "计划对象（必填）：nodes（可选，1~100 个新建节点，每个可选 media 内联素材与 refs/resultSlots）、"
                     + "edges（可选显式边）、updates（可选，改已有节点的 data）、markResultSlots（可选，把已有空节点标记为结果槽）、"
+                    + "createResultSlots（可选，给已有生产节点补建新槽）、"
                     + "layout（可选收尾布局）、pruneUnreferencedResultSlots（可选，默认 false）。"
-                    + "nodes / updates / markResultSlots 至少给一个", required = true)
+                    + "nodes / updates / markResultSlots / createResultSlots / layout 至少给一个", required = true)
             @McpToolParam(description = "计划对象（必填）：nodes（可选，1~100 个新建节点，每个可选 media 内联素材与 refs/resultSlots）、"
                     + "edges（可选显式边）、updates（可选，改已有节点的 data）、markResultSlots（可选，把已有空节点标记为结果槽）、"
+                    + "createResultSlots（可选，给已有生产节点补建新槽）、"
                     + "layout（可选收尾布局）、pruneUnreferencedResultSlots（可选，默认 false）。"
-                    + "nodes / updates / markResultSlots 至少给一个", required = true)
+                    + "nodes / updates / markResultSlots / createResultSlots / layout 至少给一个", required = true)
             PlanSpec plan,
             @ToolParam(description = "校验失败是否继续（可选，默认 false=整批不落库并返回全部错误；true=跳过失败项、落库成功项）",
                     required = false)

@@ -451,6 +451,11 @@ public final class CanvasGraphToolInputs {
             @McpToolParam(description = "把已有空图片/视频节点标记为某生产节点的结果槽（可选）：每项 {producerNodeId, nodeIds, startOrder?}；"
                     + "不新建节点，只补连线与槽位顺序", required = false)
             List<MarkResultSlotArgs> markResultSlots,
+            @ToolParam(description = "给**已存在**的生产节点补建全新空结果槽（可选）：每项 {producerNodeId, kind, count, position?, gapY?}。"
+                    + "与 nodes[].resultSlots 的区别：后者只能给本批次新建的节点建槽", required = false)
+            @McpToolParam(description = "给**已存在**的生产节点补建全新空结果槽（可选）：每项 {producerNodeId, kind, count, position?, gapY?}。"
+                    + "与 nodes[].resultSlots 的区别：后者只能给本批次新建的节点建槽", required = false)
+            List<ResultSlotArgs> createResultSlots,
             @ToolParam(description = "收尾布局（可选）：在本批次变更之后、同一次保存内执行，不会额外产生 revision；不传布局参数时默认排布本批次节点", required = false)
             @McpToolParam(description = "收尾布局（可选）：在本批次变更之后、同一次保存内执行，不会额外产生 revision；不传布局参数时默认排布本批次节点", required = false)
             LayoutSpec layout,
@@ -464,6 +469,7 @@ public final class CanvasGraphToolInputs {
             put(out, "edges", toEdgeMaps(edges));
             put(out, "updates", toUpdateMaps(updates));
             put(out, "markResultSlots", toMarkSlotMaps(markResultSlots));
+            put(out, "createResultSlots", toResultSlotMaps(createResultSlots));
             put(out, "layout", layout == null ? null : layout.toMap());
             put(out, "pruneUnreferencedResultSlots", pruneUnreferencedResultSlots);
             return out;
@@ -478,6 +484,11 @@ public final class CanvasGraphToolInputs {
     static List<Map<String, Object>> toMarkSlotMaps(List<MarkResultSlotArgs> items) {
         if (items == null) return null;
         return items.stream().filter(Objects::nonNull).map(MarkResultSlotArgs::toMap).toList();
+    }
+
+    static List<Map<String, Object>> toResultSlotMaps(List<ResultSlotArgs> items) {
+        if (items == null) return null;
+        return items.stream().filter(Objects::nonNull).map(ResultSlotArgs::toMap).toList();
     }
 
     static List<Map<String, Object>> toNodeMaps(List<NodeSpec> nodes) {
