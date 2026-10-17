@@ -24,6 +24,7 @@ public class AgentScopeToolkitFactory {
     public static final String VIDEO_TOOLS = "video-tools";
     public static final String CANVAS_DESIGN_TOOLS = "canvas-design-tools";
     public static final String CANVAS_RUN_TOOLS = "canvas-run-tools";
+    public static final String STORYBOARD_TOOLS = "storyboard-tools";
 
     /**
      * 画布能力探测标记：这两个工具齐全才算画布链路真的可用。
@@ -111,7 +112,6 @@ public class AgentScopeToolkitFactory {
         register(toolkit, interactionTools.storyboardCommitTool());
         register(toolkit, interactionTools.tool());
         register(toolkit, workflowTools.tool());
-        register(toolkit, videoMergeTools.tool());
         documentTools.tools().forEach(tool -> register(toolkit, tool));
         if (sandboxTools != null) {
             sandboxTools.tools().forEach(tool -> register(toolkit, tool));
@@ -120,7 +120,18 @@ public class AgentScopeToolkitFactory {
             webTools.tools().forEach(tool -> register(toolkit, tool));
         }
         creativeTools.tools().forEach(tool -> register(toolkit, tool));
-        storyboardTools.tools().forEach(tool -> register(toolkit, tool));
+        // 分镜 16 个工具改为技能门控（2026-10-17）：它们此前无条件注册，
+        // 使每一轮（哪怕只是闲聊）都带着 16 个分镜 schema，占常驻工具面 40%。
+        // storyboard 技能的 allowed-tools 已声明这些工具，激活技能即可见。
+        toolkit.createSkillToolGroup(
+                STORYBOARD_TOOLS, "Storyboard production tools", false, "storyboard");
+        storyboardTools.tools().forEach(tool -> toolkit.registration()
+                .agentTool(toolPipeline.wrap(tool))
+                .group(STORYBOARD_TOOLS).apply());
+        // 成片合并只服务于分镜链路，与分镜同组，避免常驻。
+        toolkit.registration()
+                .agentTool(toolPipeline.wrap(videoMergeTools.tool()))
+                .group(STORYBOARD_TOOLS).apply();
         toolkit.createSkillToolGroup(
                 CANVAS_DESIGN_TOOLS, "Canvas graph design tools", false, "canvas-design");
         toolkit.createSkillToolGroup(

@@ -43,6 +43,44 @@ class AgentScopeToolkitFactoryTest {
                 .contains("list_conversation_documents", "read_document");
     }
 
+    /**
+     * 分镜工具必须门控在 storyboard 技能组里，不能常驻。
+     *
+     * <p>2026-10-17：这 16 个工具此前无条件注册，使每一轮（哪怕只是闲聊）都带着它们，
+     * 占常驻工具面的 40%。storyboard 技能的 {@code allowed-tools} 已声明这些工具，
+     * 激活技能即可见——与 canvas/image 的门控方式一致。
+     *
+     * <p>本测试锁三件事：① 组存在且含分镜工具；② 组初始**未激活**（否则等于没门控）；
+     * ③ 该组确实挂在 {@code storyboard} 技能上（否则没有任何途径激活它）。
+     */
+    @Test
+    void storyboardToolsAreGatedBehindStoryboardSkill() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeToolkitFactory factory = factory(interaction);
+
+        factory.create();
+        io.agentscope.core.tool.Toolkit toolkit = factory.activeToolkit();
+
+        io.agentscope.core.tool.ToolGroup group =
+                toolkit.getToolGroup(AgentScopeToolkitFactory.STORYBOARD_TOOLS);
+        assertThat(group)
+                .as("分镜工具组必须存在，否则分镜工具无处安放")
+                .isNotNull();
+        assertThat(group.getTools())
+                .as("分镜工具必须落在这个组里")
+                .contains("start_storyboard_production", "list_project_storyboard");
+        assertThat(group.containsTool("merge_storyboard_videos"))
+                .as("成片合并只服务分镜链路，必须与分镜同组、不得常驻")
+                .isTrue();
+        assertThat(group.isActive())
+                .as("分镜组初始必须未激活，否则等于没有门控")
+                .isFalse();
+        assertThat(toolkit.findSkillToolGroupsByActivateOnSkill("storyboard"))
+                .as("该组必须挂在 storyboard 技能上，否则模型没有任何途径激活它")
+                .contains(AgentScopeToolkitFactory.STORYBOARD_TOOLS);
+    }
+
     @Test
     void everyRegisteredReadOnlyToolIsAutoAllowed() {
         AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
@@ -258,7 +296,8 @@ class AgentScopeToolkitFactoryTest {
         when(images.tool()).thenReturn(tool("generate_image"));
         when(images.batchTool()).thenReturn(tool("generate_image_batch"));
         when(videos.tool()).thenReturn(tool("generate_video"));
-        when(storyboards.tools()).thenReturn(List.of());
+        when(storyboards.tools()).thenReturn(List.of(
+                tool("start_storyboard_production"), tool("list_project_storyboard")));
         when(workflows.tool()).thenReturn(tool("resolve_agent_workflow"));
         when(videoMerge.tool()).thenReturn(tool("merge_storyboard_videos"));
         when(creative.tools()).thenReturn(List.of());
