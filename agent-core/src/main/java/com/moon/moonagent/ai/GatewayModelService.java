@@ -44,6 +44,17 @@ public interface GatewayModelService {
     }
 
     /**
+     * 最近一次已知的网关模型目录版本号（网关 {@code gateway:models:version}）。
+     *
+     * <p>网关任何一次模型目录变更（路由 / 渠道 / 参数 / 默认模型）都会换一个新版本号；前端可据此
+     * 判断「下拉里的模型信息是否真的变了」，避免轮询时做无意义的重渲染。
+     * Redis 不可用且尚未从响应里看到过版本号时返回 {@code null}。
+     */
+    default String catalogVersion() {
+        return null;
+    }
+
+    /**
      * 模型上下文窗口（token 数）：权威源为网关 {@code model_params.context_window}，
      * 经 {@code GET {gateway}/v1/models?type=text} 的 {@code data[].contextWindow} 透出。
      *

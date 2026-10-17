@@ -1,5 +1,6 @@
 package com.moon.xiaoyuecanvas.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.moon.moonagent.service.MorrowCanvasService;
 import com.moon.xiaoyuecanvas.dto.response.CanvasGraphResponse;
@@ -37,6 +38,16 @@ public class CanvasGraphServiceImpl implements CanvasGraphService {
             return new CanvasGraphResponse(EMPTY_GRAPH, 0, null);
         }
         return new CanvasGraphResponse(parseGraph(g.getGraphJson()), g.getRevision(), g.getUpdatedAt() == null ? null : g.getUpdatedAt().toString());
+    }
+
+    @Override
+    public int revision(String userId, String canvasId) {
+        canvasService.get(userId, canvasId); // 属主校验
+        CanvasGraph g = canvasGraphMapper.selectOne(new LambdaQueryWrapper<CanvasGraph>()
+                .select(CanvasGraph::getRevision)
+                .eq(CanvasGraph::getCanvasId, canvasId)
+                .last("LIMIT 1"));
+        return g == null || g.getRevision() == null ? 0 : g.getRevision();
     }
 
     @Override

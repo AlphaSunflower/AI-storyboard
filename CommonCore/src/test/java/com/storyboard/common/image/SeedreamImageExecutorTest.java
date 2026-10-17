@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -57,6 +58,48 @@ class SeedreamImageExecutorTest {
         assertEquals("Bearer gateway-key", authorization.get());
         assertTrue(received.get().path("image").asText().startsWith("data:image/png;base64,"));
         assertEquals(2, received.get().path("sequential_image_generation_options").path("max_images").asInt());
+    }
+
+    @Test
+    void readsNonStreamingJsonForSingleImageModels() throws Exception {
+        AtomicReference<JsonNode> received = new AtomicReference<>();
+        startServer(exchange -> {
+            received.set(mapper.readTree(exchange.getRequestBody()));
+            writeJson(exchange, """
+                    {"created":1,"model":"doubao-seedream-5-0-flash-260915",
+                     "data":[{"url":"https://cdn/0.jpeg","size":"2048x2048"}],
+                     "usage":{"generated_images":1}}
+                    """);
+        });
+
+        List<String> saved = new SeedreamImageExecutor(new FakeImageStore()).execute(
+                config(), "doubao-seedream-5-0-flash-260915", "一只橘猫坐在窗边", "4K", 4,
+                List.of("/api/files/images/ref.png"));
+
+        assertEquals(List.of("/saved/0.jpeg"), saved);
+        assertFalse(received.get().has("stream"));
+        assertFalse(received.get().has("sequential_image_generation"));
+        assertEquals("2K", received.get().path("size").asText());
+    }
+
+    @Test
+    void surfacesUpstreamStatusForNonStreamingFailure() throws Exception {
+        startServer(exchange -> {
+            byte[] bytes = ("""
+                    {"error":{"code":"InvalidParameter","message":"the parameter `sequential_image_generation` is not supported"}}
+                    """).getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+
+        RuntimeException error = assertThrows(RuntimeException.class, () ->
+                new SeedreamImageExecutor(new FakeImageStore()).execute(
+                        config(), "doubao-seedream-5-0-flash-260915", "p", "2K", 1, List.of()));
+
+        assertTrue(error.getMessage().contains("Ark 返回 400"));
+        assertTrue(error.getMessage().contains("not supported"));
     }
 
     @Test
@@ -130,6 +173,14 @@ class SeedreamImageExecutorTest {
     private static void writeSse(HttpExchange exchange, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
+    }
+
+    private static void writeJson(HttpExchange exchange, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, bytes.length);
         exchange.getResponseBody().write(bytes);
         exchange.close();

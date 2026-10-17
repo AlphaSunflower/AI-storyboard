@@ -79,15 +79,40 @@ class TurnCapabilityReporterTest {
                                                    boolean sandboxEnabled,
                                                    Object webTools,
                                                    Object documentTools) {
+        return reporter(tools, sandboxEnabled, webTools, documentTools, null);
+    }
+
+    private static TurnCapabilityReporter reporter(ToolAvailability tools,
+                                                   boolean sandboxEnabled,
+                                                   Object webTools,
+                                                   Object documentTools,
+                                                   AgentScopeToolkitFactory toolkitFactory) {
         return new TurnCapabilityReporter(tools, new AgentScopeProperties(),
                 new StubModelRoles(), provider(sandbox(sandboxEnabled)),
-                providerOfWeb(webTools), providerOfDocument(documentTools));
+                providerOfWeb(webTools), providerOfDocument(documentTools),
+                providerOfStoryboard(null), providerOfToolkit(toolkitFactory));
+    }
+
+    /**
+     * 尚未创建 Toolkit 的工厂替身：{@code activeToolkit} 为空，注册表读出来是空集合。
+     * 全部依赖传 null——该构造器只做字段赋值，诊断路径不触碰它们。
+     */
+    private static AgentScopeToolkitFactory emptyRegistryToolkit() {
+        return new AgentScopeToolkitFactory(
+                null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, new AgentScopeProperties());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<AgentScopeToolkitFactory> providerOfToolkit(Object value) {
+        return (ObjectProvider<AgentScopeToolkitFactory>) (ObjectProvider<?>) provider(value);
     }
 
     private static TurnCapabilityReporter reporterWithWeb(Object webTools) {
         return new TurnCapabilityReporter(new StubTools(), new AgentScopeProperties(),
                 new StubModelRoles(), provider(sandbox(false)),
-                providerOfWeb(webTools), providerOfDocument(null));
+                providerOfWeb(webTools), providerOfDocument(null),
+                providerOfStoryboard(null), providerOfToolkit(null));
     }
 
     @SuppressWarnings("unchecked")
@@ -100,9 +125,28 @@ class TurnCapabilityReporterTest {
         return (ObjectProvider<AgentScopeDocumentTools>) (ObjectProvider<?>) provider(value);
     }
 
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<AgentScopeStoryboardTools> providerOfStoryboard(Object value) {
+        return (ObjectProvider<AgentScopeStoryboardTools>) (ObjectProvider<?>) provider(value);
+    }
+
     private static String report(String[] registeredTools, boolean sandboxEnabled) {
         return reporter(new StubTools(registeredTools), sandboxEnabled, null, null)
                 .capabilityReport();
+    }
+
+    @Test
+    void canvasIsUnavailableWhenTheToolkitRegistryHasNoCanvasTools() {
+        // 事故形态（2026-10-15）：发现记录（SkillExpander）里有全部画布标记，运行时据此宣称
+        // 「画布设计与执行：可用」，但 Toolkit 注册表里一个画布工具都没有 —— 模型于是激活空
+        // 工具组，每个调用都拿到 Tool not found。能力声明必须以注册表为准。
+        String report = reporter(new StubTools(
+                        "canvas_graph_get_state", "canvas_graph_layout_graph"),
+                false, null, null, emptyRegistryToolkit())
+                .capabilityReport();
+
+        assertThat(report).contains("此轮不可用的能力");
+        assertThat(report).contains("画布设计与执行");
     }
 
     @Test
@@ -148,6 +192,15 @@ class TurnCapabilityReporterTest {
     }
 
     @Test
+    void registeredReadProjectSceneDeclaresStoryboardReadingAvailable() {
+        String report = reporter(new StubTools(AgentScopeStoryboardTools.READ_PROJECT_SCENE),
+                false, null, null).capabilityReport();
+
+        assertThat(report).contains("此轮可用的能力");
+        assertThat(report).contains("项目分镜读取");
+    }
+
+    @Test
     void partialCanvasRegistrationCountsAsUnavailable() {
         // 只注册了部分画布工具（例如 MCP 半途断开）时必须判为整体不可用。
         String report = report(new String[]{"canvas_graph_get_state"}, false);
@@ -162,17 +215,15 @@ class TurnCapabilityReporterTest {
 
         assertThat(report).contains("可用子智能体");
         assertThat(report).contains("creative-planner");
-        assertThat(report).contains("visual-critic");
+        assertThat(report).doesNotContain("visual-critic");
         assertThat(report).contains("continuity-editor");
     }
 
     @Test
     void webSearchWithoutRequiredCredentialsIsReportedUnavailable() {
-        // 事故形态：bean 在容器里（开关是 true），但当前后端缺必需配置，tools() 返回空列表、
+        // 事故形态：bean 在容器里（开关是 true），但没有 key，tools() 返回空列表、
         // 一个工具都没注册。只看 bean 存在会把「网页检索」报成可用，模型随后承诺做不到的事。
-        // 这里用 deepseek 后端且不给 key 来构造「缺必需配置」。
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setProvider("deepseek");
         AgentScopeWebTools web = new AgentScopeWebTools(properties);
 
         String report = reporterWithWeb(web).capabilityReport();
@@ -184,7 +235,6 @@ class TurnCapabilityReporterTest {
     @Test
     void webSearchWithRequiredConfigIsReportedAvailable() {
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setProvider("deepseek");
         properties.getWebSearch().setApiKey("sk-test");
 
         String report = reporterWithWeb(new AgentScopeWebTools(properties)).capabilityReport();
@@ -193,14 +243,5 @@ class TurnCapabilityReporterTest {
         // 其它能力（画布/图片/视频/沙箱）没注册，仍应出现在不可用清单里；
         // 这里只要求「网页检索」不再被列进不可用清单。
         assertThat(report).contains("此轮不可用的能力：画布设计与执行");
-    }
-
-    @Test
-    void selfHostedSearchIsAvailableWithoutAnyThirdPartyKey() {
-        // 默认后端是自托管 SearXNG：没有 key 也必须报可用，否则自托管方案会被误判为不可用。
-        String report = reporterWithWeb(new AgentScopeWebTools(new AgentScopeProperties()))
-                .capabilityReport();
-
-        assertThat(report).contains("此轮可用的能力").contains("网页检索");
     }
 }

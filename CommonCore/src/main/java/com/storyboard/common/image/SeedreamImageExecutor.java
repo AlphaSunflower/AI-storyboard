@@ -48,9 +48,11 @@ public class SeedreamImageExecutor {
         if (config == null || config.gatewayBaseUrl() == null || config.gatewayBaseUrl().isBlank()) {
             throw new IllegalArgumentException("网关地址未配置");
         }
+        // 5.0 pro/flash 不支持流式输出，请求体不带 stream，响应是一次性 JSON
+        boolean streaming = SeedreamImageProtocol.supportsStreaming(model);
         int count = requestedCount != null ? Math.max(0, requestedCount) : 1;
         List<String> normalizedInputs = normalizeInputs(orderedInputImages);
-        SeedreamImageProtocol.validateLimits(normalizedInputs.size(), count);
+        SeedreamImageProtocol.validateLimits(model, normalizedInputs.size(), count);
 
         ObjectNode requestBody = SeedreamImageProtocol.buildRequest(model, prompt, normalizedInputs, size, count);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
@@ -72,7 +74,7 @@ public class SeedreamImageExecutor {
                 }
                 throw new RuntimeException("Ark 返回 " + response.statusCode() + ": " + errorMessage(body));
             }
-            return consume(response.body());
+            return streaming ? consumeSse(response.body()) : consumeSync(response.body());
         } catch (RuntimeException e) {
             throw e;
         } catch (InterruptedException e) {
@@ -83,34 +85,59 @@ public class SeedreamImageExecutor {
         }
     }
 
-    private List<String> consume(InputStream stream) throws Exception {
+    private List<String> consumeSse(InputStream stream) throws Exception {
         List<String> saved = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         boolean[] completed = {false};
 
-        SeedreamImageProtocol.readEvents(stream, event -> {
-            switch (event.type()) {
-                case PARTIAL_SUCCEEDED -> {
-                    try {
-                        String persisted = saveEventImage(event);
-                        if (persisted != null && !persisted.isBlank()) saved.add(persisted);
-                    } catch (Exception e) {
-                        failures.add("image_index=" + event.imageIndex() + " 保存失败: " + e.getMessage());
-                    }
-                }
-                case PARTIAL_FAILED -> failures.add(formatFailure(event));
-                case ERROR -> throw new RuntimeException("Ark 流式错误: " + formatFailure(event));
-                case COMPLETED -> {
-                    completed[0] = true;
-                    log.info("Seedream 生成完成: usage={}", event.usage() == null ? "{}" : event.usage());
-                }
-                case UNKNOWN -> {
+        SeedreamImageProtocol.readEvents(stream, event ->
+                applyEvent(event, saved, failures, completed, "Ark 流式错误: "));
+
+        return finish(saved, failures, completed[0]);
+    }
+
+    /** 非流式模型：读取一次性返回的 {@code {data:[{url|b64_json}]}} JSON。 */
+    private List<String> consumeSync(InputStream stream) throws Exception {
+        String body;
+        try (InputStream in = stream) {
+            body = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        List<String> saved = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
+        boolean[] completed = {false};
+
+        for (SeedreamImageProtocol.Event event : SeedreamImageProtocol.parseSyncResponse(body)) {
+            applyEvent(event, saved, failures, completed, "Ark 图片生成错误: ");
+        }
+
+        return finish(saved, failures, completed[0]);
+    }
+
+    private void applyEvent(SeedreamImageProtocol.Event event, List<String> saved,
+                            List<String> failures, boolean[] completed, String errorPrefix) {
+        switch (event.type()) {
+            case PARTIAL_SUCCEEDED -> {
+                try {
+                    String persisted = saveEventImage(event);
+                    if (persisted != null && !persisted.isBlank()) saved.add(persisted);
+                } catch (Exception e) {
+                    failures.add("image_index=" + event.imageIndex() + " 保存失败: " + e.getMessage());
                 }
             }
-        });
+            case PARTIAL_FAILED -> failures.add(formatFailure(event));
+            case ERROR -> throw new RuntimeException(errorPrefix + formatFailure(event));
+            case COMPLETED -> {
+                completed[0] = true;
+                log.info("Seedream 生成完成: usage={}", event.usage() == null ? "{}" : event.usage());
+            }
+            case UNKNOWN -> {
+            }
+        }
+    }
 
-        if (!completed[0] && !saved.isEmpty()) {
-            log.warn("Seedream SSE 未收到 completed，保留已成功落库的 {} 张图片", saved.size());
+    private List<String> finish(List<String> saved, List<String> failures, boolean completed) {
+        if (!completed && !saved.isEmpty()) {
+            log.warn("Seedream 响应未收到 completed，保留已成功落库的 {} 张图片", saved.size());
         }
         if (saved.isEmpty()) {
             String detail = failures.isEmpty() ? "未收到成功图片" : String.join("; ", failures);

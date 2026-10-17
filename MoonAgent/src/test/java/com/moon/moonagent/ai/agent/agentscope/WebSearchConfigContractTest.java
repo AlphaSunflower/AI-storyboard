@@ -19,9 +19,6 @@ class WebSearchConfigContractTest {
     /** 键 → 必须出现的 env 变量名。 */
     private static final String[][] KEYS = {
             {"enabled:", "AGENTSCOPE_WEB_SEARCH_ENABLED"},
-            {"provider:", "AGENTSCOPE_WEB_SEARCH_PROVIDER"},
-            {"searxng-url:", "AGENTSCOPE_SEARXNG_URL"},
-            {"searxng-language:", "AGENTSCOPE_SEARXNG_LANGUAGE"},
             {"base-url:", "AGENTSCOPE_WEB_SEARCH_BASE_URL"},
             {"api-key:", "AGENTSCOPE_WEB_SEARCH_API_KEY"},
             {"model:", "AGENTSCOPE_WEB_SEARCH_MODEL"},
@@ -54,16 +51,18 @@ class WebSearchConfigContractTest {
     }
 
     @Test
-    void defaultProviderIsSelfHostedAndKeepsTheMessagesBaseForDeepseek() throws Exception {
+    void singleBackendKeepsTheAnthropicMessagesBaseAndOffersNoSecondEngine() throws Exception {
         Path path = Path.of(RESOURCE);
         if (!Files.isRegularFile(path)) return;
         String yaml = Files.readString(path, StandardCharsets.UTF_8);
 
-        // 默认自托管：不填任何 key 也能用。
-        assertThat(yaml).contains("provider: ${AGENTSCOPE_WEB_SEARCH_PROVIDER:searxng}");
-        // DeepSeek 后端仍保留 Anthropic 兼容基址：原生搜索只存在于 Messages 协议上，
-        // 默认值若被改成 chat-completions 基址，这条路径会整片 404（本次事故的形态）。
+        // 唯一后端 = DeepSeek 原生搜索：默认基址必须留在 Anthropic Messages 协议上，
+        // 改成 chat-completions 基址这条路径会整片 404（已经发生过一次）。
         assertThat(yaml).contains("https://api.deepseek.com/anthropic/v1");
+        // 不再有第二个可切换的搜索引擎：出现过一次「配了但没部署」的后端，
+        // 结果是 /chat 的每一次网页检索都失败。
+        assertThat(yaml).doesNotContain("searxng");
+        assertThat(yaml).doesNotContain("AGENTSCOPE_WEB_SEARCH_PROVIDER");
         assertThat(yaml).doesNotContain("firecrawl");
     }
 }

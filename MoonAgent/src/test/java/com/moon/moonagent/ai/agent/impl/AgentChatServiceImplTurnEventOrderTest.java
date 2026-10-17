@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.AiConfigProperties;
 import com.moon.moonagent.ai.agent.AgentGenerationService;
+import com.moon.moonagent.ai.agent.AgentInterruptException;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.ConversationTitleService;
@@ -116,6 +117,65 @@ class AgentChatServiceImplTurnEventOrderTest {
         assertThat(frames.getLast().payload().path("code").asText()).isEqualTo("50001");
     }
 
+    /**
+     * 红线补充：用户打断（「停止生成」/「打断并发送」）不是"把已说出的字丢掉"。
+     *
+     * <p>打断收口必须同时做到三件事：turn 仍按同一有序 publisher 收尾（序号连续、终态不越过 delta）、
+     * 已流出的正文连同「…」落库（刷新后仍在、后续回合上下文读得到）、终态帧带 {@code interrupted} 标记。</p>
+     */
+    @Test
+    void interruptedTurnKeepsPartialReplyAndEmitsContiguousTerminalSequence() {
+        Harness harness = new Harness();
+        harness.runWith(observer -> {
+            // 3 参构造器才是 (replyId, blockId, delta)；5 参是 (id, createdAt, replyId, blockId, delta)
+            observer.accept(new TextBlockDeltaEvent("reply-1", "block-1", "我先说一半"));
+            observer.accept(new TextBlockDeltaEvent("reply-1", "block-1", "就被叫停了"));
+            throw new AgentInterruptException();
+        });
+
+        List<AgentTurnEventEnvelope> persisted = harness.awaitPersisted(4);
+        List<RecordedFrame> frames = harness.frames();
+
+        assertThat(persisted).extracting(AgentTurnEventEnvelope::seq).containsExactly(1, 2, 3, 4);
+        assertThat(persisted).extracting(AgentTurnEventEnvelope::type).containsExactly(
+                "turn_started", "TEXT_BLOCK_DELTA", "TEXT_BLOCK_DELTA", "turn_failed");
+        assertThat(frames).extracting(RecordedFrame::seq).containsExactly(1, 2, 3, 4);
+        assertThat(persisted.getLast().payload())
+                .containsEntry("code", "40904")
+                .containsEntry("interrupted", true)
+                .containsEntry("content", "我先说一半就被叫停了…");
+        // 打断收口必须把这段被截断的回复落库（否则刷新后消失、上下文也读不到）
+        assertThat(harness.persistedAssistantContents()).containsExactly("我先说一半就被叫停了…");
+    }
+
+    /** 省略号只补一次：正文已以「…」结尾时不再叠加。 */
+    @Test
+    void interruptedReplyContentAppendsEllipsisOnce() {
+        assertThat(AgentChatServiceImpl.interruptedReplyContent("说到一半"))
+                .isEqualTo("说到一半…");
+        assertThat(AgentChatServiceImpl.interruptedReplyContent("说到一半…"))
+                .isEqualTo("说到一半…");
+        assertThat(AgentChatServiceImpl.interruptedReplyContent("   "))
+                .isEmpty();
+        assertThat(AgentChatServiceImpl.interruptedReplyContent(null)).isEmpty();
+    }
+
+    /**
+     * 「停止并发送」的时序红线：打断标志必须在拿到会话锁之后才清除。
+     *
+     * <p>若在请求线程就 clear，旧回合还没观察到打断信号就被清掉 → 一直跑到自然结束（用户视角
+     * 「停止没反应」），同时新回合因会话锁仍被占用被 40901 拒绝。</p>
+     */
+    @Test
+    void interruptFlagIsClearedOnlyAfterConversationLockIsHeld() {
+        Harness harness = new Harness();
+        harness.runWith(observer -> new AgentTurnResult("好了", Map.of(), List.of(), null, List.of(), false, ""));
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(harness.lock, harness.support);
+        order.verify(harness.lock).acquire("conversation-1");
+        order.verify(harness.support).clearInterrupt("conversation-1");
+    }
+
     @Test
     void liveFramesAndAfterSeqCompensationAgreeEventByEvent() {
         Harness harness = new Harness();
@@ -216,15 +276,15 @@ class AgentChatServiceImplTurnEventOrderTest {
         private final MoonAgentRuntime runtime = mock(MoonAgentRuntime.class);
         private final SandboxOutputReconciler reconciler = mock(SandboxOutputReconciler.class);
         private final RecordingEmitter emitter = new RecordingEmitter();
+        private final ConversationLock lock = mock(ConversationLock.class);
+        private final AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        private final AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
         private final AgentChatServiceImpl service;
 
         private Harness() {
             AgentConversationMapper conversationMapper = mock(AgentConversationMapper.class);
-            AgentMessageMapper messageMapper = mock(AgentMessageMapper.class);
-            ConversationLock lock = mock(ConversationLock.class);
             ConversationLock.LockLease lease = mock(ConversationLock.LockLease.class);
             PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
-            AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
             AgentConversation conversation = new AgentConversation();
             conversation.setId("conversation-1");
             conversation.setUserId("user-1");
@@ -299,6 +359,7 @@ class AgentChatServiceImplTurnEventOrderTest {
                     mock(ProjectCreativeContextService.class),
                     mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.class),
                     mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.class),
+                    mock(com.moon.moonagent.ai.agent.context.ConversationContextCleanupService.class),
                     transactionManager);
             inject("agentScopeMediaRuntime", runtime);
             inject("turnEventStore", store);
@@ -324,6 +385,21 @@ class AgentChatServiceImplTurnEventOrderTest {
 
         private List<AgentTurnEventEnvelope> awaitPersisted(int expectedCount) {
             return await(() -> store.eventsAfter(TURN_ID, 0), expectedCount);
+        }
+
+        /** 本轮落库的 assistant 消息正文（打断收口必须留下被截断的回复）。 */
+        private List<String> persistedAssistantContents() {
+            List<String> contents = new ArrayList<>();
+            for (org.mockito.invocation.Invocation invocation
+                    : org.mockito.Mockito.mockingDetails(messageMapper).getInvocations()) {
+                if (!"insert".equals(invocation.getMethod().getName())) continue;
+                Object argument = invocation.getArgument(0);
+                if (argument instanceof com.moon.moonagent.entity.AgentMessage message
+                        && "assistant".equals(message.getRole())) {
+                    contents.add(message.getContent());
+                }
+            }
+            return contents;
         }
 
         private List<RecordedFrame> frames() {

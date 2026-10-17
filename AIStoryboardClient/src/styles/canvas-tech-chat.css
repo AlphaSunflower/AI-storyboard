@@ -20,7 +20,6 @@
 }
 
 .chat-canvas-tech-atmosphere__grid,
-.chat-canvas-tech-atmosphere__beam,
 .chat-canvas-tech-atmosphere__line {
   position: absolute;
   pointer-events: none;
@@ -38,27 +37,6 @@
   mask-image: radial-gradient(ellipse 84% 72% at 54% 48%, #000 16%, rgba(0, 0, 0, 0.74) 54%, transparent 100%);
   -webkit-mask-image: radial-gradient(ellipse 84% 72% at 54% 48%, #000 16%, rgba(0, 0, 0, 0.74) 54%, transparent 100%);
   animation: chat-canvas-grid-drift 18s linear infinite;
-}
-
-.chat-canvas-tech-atmosphere__beam {
-  top: -18%;
-  bottom: -18%;
-  left: -42%;
-  width: 34%;
-  opacity: 0;
-  transform: skewX(-14deg);
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(75, 177, 199, 0.025) 28%,
-    rgba(75, 177, 199, 0.16) 52%,
-    rgba(75, 177, 199, 0.025) 75%,
-    transparent 100%
-  );
-}
-
-.chat-canvas-tech-atmosphere.is-active .chat-canvas-tech-atmosphere__beam {
-  animation: chat-canvas-beam-sweep 7.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
 }
 
 .chat-canvas-tech-atmosphere__line {
@@ -119,23 +97,6 @@
   }
 }
 
-@keyframes chat-canvas-beam-sweep {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0) skewX(-14deg);
-  }
-  12% {
-    opacity: 1;
-  }
-  72% {
-    opacity: 0.72;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(430%, 0, 0) skewX(-14deg);
-  }
-}
-
 @keyframes chat-canvas-signal-line {
   0%,
   14% {
@@ -153,12 +114,7 @@
   }
 
   .chat-canvas-tech-atmosphere__grid,
-  .chat-canvas-tech-atmosphere.is-active .chat-canvas-tech-atmosphere__beam,
   .chat-canvas-tech-atmosphere.is-active .chat-canvas-tech-atmosphere__line {
     animation: none;
-  }
-
-  .chat-canvas-tech-atmosphere__beam {
-    display: none;
   }
 }

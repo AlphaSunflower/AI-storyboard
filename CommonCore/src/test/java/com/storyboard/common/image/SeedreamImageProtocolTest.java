@@ -187,4 +187,119 @@ class SeedreamImageProtocolTest {
         assertEquals(SeedreamImageProtocol.EventType.PARTIAL_SUCCEEDED, events.get(0).type());
         assertEquals(SeedreamImageProtocol.EventType.COMPLETED, events.get(1).type());
     }
+
+    // ── 按模型能力裁剪参数（方舟对 5.0 pro/flash 拒绝组图与流式参数） ──────────────
+
+    @Test
+    void recognizesCapabilitiesByModel() {
+        SeedreamImageProtocol.Capabilities flash = SeedreamImageProtocol.capabilities(
+                "doubao-seedream-5-0-flash-260915");
+        assertFalse(flash.groupImages());
+        assertFalse(flash.streaming());
+        assertEquals(List.of("1K", "1.5K", "2K"), flash.sizeTiers());
+        assertEquals(10, flash.maxInputImages());
+
+        SeedreamImageProtocol.Capabilities pro = SeedreamImageProtocol.capabilities(
+                "doubao-seedream-5-0-pro-260628");
+        assertFalse(pro.groupImages());
+        assertFalse(pro.streaming());
+
+        // lite 及基础模型别名（doubao-seedream-5-0-<版本号>）支持组图与流式
+        SeedreamImageProtocol.Capabilities lite = SeedreamImageProtocol.capabilities(
+                "doubao-seedream-5-0-260128");
+        assertTrue(lite.groupImages());
+        assertTrue(lite.streaming());
+        assertEquals(List.of("2K", "3K", "4K"), lite.sizeTiers());
+        assertTrue(SeedreamImageProtocol.supportsGroupImages("doubao-seedream-5-0-lite-260128"));
+
+        SeedreamImageProtocol.Capabilities v45 = SeedreamImageProtocol.capabilities(
+                "doubao-seedream-4-5-251128");
+        assertTrue(v45.groupImages());
+        assertTrue(v45.streaming());
+        assertEquals(List.of("2K", "4K"), v45.sizeTiers());
+
+        SeedreamImageProtocol.Capabilities v40 = SeedreamImageProtocol.capabilities(
+                "doubao-seedream-4-0-250828");
+        assertEquals(List.of("1K", "2K", "4K"), v40.sizeTiers());
+        assertEquals(14, v40.maxInputImages());
+    }
+
+    @Test
+    void omitsUnsupportedParametersForSingleImageModels() {
+        JsonNode body = SeedreamImageProtocol.buildRequest(
+                "doubao-seedream-5-0-flash-260915",
+                "一只橘猫坐在窗边看雨",
+                List.of("https://example.com/a.png", "https://example.com/b.png"),
+                "4K",
+                4);
+
+        assertFalse(body.has("sequential_image_generation"));
+        assertFalse(body.has("sequential_image_generation_options"));
+        assertFalse(body.has("stream"));
+        assertEquals("2K", body.path("size").asText());
+        assertEquals(2, body.path("image").size());
+        assertEquals("一只橘猫坐在窗边看雨", body.path("prompt").asText());
+    }
+
+    @Test
+    void keepsGroupAndStreamParametersForGroupImageModels() {
+        JsonNode body = SeedreamImageProtocol.buildRequest(
+                "doubao-seedream-4-0-250828", "一只橘猫", List.of(), "1K", 1);
+
+        assertEquals("disabled", body.path("sequential_image_generation").asText());
+        assertTrue(body.path("stream").asBoolean());
+    }
+
+    @Test
+    void degradesSizesOutsideTheModelTierSet() {
+        assertEquals("2K", SeedreamImageProtocol.normalizeSize("doubao-seedream-5-0-flash-260915", "4K"));
+        assertEquals("1.5K", SeedreamImageProtocol.normalizeSize("doubao-seedream-5-0-flash-260915", "1.5K"));
+        assertEquals("2K", SeedreamImageProtocol.normalizeSize("doubao-seedream-4-5-251128", "1K"));
+        assertEquals("2K", SeedreamImageProtocol.normalizeSize("doubao-seedream-5-0-260128", "1K"));
+        assertEquals("4K", SeedreamImageProtocol.normalizeSize("doubao-seedream-4-0-250828", "4K"));
+    }
+
+    @Test
+    void singleImageModelIgnoresRequestedCountAndHasLowerReferenceLimit() {
+        assertEquals(1, SeedreamImageProtocol.resolveRequestedCount(
+                "doubao-seedream-5-0-flash-260915", "生成四张同一角色的不同表情", 4));
+        assertThrows(IllegalArgumentException.class, () ->
+                SeedreamImageProtocol.validateLimits("doubao-seedream-5-0-flash-260915", 11, 1));
+        // 单图模型忽略输出张数，但 4.0 仍校验“输入 + 输出 ≤ 15”
+        SeedreamImageProtocol.validateLimits("doubao-seedream-5-0-flash-260915", 10, 4);
+        assertThrows(IllegalArgumentException.class, () ->
+                SeedreamImageProtocol.validateLimits("doubao-seedream-4-0-250828", 2, 14));
+    }
+
+    @Test
+    void parsesNonStreamingJsonResponse() {
+        List<SeedreamImageProtocol.Event> events = SeedreamImageProtocol.parseSyncResponse("""
+                {"created":1,"model":"doubao-seedream-5-0-flash-260915",
+                 "data":[{"url":"https://cdn/0.jpeg","size":"2048x2048"},
+                         {"error":{"code":"Sensitive","message":"blocked"}}],
+                 "usage":{"generated_images":1}}
+                """);
+
+        assertEquals(3, events.size());
+        assertEquals(SeedreamImageProtocol.EventType.PARTIAL_SUCCEEDED, events.get(0).type());
+        assertEquals("https://cdn/0.jpeg", events.get(0).url());
+        assertEquals(0, events.get(0).imageIndex());
+        assertEquals(SeedreamImageProtocol.EventType.PARTIAL_FAILED, events.get(1).type());
+        assertEquals("blocked", events.get(1).message());
+        assertEquals(SeedreamImageProtocol.EventType.COMPLETED, events.get(2).type());
+        assertEquals(1, events.get(2).usage().path("generated_images").asInt());
+    }
+
+    @Test
+    void parsesNonStreamingTopLevelError() {
+        List<SeedreamImageProtocol.Event> events = SeedreamImageProtocol.parseSyncResponse(
+                """
+                {"error":{"code":"InvalidParameter","message":"bad size"}}
+                """);
+
+        assertEquals(1, events.size());
+        assertEquals(SeedreamImageProtocol.EventType.ERROR, events.get(0).type());
+        assertEquals("InvalidParameter", events.get(0).code());
+        assertEquals("bad size", events.get(0).message());
+    }
 }

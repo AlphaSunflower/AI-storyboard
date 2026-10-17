@@ -1,7 +1,6 @@
 package com.moon.moonagent.controller;
 
 import com.moon.moonagent.dto.request.AgentConversationUpdateRequest;
-import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.dto.request.AgentEditMessageRequest;
 import com.moon.moonagent.dto.request.AgentAssetGroupBindingRequest;
 import com.moon.moonagent.dto.request.AgentApprovalModeUpdateRequest;
@@ -25,6 +24,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.ClearContextResult;
 import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
@@ -33,14 +33,13 @@ import com.moon.moonagent.ai.agent.PromptOptimizeService;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.security.FileUrlSigner;
-import com.moon.moonagent.security.OutboundUrlGuard;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
+import com.moon.moonagent.service.TurnMediaCanonicalizer;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -72,13 +71,7 @@ public class AgentConversationController {
     private final AssetClient assetClient;
     private final ConversationAssetGroupService conversationAssetGroupService;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
-
-    @Value("${storyboard.internal-url:}")
-    private String storyboardInternalUrl;
-    @Value("${storyboard.asset-client.base-url:}")
-    private String assetServiceBaseUrl;
-    @Value("${storyboard.storage.endpoint:}")
-    private String storageEndpoint;
+    private final TurnMediaCanonicalizer turnMediaCanonicalizer;
 
     /** 创建会话 */
     @PostMapping("/conversations")
@@ -166,11 +159,25 @@ public class AgentConversationController {
         return ApiResponse.ok("删除成功", null);
     }
 
-    /** 清空会话聊天记录（删消息；会话与生成资产保留，其他会话不受影响） */
+    /** 清空会话上下文（真删除：消息 + 轮次事件 + checkpoint + 画布会话…，会话与产出素材保留） */
     @DeleteMapping("/conversations/{id}/messages")
     public ApiResponse<Void> clearMessages(Authentication auth, @PathVariable String id) {
         chatService.clearMessages(auth.getName(), id);
         return ApiResponse.ok("已清空", null);
+    }
+
+    /**
+     * 「/清空上下文」：把会话真删成「刚建出来的新对话」。
+     *
+     * <p>与 {@code DELETE /conversations/{id}/messages} 的区别：这里做的是硬删除 +
+     * 彻底重置（消息、轮次与直播事件、待确认 checkpoint、画布会话与运行、文档索引、
+     * 异步任务、时间线、评审、工作流、资产组绑定全部 DELETE），并重置标题与会话初始化状态。
+     * 产出素材仍保留。
+     */
+    @PostMapping("/conversations/{id}/context/clear")
+    public ApiResponse<ClearContextResult> clearContext(
+            Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(chatService.clearContext(auth.getName(), id));
     }
 
     /** 消息列表 */
@@ -278,7 +285,8 @@ public class AgentConversationController {
         if (request.content() == null || request.content().isBlank()) {
             throw new BusinessException(40001, "消息内容不能为空");
         }
-        validateTurnMedia(request);
+        // 媒体地址归一化 + 可信性校验（拒绝不可信地址，剥掉浏览器 origin）
+        request = turnMediaCanonicalizer.canonicalize(request);
         ResolvedTurnMedia media = resolveTurnMedia(auth, id, request);
         SseEmitter emitter = createSseEmitter();
         if (request.attachments() != null && !request.attachments().isEmpty()) {
@@ -286,12 +294,14 @@ public class AgentConversationController {
                     auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
                     request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
                     media.audioUrls(), request.clientRequestId(), request.attachments(),
+                    request.references(),
                     generationPreferences(request), emitter);
         } else {
             chatService.streamAgentScopeTurn(
                     auth.getName(), id, request.content(), media.picUrls(), media.assetIds(),
                     request.routingHint(), request.editMessageId(), request.canvasContext(), media.videoUrls(),
                     media.audioUrls(), request.clientRequestId(), List.of(),
+                    request.references(),
                     generationPreferences(request), emitter);
         }
         return emitter;
@@ -324,7 +334,7 @@ public class AgentConversationController {
                 auth.getName(), id, turnId, request.formToken(), request.action(), request.content(),
                 request.params() == null ? Map.of() : request.params(),
                 request.assetIds() == null ? List.of() : request.assetIds(),
-                request.canvasContext(), emitter);
+                turnMediaCanonicalizer.canonicalizeCanvasContext(request.canvasContext()), emitter);
         return emitter;
     }
 
@@ -407,6 +417,23 @@ public class AgentConversationController {
             @RequestParam(defaultValue = "0") int afterSeq) {
         return ApiResponse.ok(chatService.getTurnEvents(
                 auth.getName(), id, turnId, afterSeq));
+    }
+
+    /**
+     * 续传某个 turn 的事件流（刷新 / 新开页面接上正在跑的 turn）。
+     *
+     * <p>先补 {@code afterSeq} 之后的持久化事件，再持续推送新事件直到终态；turn 已终态时
+     * 补完历史即结束。该端点不重复执行 turn，订阅者断开也不会中断 turn。
+     */
+    @GetMapping(value = "/conversations/{id}/turns/{turnId}/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamTurnEvents(Authentication auth, @PathVariable String id,
+                                       @PathVariable String turnId,
+                                       @RequestParam(defaultValue = "0") long afterSeq) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        SseEmitter emitter = createSseEmitter();
+        chatService.openTurnEventStream(auth.getName(), id, turnId, afterSeq, emitter);
+        return emitter;
     }
 
     /** 编辑最后一轮用户消息并覆盖重发（SSE）。 */
@@ -579,40 +606,6 @@ public class AgentConversationController {
                 request.assetIds() == null ? List.of() : request.assetIds(),
                 resolvedVideos.stream().distinct().toList(),
                 resolvedAudios.stream().distinct().toList());
-    }
-
-    private void validateTurnMedia(AgentSendMessageRequest request) {
-        List<String> allowedOrigins = List.of(
-                storyboardInternalUrl == null ? "" : storyboardInternalUrl,
-                assetServiceBaseUrl == null ? "" : assetServiceBaseUrl,
-                storageEndpoint == null ? "" : storageEndpoint
-        );
-        for (String url : picUrls(request)) {
-            validateMediaUrl(url, allowedOrigins);
-        }
-        validateMediaUrls(request.referenceVideos(), allowedOrigins);
-        validateMediaUrls(request.referenceAudios(), allowedOrigins);
-        if (request.attachments() != null) {
-            request.attachments().stream()
-                    .filter(java.util.Objects::nonNull)
-                    .map(AgentAttachmentRequest::url)
-                    .forEach(url -> validateMediaUrl(url, allowedOrigins));
-        }
-        if (request.canvasContext() != null) {
-            request.canvasContext().normalizedMediaRefs().stream()
-                    .map(com.moon.moonagent.ai.agent.CanvasMediaRef::url)
-                    .forEach(url -> validateMediaUrl(url, allowedOrigins));
-        }
-    }
-
-    private static void validateMediaUrls(List<String> urls, List<String> allowedOrigins) {
-        if (urls == null) return;
-        urls.forEach(url -> validateMediaUrl(url, allowedOrigins));
-    }
-
-    private static void validateMediaUrl(String url, List<String> allowedOrigins) {
-        if (url == null || url.isBlank()) return;
-        OutboundUrlGuard.requireAllowedMediaUrl(url, allowedOrigins);
     }
 
     private record ResolvedTurnMedia(List<String> picUrls, List<String> assetIds,

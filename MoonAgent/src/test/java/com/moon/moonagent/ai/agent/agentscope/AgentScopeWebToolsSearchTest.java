@@ -226,7 +226,6 @@ class AgentScopeWebToolsSearchTest {
 
     private static AgentScopeTool searchTool(HttpClient http) {
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setProvider("deepseek");
         properties.getWebSearch().setApiKey("sk-test");
         return new AgentScopeWebTools(properties, http).tools().stream()
                 .filter(tool -> AgentScopeWebTools.WEB_SEARCH.equals(tool.getName()))

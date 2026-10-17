@@ -20,7 +20,7 @@ class AgentScopeModelProviderTest {
         AgentContextWindowResolver windows = mock(AgentContextWindowResolver.class);
         when(windows.resolve("primary-model")).thenReturn(321_000);
         when(windows.resolve("fallback-model")).thenReturn(654_000);
-        AgentScopeModelProvider provider = new AgentScopeModelProvider(properties, router, windows);
+        AgentScopeModelProvider provider = new AgentScopeModelProvider(properties, router, windows, mock(TurnModelPin.class));
         ReflectionTestUtils.setField(provider, "gatewayBaseUrl", "http://gateway.local");
         ReflectionTestUtils.setField(provider, "gatewayApiKey", "test-key");
 
@@ -39,7 +39,7 @@ class AgentScopeModelProviderTest {
         CreativeModelRouter router = mock(CreativeModelRouter.class);
         AgentContextWindowResolver windows = mock(AgentContextWindowResolver.class);
         when(windows.resolve("same-model")).thenReturn(128_000);
-        AgentScopeModelProvider provider = new AgentScopeModelProvider(properties, router, windows);
+        AgentScopeModelProvider provider = new AgentScopeModelProvider(properties, router, windows, mock(TurnModelPin.class));
         ReflectionTestUtils.setField(provider, "gatewayBaseUrl", "http://gateway.local");
         ReflectionTestUtils.setField(provider, "gatewayApiKey", "test-key");
 

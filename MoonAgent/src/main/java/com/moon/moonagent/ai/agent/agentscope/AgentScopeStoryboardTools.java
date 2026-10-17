@@ -39,6 +39,7 @@ public class AgentScopeStoryboardTools {
     public static final String UPSERT_STORYBOARD_SHOT = "upsert_storyboard_shot";
     public static final String LIST_STORYBOARD_DRAFT = "list_storyboard_draft";
     public static final String LIST_PROJECT_STORYBOARD = "list_project_storyboard";
+    public static final String READ_PROJECT_SCENE = "read_project_scene";
     public static final String UPDATE_PROJECT_STORYBOARD_SHOT = "update_project_storyboard_shot";
     public static final String DELETE_STORYBOARD_DRAFT_SHOT = "delete_storyboard_draft_shot";
     public static final String REORDER_STORYBOARD_DRAFT = "reorder_storyboard_draft";
@@ -67,6 +68,7 @@ public class AgentScopeStoryboardTools {
                 batchVideoTool(),
                 listDraftTool(),
                 listProjectTool(),
+                readProjectSceneTool(),
                 updateProjectShotTool(),
                 upsertShotTool(),
                 deleteDraftShotTool(),
@@ -165,6 +167,36 @@ public class AgentScopeStoryboardTools {
                             .toList();
                     return Map.of("projectId", conversation.getProjectId(), "count", scenes.size(),
                             "scenes", scenes);
+                }));
+    }
+
+    private AgentScopeTool readProjectSceneTool() {
+        return new AgentScopeTool(
+                READ_PROJECT_SCENE,
+                "Read every field of one approved storyboard scene in the current project. "
+                        + "Locate it by scene_id or scene_number (pass at least one). Use this after a "
+                        + "user @-mentions a scene or when the user asks about one specific scene.",
+                AgentScopeTool.schema(Map.of(
+                        "scene_id", Map.of("type", "string"),
+                        "scene_number", Map.of("type", "integer")), List.of()),
+                true, true, false,
+                (input, param) -> guard(() -> {
+                    AgentConversation conversation = AgentScopeSessionTools.requireConversation(context(param));
+                    String sceneId = string(input.get("scene_id"));
+                    int sceneNumber = integer(input.get("scene_number"), -1);
+                    if (sceneId.isBlank() && sceneNumber <= 0) {
+                        throw new IllegalArgumentException(
+                                "请至少提供 scene_id 或 scene_number 之一来定位分镜");
+                    }
+                    // 只允许读当前会话所属项目的分镜；findProjectScene 在项目列表里定位，
+                    // 跨项目 scene_id 天然找不到，返回 ok=false 风格的错误对象而不是抛异常。
+                    List<Scene> scenes = storyboardClient.getProjectScenes(conversation.getProjectId());
+                    Scene target = findProjectScene(input, scenes, conversation.getProjectId());
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("ok", true);
+                    out.put("projectId", conversation.getProjectId());
+                    out.put("scene", sceneMap(target));
+                    return out;
                 }));
     }
 
@@ -1066,6 +1098,9 @@ public class AgentScopeStoryboardTools {
         context.request().setTurnMetadata(metadata);
     }
 
+    /**
+     * 项目分镜的字段口径（{@code list_project_storyboard} 与 {@code read_project_scene} 共用一份）。
+     */
     private static Map<String, Object> sceneMap(Scene scene) {
         Map<String, Object> item = new LinkedHashMap<>();
         List<String> imageUrls = sceneImageUrls(scene);
@@ -1075,8 +1110,10 @@ public class AgentScopeStoryboardTools {
         item.put("scriptContent", scene.getScriptContent());
         item.put("imagePrompt", scene.getImagePrompt());
         item.put("videoPrompt", scene.getVideoPrompt());
+        item.put("negativePrompt", scene.getNegativePrompt());
         item.put("shotType", scene.getShotType());
         item.put("cameraMovement", scene.getCameraMovement());
+        item.put("soundDesign", scene.getSoundDesign());
         item.put("duration", scene.getDuration());
         item.put("imageCount", imageUrls.size());
         item.put("videoCount", hasVideo ? 1 : 0);

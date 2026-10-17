@@ -37,16 +37,25 @@ public class AgentScopeCreativeTools {
     private final ConstraintExtractionService extractionService;
     private final CreativeCritiqueService critiqueService;
     private final TimelineManifestService timelineService;
+    private final AgentScopeProperties properties;
 
+    /**
+     * 生成结果诊断工具默认不注册：{@code review_generated_media} 每次调用都是一次付费视觉
+     * 模型评审，历史事故是模型在每次生图后主动自检并触发修复重生成，费用与延迟都翻倍。
+     * 只有显式打开 {@code agentscope.critique-enabled} 才把它交回模型。
+     */
     public List<AgentScopeTool> tools() {
-        return List.of(
+        List<AgentScopeTool> tools = new ArrayList<>(List.of(
                 getContext(),
                 updateContext(),
                 extractConstraints(),
-                reviewMedia(),
                 listCritiques(),
                 saveTimeline(),
-                getTimeline());
+                getTimeline()));
+        if (properties.isCritiqueEnabled()) {
+            tools.add(reviewMedia());
+        }
+        return List.copyOf(tools);
     }
 
     private AgentScopeTool getContext() {

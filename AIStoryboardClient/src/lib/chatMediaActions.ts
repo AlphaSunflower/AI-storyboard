@@ -1,9 +1,42 @@
 import { useAgentStore } from '../stores/agentStore';
 import { useProjectStore } from '../stores/projectStore';
 import { notify } from '../stores/toastStore';
+import { assetUrl } from '../config';
+import { copyImageToClipboard, copyPlainText } from './chatBlockExport';
 import { openCanvasSite } from '../components/agent/apps/chatAppDefinitions';
 
 export type ChatMediaKind = 'image' | 'video';
+/** 复制要区分的三种来源：只有图片能走位图，视频和文档只能给带时效的链接。 */
+export type MediaAssetKind = ChatMediaKind | 'document';
+
+/**
+ * 复制一条素材。
+ *
+ * 图片优先写位图进剪贴板（粘到别处就是图本身），浏览器不给权限时退回链接；
+ * 视频和文档没有位图形态，只能复制链接，并在提示里说明链接会过期。
+ */
+export async function copyMediaAsset(url: string, kind: MediaAssetKind): Promise<void> {
+  const absolute = assetUrl(url);
+  if (kind === 'image') {
+    const result = await copyImageToClipboard(absolute);
+    if (result === 'failed') {
+      notify({ title: '复制失败', description: '浏览器不允许写入剪贴板', variant: 'error' });
+      return;
+    }
+    notify({
+      title: result === 'bitmap' ? '已复制图片' : '已复制图片链接',
+      description: result === 'bitmap' ? undefined : '链接带时效，过期后需要重新复制',
+      variant: 'info',
+    });
+    return;
+  }
+  const copied = await copyPlainText(absolute);
+  notify({
+    title: copied ? '已复制链接' : '复制失败',
+    description: copied ? '链接带时效，过期后需要重新复制' : '浏览器不允许写入剪贴板',
+    variant: copied ? 'info' : 'error',
+  });
+}
 
 /** 参考素材引用：把这张图/视频放回输入卡，下一条消息直接带上。 */
 export function quoteAsReference(kind: ChatMediaKind, url: string): void {

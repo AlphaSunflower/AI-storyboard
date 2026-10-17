@@ -1,8 +1,22 @@
 import type { AgentAsset, AgentAttachment, AgentPage } from '../../api/agent';
+import type { AgentAssetDragKind } from '../../lib/agentAssetDrag';
 import { documentMimeType } from '../../lib/documentPreview';
 import { parseResultUrls } from '../../stores/generationRecordsStore';
 
 export type AssetsTab = 'all' | 'image' | 'video' | 'document' | 'storyboard' | 'other';
+
+/**
+ * 网格里点开一张媒体时交给宿主的上下文。
+ *
+ * 和扁平版 `AssetDetailTarget` 的区别：这里一定带完整记录（网格本来就有），
+ * 另外多带一份拖拽用的种类判定，右键菜单和详情共用同一套「这是图还是视频」的判断。
+ */
+export interface AgentAssetDetailTarget {
+  asset: AgentAsset;
+  url: string;
+  index: number;
+  kind: AgentAssetDragKind;
+}
 
 /** 会话资产的类型分桶；other 兜住 image/video/document 之外的资产（上传参考图等）。 */
 export interface AgentAssetBuckets {

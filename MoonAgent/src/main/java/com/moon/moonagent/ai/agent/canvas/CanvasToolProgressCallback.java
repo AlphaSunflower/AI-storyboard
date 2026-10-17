@@ -58,9 +58,7 @@ public final class CanvasToolProgressCallback implements ToolCallback {
             case "canvas_update_node" -> "正在更新节点";
             case "canvas_get_node_model_config" -> "正在读取节点模型参数";
             case "canvas_set_node_model_config" -> "正在调整节点模型参数";
-            case "canvas_delete_nodes" -> "正在删除节点";
             case "canvas_create_edge" -> "正在连接节点";
-            case "canvas_delete_edges" -> "正在删除连线";
             case "canvas_layout_graph" -> "正在整理画布布局";
             case "canvas_move_nodes" -> "正在移动节点";
             case "canvas_resize_nodes" -> "正在调整节点尺寸";

@@ -4,6 +4,7 @@ import com.moon.moonagent.entity.MorrowCanvas;
 import com.moon.moonagent.entity.Project;
 import com.moon.moonagent.service.MorrowCanvasService;
 import com.moon.moonagent.service.ProjectService;
+import com.moon.xiaoyuecanvas.service.CanvasGraphService;
 import com.moon.xiaoyuecanvas.service.CanvasSummaryService;
 import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class MorrowProjectController {
     private final ProjectService projectService;
     private final MorrowCanvasService canvasService;
     private final CanvasSummaryService summaryService;
+    private final CanvasGraphService graphService;
 
     @PostMapping("/projects")
     public Map<String, Object> create(@RequestAttribute("userId") String userId, @RequestBody Map<String, String> body) {
@@ -78,6 +80,15 @@ public class MorrowProjectController {
     public Map<String, Object> deleteCanvas(@RequestAttribute("userId") String userId, @PathVariable String id) {
         canvasService.delete(userId, id);
         return Map.of("ok", true);
+    }
+
+    /**
+     * 只读当前图 revision：画布前端轮询它感知服务端图命令（智能体建节点/连线）带来的变化。
+     * 不返回 graph_json，避免每次轮询搬运整幅图。
+     */
+    @GetMapping("/canvases/{id}/revision")
+    public Map<String, Object> canvasRevision(@RequestAttribute("userId") String userId, @PathVariable String id) {
+        return Map.of("revision", graphService.revision(userId, id));
     }
 
     private Map<String, Object> toProject(Project p) {

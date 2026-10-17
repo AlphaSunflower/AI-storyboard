@@ -6,6 +6,7 @@ import { SceneListPanel } from '../components/editor/SceneListPanel';
 import { PreviewPanel } from '../components/editor/PreviewPanel';
 import { DraftRecoverBanner } from '../components/common/DraftRecoverBanner';
 import { GenerationCenterPanel } from '../components/agent/GenerationCenterPanel';
+import { AssetDetailHost } from '../components/agent/AssetDetailHost';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { MobileEditorHeader } from '../components/editor/MobileEditorHeader';
 import { MobileSceneList } from '../components/editor/MobileSceneList';
@@ -101,6 +102,23 @@ export function EditorPage() {
 
     void useAuthStore.getState().checkAuth();
   }, [loadProjects, checkDraft, loadProject, createProject, fetchAiModels, selectScene]);
+
+  // 模型目录可能在后台被改（admin 切默认模型 / 停用渠道）：回到前台或每 60s 静默刷新一次。
+  // 网关目录版本号没变时 store 内部会直接跳过整个 setState，所以这里的轮询几乎无渲染开销。
+  useEffect(() => {
+    const refresh = () => { void fetchAiModels(); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+    };
+  }, [fetchAiModels]);
 
   const handleRecoverDraft = () => {
     if (draftProject) {
@@ -255,6 +273,8 @@ export function EditorPage() {
       {!embedded && (
         <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
       )}
+      {/* 生成中心网格点开的素材详情弹窗（编辑器里没有聊天气泡，但网格同样要点开看）。 */}
+      {!embedded && <AssetDetailHost />}
     </div>
   );
 }

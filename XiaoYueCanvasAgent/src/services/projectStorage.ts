@@ -3,7 +3,7 @@ import type { IDBPDatabase } from 'idb';
 import type { AssetCacheEntry, AssetMetadata, CanvasDocumentV1, CanvasEdge, CanvasNode, CanvasSummary, LegacyProjectDocument, MediaAsset, PersistedAsset, ProjectDocumentV1, ProjectDocumentV2, ProjectSummary } from '../types';
 import type { Viewport } from '@xyflow/react';
 import { createId } from '../utils/id';
-import { apiJson } from './morrowApi';
+import { ApiRequestError, apiJson } from './morrowApi';
 import { migrateCanvasGraphV1ToV2 } from '../canvas/graphMigration';
 import { mergedGenerationKind } from '../canvas/generationModes';
 import type { GenerationQueueItem } from '../canvas/generationQueue';
@@ -539,7 +539,23 @@ export async function saveCanvas(canvas: CanvasDocumentV1): Promise<CanvasDocume
   const baseRevision = canvas.revision ?? 0;
   // 标题走后端元数据（失败不阻断图入库）
   await apiJson(`/canvases/${encodeURIComponent(canvas.id)}`, { method: 'PATCH', body: JSON.stringify({ title: canvas.title }) }).catch(() => undefined);
-  // 图入库：乐观锁 CAS（baseRevision 不匹配抛 40901，message 携带当前 revision）
+  try {
+    return await putCanvasGraph(canvas, baseRevision);
+  } catch (error) {
+    if (!isRevisionConflict(error)) throw error;
+    // 40901：服务端 revision 已被智能体/他人推进。以**本地意图为准**重试一次
+    // （last-writer-wins）：拿服务端最新 revision 当 baseRevision 再 PUT 同一份本地图。
+    //   - 只重试一次，避免与正在写入的智能体形成活锁；
+    //   - 冲突窗口内智能体刚写、而补丁还没到本地的节点，会在这次覆盖中丢失；
+    //     调用方（App）以“服务端补丁随后到达即应用”收口，用户本地编辑优先不丢（见 WS3 契约）。
+    // 仍冲突 → 继续抛给调用方：UI 明确提示 + 暂停轮询覆盖，等下一次本地保存成功再恢复。
+    const latest = await resolveConflictRevision(canvas.id, error);
+    return putCanvasGraph(canvas, latest);
+  }
+}
+
+/** 一次 PUT：带 CAS baseRevision，成功返回应用了新 revision 的图，失败原样抛出。 */
+async function putCanvasGraph(canvas: CanvasDocumentV1, baseRevision: number): Promise<CanvasDocumentV1> {
   const dto = await apiJson<CanvasGraphDto>(`/canvases/${encodeURIComponent(canvas.id)}/graph`, {
     method: 'PUT',
     body: JSON.stringify({ graph: graphPayloadOf(canvas), baseRevision }),
@@ -547,6 +563,26 @@ export async function saveCanvas(canvas: CanvasDocumentV1): Promise<CanvasDocume
   const saved = applyGraph(canvas, dto);
   await (await database).put('canvases', saved); // 本地缓存回写
   return saved;
+}
+
+/** 乐观锁冲突判定：HTTP 409 或业务码 40901（后端 message 形如「画布已被他人修改，请刷新后重试|revision=N」）。 */
+export function isRevisionConflict(error: unknown): boolean {
+  if (error instanceof ApiRequestError) {
+    if (error.status === 409) return true;
+    if (error.code === 40901 || error.code === '40901') return true;
+  }
+  return error instanceof Error && error.message.includes('画布已被他人修改');
+}
+
+/** 服务端当前 revision：优先只读 revision 接口，失败时退回冲突消息里带的 `|revision=N`。 */
+async function resolveConflictRevision(canvasId: string, conflict: unknown): Promise<number> {
+  try {
+    return await getCanvasRevision(canvasId);
+  } catch {
+    const matched = conflict instanceof Error ? /\|revision=(\d+)/.exec(conflict.message) : null;
+    if (matched) return Number(matched[1]);
+    throw conflict;
+  }
 }
 
 export async function loadCanvas(canvasId: string, projectId?: string): Promise<CanvasDocumentV1 | undefined> {
@@ -574,6 +610,17 @@ function isResolvedHttpError(error: unknown): boolean {
   if (!error || typeof error !== 'object' || !('status' in error)) return false;
   const status = (error as { status?: unknown }).status;
   return typeof status === 'number' && status < 500;
+}
+
+/**
+ * 只读服务端当前 revision。
+ *
+ * <p>智能体在服务端直接改图（canvas_graph_*）时，画布窗口不一定是被 /chat 内嵌的 iframe，
+ * 收不到 parent 的 graph-updated 消息；轮询这个轻量接口即可感知变化并按需重载。
+ */
+export async function getCanvasRevision(canvasId: string): Promise<number> {
+  const dto = await apiJson<{ revision?: number }>(`/canvases/${encodeURIComponent(canvasId)}/revision`);
+  return typeof dto?.revision === 'number' && Number.isFinite(dto.revision) ? dto.revision : 0;
 }
 
 function emptyCanvas(canvasId: string, projectId = ''): CanvasDocumentV1 {

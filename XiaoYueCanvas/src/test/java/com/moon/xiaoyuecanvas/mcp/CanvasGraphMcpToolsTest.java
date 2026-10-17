@@ -26,11 +26,13 @@ class CanvasGraphMcpToolsTest {
             "canvas_graph_create_nodes",
             "canvas_graph_update_node",
             "canvas_graph_create_edge",
+            "canvas_graph_create_edges",
             "canvas_graph_import_media",
             "canvas_graph_import_media_batch",
             "canvas_graph_create_result_slots",
             "canvas_graph_mark_result_slots",
-            "canvas_graph_layout_graph");
+            "canvas_graph_layout_graph",
+            "canvas_graph_apply_plan");
 
     @Test
     void exposesExactlyTheRequiredMcpTools() {

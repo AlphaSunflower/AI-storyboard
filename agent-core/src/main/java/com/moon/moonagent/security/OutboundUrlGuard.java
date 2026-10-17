@@ -53,23 +53,56 @@ public final class OutboundUrlGuard {
      * explicitly configured service origins.
      */
     public static void requireAllowedMediaUrl(String rawUrl, Collection<String> allowedOrigins) {
+        canonicalizeMediaUrl(rawUrl, allowedOrigins);
+    }
+
+    /**
+     * Validates a media URL accepted from an untrusted request and returns its
+     * canonical server-facing form.
+     *
+     * <p>Accepted shapes:
+     * <ul>
+     *   <li>relative application media paths ({@code /api/files/**},
+     *       {@code /api/library/media/**}) — returned unchanged;
+     *   <li>absolute URLs on an explicitly configured origin — returned unchanged;
+     *   <li>absolute URLs whose <em>path</em> is one of the trusted media paths but
+     *       whose origin is a browser-facing host (frontend dev server, gateway,
+     *       public site) — returned as a relative path (query preserved, host and
+     *       fragment dropped).
+     * </ul>
+     *
+     * <p>Everything else is rejected. Because a foreign host is never part of the
+     * returned value, downstream fetches resolve against the internal service
+     * bases instead of the caller-supplied origin: this normalizes browser
+     * absolute URLs without widening the set of hosts the server may contact.
+     * The method performs no DNS or network lookup.
+     */
+    public static String canonicalizeMediaUrl(String rawUrl, Collection<String> allowedOrigins) {
         if (rawUrl == null || rawUrl.isBlank()) {
             throw new BusinessException(40001, "媒体地址不能为空");
         }
         String value = rawUrl.trim();
-        if (value.startsWith("/api/files/") || value.startsWith("/api/library/media/")) {
-            return;
+        if (isTrustedMediaPath(value)) {
+            return value;
         }
         URI uri = parse(value);
-        String scheme = requireHttpScheme(uri);
-        if (!"http".equals(scheme) && !"https".equals(scheme)) {
-            throw new BusinessException(40001, "仅支持 HTTP/HTTPS 媒体地址");
+        // requireHttpScheme 已经保证 scheme 是 http/https
+        requireHttpScheme(uri);
+        if (normalizeOrigins(allowedOrigins).contains(origin(uri))) {
+            return value;
         }
-        String origin = origin(uri);
-        Set<String> normalized = normalizeOrigins(allowedOrigins);
-        if (!normalized.contains(origin)) {
-            throw new BusinessException(40001, "媒体地址不在允许的服务范围内");
+        String path = uri.getRawPath();
+        if (path != null && isTrustedMediaPath(path)) {
+            String query = uri.getRawQuery();
+            return query == null || query.isEmpty() ? path : path + "?" + query;
         }
+        throw new BusinessException(40001, "媒体地址不在允许的服务范围内");
+    }
+
+    /** Trusted relative media paths served by the internal services. */
+    private static boolean isTrustedMediaPath(String value) {
+        return value != null
+                && (value.startsWith("/api/files/") || value.startsWith("/api/library/media/"));
     }
 
     public static String origin(URI uri) {

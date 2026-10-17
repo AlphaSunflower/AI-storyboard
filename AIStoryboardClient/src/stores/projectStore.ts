@@ -16,6 +16,45 @@ export function getLastOpenedProjectId(): string | null {
   try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
 }
 
+// 用户手选的全局模型（图/视频/理解三类）。
+// 存过的类型视为「用户显式选过」：后续网关默认模型变化不再覆盖它，刷新也能恢复；
+// 只有没选过、或所选模型已下架时才跟随网关默认。
+const MODEL_CHOICE_KEY = 'editorModelChoice';
+interface PersistedModelChoice { image?: string; video?: string; understanding?: string }
+
+function readModelChoice(): PersistedModelChoice {
+  try {
+    const raw = localStorage.getItem(MODEL_CHOICE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedModelChoice;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
+}
+
+/** 合并写入用户的一次手选（其它类型保持不变） */
+function writeModelChoice(patch: PersistedModelChoice): void {
+  try {
+    localStorage.setItem(MODEL_CHOICE_KEY, JSON.stringify({ ...readModelChoice(), ...patch }));
+  } catch { /* 忽略：localStorage 不可用时退化为「本次会话内有效」 */ }
+}
+
+/**
+ * 目录刷新后应选中的模型：
+ * 1) 用户手选过且该模型仍在列表里 → 保留用户选择（网关默认换了也不打扰用户）；
+ * 2) 没选过 / 所选已下架 → 跟随网关默认（is_default）；
+ * 3) 网关没给默认（或列表为空）→ 保持原值，绝不把选择清空。
+ */
+function pickModel(
+  current: string,
+  options: ModelOption[],
+  userChoice: string | undefined,
+  gatewayDefault?: string,
+): string {
+  if (userChoice && options.some((o) => o.value === userChoice)) return userChoice;
+  if (gatewayDefault) return gatewayDefault;
+  return current;
+}
+
 /** 解析网关下发的 params JSON 字符串为参数对象（解析失败/非对象返回 null，前端回退静态默认） */
 function safeParseParams(json: string): ModelOption['params'] {
   try {
@@ -55,6 +94,8 @@ interface ProjectState {
   // 模型下拉选项：初始为静态默认，fetchAiModels 拉取网关后替换（网关无返回则保持默认）
   imageModelOptions: ModelOption[];
   videoModelOptions: ModelOption[];
+  /** 最近一次网关模型目录版本号（null = 网关没给）：用于跳过无变化的重渲染 */
+  modelCatalogVersion: string | null;
   // 理解模型（vision 类型）：剧本输入上传参考图时先看图生成描述
   understandingModel: string;
   understandingModelOptions: ModelOption[];
@@ -141,8 +182,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   videoProgress: {},
   scriptGenerationStatus: 'idle',
   scriptGenerationMessage: '',
-  imageModel: DEFAULT_IMAGE_MODEL,
-  videoModel: DEFAULT_VIDEO_MODEL,
+  imageModel: readModelChoice().image ?? DEFAULT_IMAGE_MODEL,
+  videoModel: readModelChoice().video ?? DEFAULT_VIDEO_MODEL,
   videoPreset: DEFAULT_VIDEO_PRESET,
   imageSize: DEFAULT_IMAGE_SIZE,
   imageQuality: DEFAULT_IMAGE_QUALITY,
@@ -150,8 +191,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 初始 = 静态默认（as const 需展开为可变 ModelOption[]，不带 params）；网关拉取成功且非空时替换
   imageModelOptions: IMAGE_MODELS.map((m) => ({ value: m.value, label: m.label })),
   videoModelOptions: VIDEO_MODELS.map((m) => ({ value: m.value, label: m.label })),
-  understandingModel: DEFAULT_UNDERSTANDING_MODEL,
+  understandingModel: readModelChoice().understanding ?? DEFAULT_UNDERSTANDING_MODEL,
   understandingModelOptions: UNDERSTANDING_MODELS.map((m) => ({ value: m.value, label: m.label })),
+  modelCatalogVersion: null,
   sceneRefs: {},
   unreadScenes: new Set<string>(),
 
@@ -453,9 +495,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setGeneratingVideo: (sceneId, v) =>
     set((s) => ({ generatingVideo: { ...s.generatingVideo, [sceneId]: v } })),
 
-  setImageModel: (m) => set({ imageModel: m }),
-  setVideoModel: (m) => set({ videoModel: m }),
-  setUnderstandingModel: (m) => set({ understandingModel: m }),
+  setImageModel: (m) => { writeModelChoice({ image: m }); set({ imageModel: m }); },
+  setVideoModel: (m) => { writeModelChoice({ video: m }); set({ videoModel: m }); },
+  setUnderstandingModel: (m) => { writeModelChoice({ understanding: m }); set({ understandingModel: m }); },
   setVideoPreset: (p) => set({ videoPreset: p }),
   setImageSize: (s) => set({ imageSize: s }),
   setImageQuality: (q) => set({ imageQuality: q }),
@@ -464,9 +506,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   fetchAiModels: async () => {
     try {
       const res = await aiApi.aiModels();
-      const imageModels = res.data.data?.imageModels ?? [];
-      const videoModels = res.data.data?.videoModels ?? [];
-      const understandingModels = res.data.data?.understandingModels ?? [];
+      const data = res.data.data;
+      if (!data) return;
+      const version = typeof data.version === 'string' && data.version ? data.version : null;
+      // 版本号没变 = 网关模型目录没变：整轮跳过（回到前台/轮询会频繁调用，避免无意义重渲染）
+      if (version && version === get().modelCatalogVersion) return;
+      const imageModels = data.imageModels ?? [];
+      const videoModels = data.videoModels ?? [];
+      const understandingModels = data.understandingModels ?? [];
       // 网关下发的 params 是 JSON 字符串 → 解析为参数对象（解析失败置 null，前端回退静态默认）
       const parsedImageModels: ModelOption[] = imageModels.map((m) => ({
         ...m,
@@ -481,19 +528,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         params: m.params ? safeParseParams(m.params) : null,
       }));
       set((s) => {
-        // 自动同步网关默认模型（is_default=true 的模型）
-        const defaultImageModel = parsedImageModels.find((m) => m.default)?.value;
-        const defaultVideoModel = parsedVideoModels.find((m) => m.default)?.value;
-        const defaultUnderstandingModel = parsedUnderstandingModels.find((m) => m.default)?.value;
-        
+        const optionsByKind = {
+          image: parsedImageModels.length ? parsedImageModels : s.imageModelOptions,
+          video: parsedVideoModels.length ? parsedVideoModels : s.videoModelOptions,
+          understanding: parsedUnderstandingModels.length
+            ? parsedUnderstandingModels : s.understandingModelOptions,
+        };
+        // 网关标记的默认模型（is_default → default="true"）
+        const gatewayImageDefault = parsedImageModels.find((m) => m.default)?.value;
+        const gatewayVideoDefault = parsedVideoModels.find((m) => m.default)?.value;
+        const gatewayUnderstandingDefault = parsedUnderstandingModels.find((m) => m.default)?.value;
+        const choice = readModelChoice();
         return {
-          imageModelOptions: parsedImageModels.length ? parsedImageModels : s.imageModelOptions,
-          videoModelOptions: parsedVideoModels.length ? parsedVideoModels : s.videoModelOptions,
-          understandingModelOptions: parsedUnderstandingModels.length ? parsedUnderstandingModels : s.understandingModelOptions,
-          // 如果网关返回了默认模型，自动更新当前选中的模型
-          ...(defaultImageModel && { imageModel: defaultImageModel }),
-          ...(defaultVideoModel && { videoModel: defaultVideoModel }),
-          ...(defaultUnderstandingModel && { understandingModel: defaultUnderstandingModel }),
+          imageModelOptions: optionsByKind.image,
+          videoModelOptions: optionsByKind.video,
+          understandingModelOptions: optionsByKind.understanding,
+          modelCatalogVersion: version ?? s.modelCatalogVersion,
+          // 用户手选过就保留；没选过 / 所选已下架才跟随网关默认
+          imageModel: pickModel(s.imageModel, optionsByKind.image, choice.image, gatewayImageDefault),
+          videoModel: pickModel(s.videoModel, optionsByKind.video, choice.video, gatewayVideoDefault),
+          understandingModel: pickModel(
+            s.understandingModel, optionsByKind.understanding,
+            choice.understanding, gatewayUnderstandingDefault,
+          ),
         };
       });
     } catch {

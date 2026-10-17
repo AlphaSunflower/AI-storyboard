@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.skill.SkillExpander;
+import io.agentscope.core.tool.Toolkit;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -130,6 +131,95 @@ class AgentScopeToolkitFactoryTest {
                 .contains(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN);
     }
 
+    @Test
+    void emptyProbeNeverRemovesRegisteredCanvasTools() {
+        // 事故形态（2026-10-15）：画布 MCP 工具列表探测一度为空，原实现按空集合收敛，
+        // 把已注册的画布工具全部摘掉，而发现记录（SkillExpander）只增不减、仍宣称画布可用，
+        // 模型于是每次调用都拿到 "Tool not found"。注册表只能被非空探测替换。
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        SkillExpander expander = mock(SkillExpander.class);
+        ToolCallback[] withCanvas = { callback("canvas_graph_get_state") };
+        ToolCallback[] empty = new ToolCallback[0];
+        when(expander.toolCallbacksByPrefix("canvas_"))
+                .thenReturn(withCanvas)
+                .thenReturn(empty);
+        AgentScopeToolkitFactory factory = factory(
+                interaction, expander, mock(AgentScopeCanvasTools.class));
+
+        factory.create();
+        assertThat(factory.activeToolkit().getToolNames()).contains("canvas_graph_get_state");
+
+        factory.refreshCanvasTools();
+
+        assertThat(factory.activeToolkit().getToolNames()).contains("canvas_graph_get_state");
+    }
+
+    @Test
+    void toolkitRegistryIsTheAuthorityForCanvasAvailability() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        SkillExpander expander = mock(SkillExpander.class);
+        ToolCallback[] withCanvas = {
+                callback("canvas_graph_get_state"), callback("canvas_graph_layout_graph")};
+        ToolCallback[] empty = new ToolCallback[0];
+        when(expander.toolCallbacksByPrefix("canvas_"))
+                .thenReturn(empty)
+                .thenReturn(withCanvas);
+        AgentScopeToolkitFactory factory = factory(
+                interaction, expander, mock(AgentScopeCanvasTools.class));
+
+        factory.create();
+        // create_run 恒注册，但它不代表画布链路可用：就绪判定只能看真实注册表。
+        assertThat(factory.activeToolkit().getToolNames())
+                .contains(AgentScopeCanvasRunTools.CREATE_CANVAS_RUN);
+        assertThat(factory.hasCanvasTools()).isFalse();
+        assertThat(factory.hasTool("canvas_graph_get_state")).isFalse();
+
+        factory.refreshCanvasTools();
+
+        assertThat(factory.hasCanvasTools()).isTrue();
+        assertThat(factory.hasTool("canvas_graph_get_state")).isTrue();
+        assertThat(factory.canvasToolNames())
+                .contains("canvas_graph_get_state", "canvas_graph_layout_graph");
+    }
+
+    @Test
+    void planAndTodoToolsAreGuardedExactlyOnceOnBind() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeToolkitFactory factory = factory(interaction);
+
+        Toolkit toolkit = factory.create();
+        CanvasPlanToolGuard.GUARDED_TOOL_NAMES.forEach(name -> toolkit.registerAgentTool(tool(name)));
+
+        factory.bindAgentToolkit(toolkit);
+        // 实测启动日志里 bindAgentToolkit 会被调用两次：重复绑定必须幂等，不能套娃
+        factory.bindAgentToolkit(toolkit);
+
+        for (String name : CanvasPlanToolGuard.GUARDED_TOOL_NAMES) {
+            assertThat(toolkit.getTool(name))
+                    .as("%s 应被替换成画布轮守卫", name)
+                    .isInstanceOf(CanvasPlanToolGuard.class);
+            assertThat(((CanvasPlanToolGuard) toolkit.getTool(name)).delegate())
+                    .as("%s 不得被包装两层", name)
+                    .isNotInstanceOf(CanvasPlanToolGuard.class);
+        }
+        assertThat(toolkit.getToolNames()).contains("plan_enter", "todo_write");
+    }
+
+    @Test
+    void bindingWithoutPlanToolsIsHarmless() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeToolkitFactory factory = factory(interaction);
+
+        Toolkit toolkit = factory.create();
+        factory.bindAgentToolkit(toolkit);
+
+        assertThat(toolkit.getToolNames()).doesNotContain("plan_enter", "todo_write");
+    }
+
     private static AgentScopeToolkitFactory factory(AgentScopeInteractionTools interaction) {
         return factory(interaction, mock(SkillExpander.class), mock(AgentScopeCanvasTools.class));
     }
@@ -187,7 +277,8 @@ class AgentScopeToolkitFactoryTest {
         return new AgentScopeToolkitFactory(
                 session, interaction, structured, assetGroups, images, videos, journeys,
                 storyboards, workflows, videoMerge, creative, canvasTools, runTools,
-                documentTools, mock(AgentCanvasRunService.class), pipeline, expander);
+                documentTools, mock(AgentCanvasRunService.class), pipeline, expander,
+                new AgentScopeProperties());
     }
 
     private static AgentScopeTool tool(String name) {

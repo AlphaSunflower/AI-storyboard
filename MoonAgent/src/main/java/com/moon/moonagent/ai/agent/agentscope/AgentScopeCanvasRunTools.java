@@ -45,6 +45,15 @@ public class AgentScopeCanvasRunTools {
                                 ? null : context.request().getCanvasContext();
                         String existingCanvasId = canvasContext == null
                                 ? "" : canvasContext.canvasId();
+                        // 本轮已经为这张画布建立过 run（画布编辑模式自动接管）时复用，避免同轮两条 run。
+                        AgentCanvasRunService.CanvasRunView active = runs.activeByTurn(turnId);
+                        if (active != null && existingCanvasId != null && !existingCanvasId.isBlank()
+                                && existingCanvasId.equals(active.canvasId())) {
+                            if (context.turnState() != null) {
+                                context.turnState().setActiveCanvasRun(active.runId(), active.canvasId());
+                            }
+                            return active.toMap();
+                        }
                         AgentCanvasRunService.CanvasRunView run =
                                 existingCanvasId == null || existingCanvasId.isBlank()
                                         ? runs.create(

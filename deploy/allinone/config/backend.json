@@ -1,0 +1,20 @@
+{
+  "spring": {
+    "datasource": {
+      "url": "jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/ai_storyboard",
+      "username": "${POSTGRES_USER}",
+      "password": "${POSTGRES_PASSWORD}"
+    },
+    "ai": {
+      "openai": {
+        "api-key": "${LLM_GATEWAY_API_KEY_MAIN}"
+      }
+    }
+  },
+  "ai": {
+    "gateway": {
+      "api-key": "${LLM_GATEWAY_API_KEY_MAIN}"
+    }
+  },
+  "LLM_GATEWAY_API_KEY": "${LLM_GATEWAY_API_KEY_MAIN}"
+}

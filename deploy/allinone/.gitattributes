@@ -1,0 +1,7 @@
+# Windows 检出时绝不把这些文件转成 CRLF：
+# shell 脚本一旦是 CRLF，Linux 上会以 "/bin/bash^M: bad interpreter" 直接失败
+# （postgres 的 docker-entrypoint-initdb.d 就是这么静默跳过建库/还原的）。
+*.sh text eol=lf
+*.conf text eol=lf
+*.sql text eol=lf
+Dockerfile text eol=lf

@@ -8,12 +8,23 @@ export interface SlashCommandItem {
   icon: React.ReactNode;
   title: string;
   description: string;
+  /** 英文/别名命令名（不含 `/`）：用于 `/clear` 这类输入直接命中，展示时排在中文名后面。 */
+  aliases?: string[];
   /** 移动端或内嵌侧边聊天中可隐藏整项。 */
   visible?: boolean;
   /** 不可用项：仍展示（可发现），但不可执行并显示 disabledHint */
   disabled?: boolean;
   disabledHint?: string;
   run: () => void;
+}
+
+/** 命令是否命中输入的关键词：中文名、英文 id、别名任一包含即可。 */
+export function slashItemMatches(item: SlashCommandItem, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return item.title.toLowerCase().includes(q)
+    || item.id.toLowerCase().includes(q)
+    || (item.aliases ?? []).some((alias) => alias.toLowerCase().includes(q));
 }
 
 /**
@@ -39,11 +50,9 @@ export function ChatSlashMenu({
     minWidth: 320,
   });
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const available = items.filter((item) => item.visible !== false);
-    if (!q) return available;
-    return available.filter((item) => item.title.toLowerCase().includes(q)
-      || item.id.toLowerCase().includes(q));
+    if (!query.trim()) return available;
+    return available.filter((item) => slashItemMatches(item, query));
   }, [items, query]);
   const [active, setActive] = useState(0);
 
@@ -105,7 +114,19 @@ export function ChatSlashMenu({
             {item.icon}
           </span>
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{item.title}</span>
+            <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>
+              {item.title}
+              {(item.aliases ?? []).map((alias) => (
+                <span
+                  key={alias}
+                  style={{
+                    marginLeft: 6, fontSize: 12, fontWeight: 500, color: T.textCaption,
+                  }}
+                >
+                  /{alias}
+                </span>
+              ))}
+            </span>
             <span style={{ display: 'block', fontSize: 12, color: T.textCaption, marginTop: 1 }}>
               {item.disabled ? (item.disabledHint ?? item.description) : item.description}
             </span>

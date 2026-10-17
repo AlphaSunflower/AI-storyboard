@@ -12,6 +12,8 @@ public class AgentScopeProperties {
     private boolean enabled;
     private String model = "";
     private String fallbackModel = "deepseek-flash";
+    /** 见 {@link #isDynamicDefaultModel()}：默认开，置 false 可回退到「启动时固化」的旧行为 */
+    private boolean dynamicDefaultModel = true;
     private int maxRetries = 3;
     private int maxIters = 24;
     private int assetSearchLimit = 8;
@@ -23,8 +25,21 @@ public class AgentScopeProperties {
     private boolean structuredOutputEnabled = true;
     private boolean subagentsEnabled = true;
     private boolean compactionEnabled = true;
-    private int compactionTriggerMessages = 40;
-    private int compactionTriggerTokens = 60_000;
+    /**
+     * 消息数触发的压缩条件：{@code <= 0} 表示禁用该条件（harness 的
+     * {@code ConversationCompactor.shouldCompact} 只在 {@code > 0} 时比较，因此 0 是安全的"关闭"值）。
+     *
+     * <p>默认 400：画布编排一轮就能产生几十条工具结果巨大的消息，旧的 40 条会被反复误触发
+     * （2026-10-16 实测：45 条 / 46931 tokens 与 42 条 / 29855 tokens 两次都不该压）。
+     * 注意 setter 只做 {@code Math.max(0, ...)}，绝不能钳到 1——那会让每条消息都触发压缩。
+     */
+    private int compactionTriggerMessages = 400;
+    /** 显式 token 阈值：仅当 {@link #compactionTriggerRatio} {@code <= 0} 时生效（人工兜底）。 */
+    private int compactionTriggerTokens = 48_000;
+    /** 自动阈值比例：{@code > 0} 时 triggerTokens = max(floor, round(模型窗口 × ratio))。 */
+    private double compactionTriggerRatio = 0.5;
+    /** 自动阈值的下限，避免小窗口模型把阈值压得过低。 */
+    private int compactionTriggerTokensFloor = 60_000;
     private int compactionKeepMessages = 12;
     private int compactionKeepTokens = 8_000;
     private boolean asyncEnabled = true;
@@ -38,12 +53,26 @@ public class AgentScopeProperties {
     private boolean planModeEnabled = true;
     private boolean taskListEnabled = true;
     private String planFileDirectory = "plans";
+    /**
+     * 画布工具 schema 是否对模型隐藏注入型参数
+     * （{@code userId/projectId/canvasId/runId/operationKey}）。
+     *
+     * <p>这些值由 {@code CanvasRunToolAdapter} 在模型调用之后强制注入，模型看到它们只会
+     * 增加每次调用的 schema token（15 个画布工具 × 5 个属性）。默认隐藏；
+     * 置 false 时恢复到"原样透出 MCP schema"的旧行为。
+     */
+    private boolean canvasSchemaHideInjectedParams = true;
     private boolean toolResultEvictionEnabled = true;
     private int toolResultEvictionMaxChars = 80_000;
     private int toolResultEvictionPreviewChars = 2_000;
     private boolean otelTracingEnabled = true;
     private boolean distributedStoreEnabled = true;
-    private boolean critiqueEnabled = true;
+    /**
+     * 生成结果诊断开关，默认关闭：自动视觉评审会对每次生图/生视频结果额外发起一次
+     * 付费模型调用，且用户往往已经满意首次结果，多余诊断只会造成浪费。
+     * 保留开关仅用于显式重新打开（含 {@code review_generated_media} 工具注册）。
+     */
+    private boolean critiqueEnabled = false;
     private WebSearch webSearch = new WebSearch();
     private int critiqueMaxRepairs = 1;
     private Models models = new Models();
@@ -71,6 +100,21 @@ public class AgentScopeProperties {
 
     public void setFallbackModel(String fallbackModel) {
         this.fallbackModel = fallbackModel == null ? "" : fallbackModel;
+    }
+
+    /**
+     * 主智能体模型是否动态跟随网关默认模型（{@code agentscope.model} 为空时生效）。
+     *
+     * <p>开启后 agent 只构建一次、持有 {@link GatewayDefaultModel} 包装器：<b>在途 turn 内模型钉住不变，
+     * 只在智能体闲置（无在途 turn）时于下一轮开始时捡起新的网关默认模型</b>，因此切换默认模型
+     * 既不需要重建 agent，也不需要重启 MoonAgent。关闭后恢复旧行为（启动时解析一次并固化）。
+     */
+    public boolean isDynamicDefaultModel() {
+        return dynamicDefaultModel;
+    }
+
+    public void setDynamicDefaultModel(boolean dynamicDefaultModel) {
+        this.dynamicDefaultModel = dynamicDefaultModel;
     }
 
     public int getMaxRetries() {
@@ -173,7 +217,8 @@ public class AgentScopeProperties {
     }
 
     public void setCompactionTriggerMessages(int compactionTriggerMessages) {
-        this.compactionTriggerMessages = Math.max(1, compactionTriggerMessages);
+        // 只允许钳到 0：0/负数表示"禁用消息数条件"。钳到 1 会让每条消息都触发压缩。
+        this.compactionTriggerMessages = Math.max(0, compactionTriggerMessages);
     }
 
     public int getCompactionTriggerTokens() {
@@ -182,6 +227,22 @@ public class AgentScopeProperties {
 
     public void setCompactionTriggerTokens(int compactionTriggerTokens) {
         this.compactionTriggerTokens = Math.max(1, compactionTriggerTokens);
+    }
+
+    public double getCompactionTriggerRatio() {
+        return compactionTriggerRatio;
+    }
+
+    public void setCompactionTriggerRatio(double compactionTriggerRatio) {
+        this.compactionTriggerRatio = Math.max(0d, compactionTriggerRatio);
+    }
+
+    public int getCompactionTriggerTokensFloor() {
+        return compactionTriggerTokensFloor;
+    }
+
+    public void setCompactionTriggerTokensFloor(int compactionTriggerTokensFloor) {
+        this.compactionTriggerTokensFloor = Math.max(1, compactionTriggerTokensFloor);
     }
 
     public int getCompactionKeepMessages() {
@@ -280,6 +341,14 @@ public class AgentScopeProperties {
 
     public void setTaskListEnabled(boolean taskListEnabled) {
         this.taskListEnabled = taskListEnabled;
+    }
+
+    public boolean isCanvasSchemaHideInjectedParams() {
+        return canvasSchemaHideInjectedParams;
+    }
+
+    public void setCanvasSchemaHideInjectedParams(boolean canvasSchemaHideInjectedParams) {
+        this.canvasSchemaHideInjectedParams = canvasSchemaHideInjectedParams;
     }
 
     public String getPlanFileDirectory() {
@@ -478,18 +547,16 @@ public class AgentScopeProperties {
     }
 
     /**
-     * 网页搜索配置。支持两个后端，用 {@code search-provider} 切换：
+     * 网页搜索配置。后端只有一个：<b>DeepSeek 原生网页搜索</b>（对齐 DSH 的
+     * {@code @deepseek-ai/dsh-web-search-deepseek}）。一次 Anthropic 兼容 Messages 调用
+     * （{@code POST {base-url}/messages}）携带服务端工具 {@code web_search_20250305}，
+     * 结果从结构化的 {@code web_search_tool_result} 块里解析，绝不从模型文本里抓 URL。
+     * 搜索在 DeepSeek 服务端执行，按账号计费，因此必须有 key。
      *
-     * <ul>
-     *   <li>{@link Provider#SEARXNG}（默认，自托管）：只打自己部署的 SearXNG
-     *       {@code GET/POST /search?format=json}。所有计算都在自己机器上，无第三方 key、无按次计费；
-     *       代价是仍需一台能出网的 SearXNG 去取上游引擎结果。</li>
-     *   <li>{@link Provider#DEEPSEEK}：DeepSeek 原生网页搜索（对齐 DSH 的
-     *       {@code @deepseek-ai/dsh-web-search-deepseek}）。一次 Anthropic 兼容 Messages 调用
-     *       （{@code POST {deepseek-base-url}/messages}）携带服务端工具 {@code web_search_20250305}，
-     *       结果从结构化的 {@code web_search_tool_result} 块里解析，绝不从模型文本里抓 URL。
-     *       搜索在 DeepSeek 服务端执行，按账号计费，因此必须有 key。</li>
-     * </ul>
+     * <p>这里刻意不再提供第二个后端（曾经是自托管 SearXNG）：那个实例不常驻时，
+     * 每一次网页检索都以连接失败收场，而失败会直接出现在 /chat 的工具卡上。
+     * 一个「可选但没人部署」的后端只会制造事故，所以只保留唯一可用的这条链路。
+     * 需要换端点时改 {@code base-url} 即可（任何 Anthropic 兼容 Messages 网关都行）。
      *
      * <p>不走 AgentScope 自带 MCP 客户端：它编译时依赖 MCP SDK 0.17.x 的
      * {@code HttpClientStreamableHttpTransport.Builder#customizeRequest}，而本项目根 pom 为 Spring AI 2.0
@@ -497,32 +564,12 @@ public class AgentScopeProperties {
      */
     public static class WebSearch {
 
-        /** 搜索后端。 */
-        public enum Provider {
-            /** 自托管 SearXNG（默认）。 */
-            SEARXNG,
-            /** DeepSeek 原生网页搜索（服务端执行，按次计费）。 */
-            DEEPSEEK;
-
-            /** 宽松解析配置值；未知值回退默认后端而不是静默禁用能力。 */
-            static Provider parse(String value) {
-                if (value == null || value.isBlank()) return SEARXNG;
-                String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
-                return "deepseek".equals(normalized) ? DEEPSEEK : SEARXNG;
-            }
-        }
-
-        /** 自托管 SearXNG 默认地址（官方容器默认监听 8080，这里用 compose 常见的 8888 映射）。 */
-        public static final String DEFAULT_SEARXNG_URL = "http://localhost:8888";
         /** Anthropic 兼容 Messages 基址；{@code /messages} 由客户端追加。 */
         public static final String DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic/v1";
         /** Anthropic 格式模型名，与本仓库 DSH 客户端（web-search-deepseek）保持一致。 */
         public static final String DEFAULT_MODEL = "deepseek-v4-flash";
 
         private boolean enabled = true;
-        private Provider provider = Provider.SEARXNG;
-        private String searxngUrl = DEFAULT_SEARXNG_URL;
-        private String searxngLanguage = "zh-CN";
         private String baseUrl = DEFAULT_BASE_URL;
         private String apiKey = "";
         private String model = DEFAULT_MODEL;
@@ -533,13 +580,9 @@ public class AgentScopeProperties {
         private Duration cacheTtl = Duration.ofMinutes(5);
         private int cacheMaxEntries = 256;
 
-        /** 只有开启且当前后端所需配置齐全才注册工具；否则保留原状，由调用方给出明确提示。 */
+        /** 只有开启且 key 非空才注册工具；否则保留原状，由调用方给出明确提示。 */
         public boolean isConfigured() {
-            if (!enabled) return false;
-            if (provider == Provider.SEARXNG) {
-                return searxngUrl != null && !searxngUrl.isBlank();
-            }
-            return apiKey != null && !apiKey.isBlank();
+            return enabled && apiKey != null && !apiKey.isBlank();
         }
 
         public boolean isEnabled() {
@@ -548,39 +591,6 @@ public class AgentScopeProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
-        }
-
-        public Provider getProvider() {
-            return provider;
-        }
-
-        public void setProvider(String provider) {
-            this.provider = Provider.parse(provider);
-        }
-
-        /** SearXNG 的 {@code /search} 端点（已带 format=json）。 */
-        public String getSearxngEndpoint() {
-            String base = searxngUrl == null || searxngUrl.isBlank() ? DEFAULT_SEARXNG_URL : searxngUrl.trim();
-            while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-            return base + "/search";
-        }
-
-        public String getSearxngUrl() {
-            return searxngUrl;
-        }
-
-        public void setSearxngUrl(String searxngUrl) {
-            this.searxngUrl = searxngUrl == null || searxngUrl.isBlank()
-                    ? DEFAULT_SEARXNG_URL : searxngUrl.trim();
-        }
-
-        /** 传给 SearXNG 的 {@code language} 参数。 */
-        public String getSearxngLanguage() {
-            return searxngLanguage;
-        }
-
-        public void setSearxngLanguage(String searxngLanguage) {
-            this.searxngLanguage = searxngLanguage == null ? "" : searxngLanguage.trim();
         }
 
         /** 完整 Messages 端点；调用方直接 POST 该地址。 */

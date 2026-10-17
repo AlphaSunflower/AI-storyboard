@@ -5,7 +5,7 @@
 | 模式 | 起什么 | 命令 |
 |---|---|---|
 | **开发模式** | Docker 只跑依赖（Postgres/Redis/MinIO/沙箱），业务代码在本机改、本机跑 | `powershell -File scripts\dev-up.ps1` |
-| 部署模式 | 整套 12 个容器（业务也在容器里） | `powershell -File scripts\up.ps1` |
+| 部署模式 | 整套 11 个容器（业务也在容器里） | `powershell -File scripts\up.ps1` |
 
 退出开发模式：`scripts\dev-down.ps1`（停依赖）；`scripts\dev-down.ps1 -FullStack`（直接恢复整套部署）。
 

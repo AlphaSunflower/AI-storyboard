@@ -83,7 +83,7 @@ class CanvasGraphCommandServiceImplTest {
                 "id", "node-text",
                 "type", "text",
                 "position", Map.of("x", 12, "y", 24),
-                "data", Map.of("label", "雪茄房说明", "prompt", "复古木质空间")));
+                "data", Map.of("label", "雪茄房说明", "prompt", "复古木质空间")), false);
 
         assertEquals("node-text", result.get("nodeId"));
         assertEquals(1, result.get("revision"));
@@ -115,7 +115,7 @@ class CanvasGraphCommandServiceImplTest {
                         "source", "text-1",
                         "target", "video-1",
                         "sourceHandle", "text",
-                        "targetHandle", "clips")));
+                        "targetHandle", "clips"), false));
 
         assertEquals("PORT_KIND_MISMATCH", error.code());
         verify(graphService, never()).save(anyString(), anyString(), anyMap(), anyInt());
@@ -138,7 +138,7 @@ class CanvasGraphCommandServiceImplTest {
                 "url", "/api/files/images/reference.png",
                 "name", "reference.png",
                 "label", "参考图",
-                "position", Map.of("x", 100, "y", 120)));
+                "position", Map.of("x", 100, "y", 120)), false);
 
         assertFalse(Boolean.FALSE.equals(result.get("ok")));
         ArgumentCaptor<CanvasAsset> assetCaptor = ArgumentCaptor.forClass(CanvasAsset.class);
@@ -180,7 +180,7 @@ class CanvasGraphCommandServiceImplTest {
                 "kind", "image",
                 "url", "/api/library/media/media-9/content?token=expired",
                 "name", "library.png",
-                "label", "项目库参考图"));
+                "label", "项目库参考图"), false);
 
         assertFalse(Boolean.FALSE.equals(result.get("ok")));
         verify(libraryService).importMedia(
@@ -203,7 +203,7 @@ class CanvasGraphCommandServiceImplTest {
 
         Map<String, Object> result = service.importMediaBatch(context, List.of(
                 Map.of("kind", "image", "url", "/api/files/images/a.png", "name", "a.png"),
-                Map.of("kind", "image", "url", "/api/files/images/b.png", "name", "b.png")));
+                Map.of("kind", "image", "url", "/api/files/images/b.png", "name", "b.png")), false);
 
         assertFalse(Boolean.FALSE.equals(result.get("ok")));
         assertEquals(2, ((List<?>) result.get("nodeIds")).size());
@@ -231,7 +231,7 @@ class CanvasGraphCommandServiceImplTest {
 
         Map<String, Object> result = service.createNode(context, Map.of(
                 "id", "node-new",
-                "type", "text"));
+                "type", "text"), false);
 
         assertTrue(Boolean.TRUE.equals(result.get("idempotentReplay")));
         assertEquals("node-existing", result.get("nodeId"));
@@ -248,7 +248,7 @@ class CanvasGraphCommandServiceImplTest {
         when(canvasService.get("user-1", "canvas-1")).thenReturn(canvas);
 
         CanvasGraphCommandException error = assertThrows(CanvasGraphCommandException.class, () ->
-                service.getState(context, null, null, true));
+                service.getState(context, null, null, true, false));
 
         assertEquals("CANVAS_PROJECT_MISMATCH", error.code());
     }
@@ -270,7 +270,7 @@ class CanvasGraphCommandServiceImplTest {
         Map<String, Object> result = service.createResultSlots(context, Map.of(
                 "producerNodeId", "producer",
                 "kind", "image",
-                "count", 3));
+                "count", 3), false);
 
         assertEquals(6, result.get("revision"));
         assertEquals(3, ((List<?>) result.get("nodeIds")).size());
@@ -280,6 +280,39 @@ class CanvasGraphCommandServiceImplTest {
         verify(graphService).save(eq("user-1"), eq("canvas-1"), graphCaptor.capture(), eq(5));
         assertEquals(4, nodes(graphCaptor.getValue()).size());
         assertEquals(3, ((List<?>) graphCaptor.getValue().get("edges")).size());
+    }
+
+    @Test
+    void createResultSlotsContinuesCanvasWideNumberingAcrossProducers() {
+        CanvasGraphCommandContext context = context("op-slots-2");
+        Map<String, Object> graph = emptyGraphMap();
+        nodes(graph).add(node("producer-a", "textToImage", 100, 100, Map.of("label", "文生图")));
+        nodes(graph).add(node("slot-existing", "image", 700, 100, Map.of("label", "结果 1")));
+        nodes(graph).add(node("producer-b", "imageToImage", 100, 500, Map.of("label", "图生图")));
+        when(canvasService.get("user-1", "canvas-1")).thenReturn(canvas());
+        when(graphService.load("user-1", "canvas-1"))
+                .thenReturn(new CanvasGraphResponse(graph, 7, null));
+        when(operationMapper.selectById("op-slots-2")).thenReturn(null);
+        when(operationMapper.claim(anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(1);
+        when(graphService.save(eq("user-1"), eq("canvas-1"), anyMap(), eq(7)))
+                .thenAnswer(invocation -> new CanvasGraphResponse(invocation.getArgument(2), 8, null));
+
+        service.createResultSlots(context, Map.of(
+                "producerNodeId", "producer-b",
+                "kind", "image",
+                "count", 2), false);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> graphCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(graphService).save(eq("user-1"), eq("canvas-1"), graphCaptor.capture(), eq(7));
+        List<String> labels = nodes(graphCaptor.getValue()).stream()
+                .filter(item -> "producer-b".equals(
+                        ((Map<?, ?>) item.getOrDefault("data", Map.of())).get("producerNodeId")))
+                .map(item -> String.valueOf(((Map<?, ?>) item.get("data")).get("label")))
+                .toList();
+        // 每个生产节点各自从「结果 1」重来会让画布上出现多个同名槽位
+        assertEquals(List.of("结果 2", "结果 3"), labels);
     }
 
     @Test
@@ -302,7 +335,7 @@ class CanvasGraphCommandServiceImplTest {
 
         Map<String, Object> result = service.layoutGraph(context, Map.of(
                 "mode", "dag",
-                "anchor", Map.of("x", 0, "y", 0)));
+                "anchor", Map.of("x", 0, "y", 0)), false);
 
         assertEquals(10, result.get("revision"));
         assertEquals(3, ((List<?>) result.get("movedNodeIds")).size());

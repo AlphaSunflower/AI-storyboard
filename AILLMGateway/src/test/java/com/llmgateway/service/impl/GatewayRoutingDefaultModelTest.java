@@ -12,6 +12,7 @@ import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelCatalogCache;
 import com.llmgateway.service.UpstreamClient;
 import com.llmgateway.vendor.route.RouteVendorRegistry;
 import org.junit.jupiter.api.Test;
@@ -56,7 +57,7 @@ class GatewayRoutingDefaultModelTest {
 
         GatewayRoutingServiceImpl service = new GatewayRoutingServiceImpl(
                 routeMapper, channelMapper, modelParamsMapper, keyService, upstreamClient,
-                routeRegistry, callLogService, redisTemplate
+                routeRegistry, callLogService, new ModelCatalogCache(redisTemplate)
         );
 
         JsonNode data = new ObjectMapper().readTree(service.fetchModels("text")).path("data");
@@ -92,7 +93,7 @@ class GatewayRoutingDefaultModelTest {
         GatewayRoutingServiceImpl service = new GatewayRoutingServiceImpl(
                 routeMapper, channelMapper, modelParamsMapper, mock(KeyService.class),
                 mock(UpstreamClient.class), mock(RouteVendorRegistry.class),
-                mock(CallLogService.class), redisTemplate);
+                mock(CallLogService.class), new ModelCatalogCache(redisTemplate));
 
         JsonNode data = new ObjectMapper().readTree(service.fetchModels("text")).path("data");
         assertThat(find(data, "deepseek-v4-flash").path("is_default").asBoolean()).isTrue();

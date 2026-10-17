@@ -30,6 +30,8 @@ x-java-base: &java-base
     STORYBOARD_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
     STORYBOARD_STORAGE_BUCKET: storyboard
     STORYBOARD_STORAGE_REGION: us-east-1
+    # 媒体引用额外允许的 origin（默认空）；浏览器 origin 走路径归一化，无需登记
+    MOON_MEDIA_ALLOWED_ORIGINS: ${MOON_MEDIA_ALLOWED_ORIGINS:-}
     FILE_SIGNING_SECRET: ${INTERNAL_SECRET}
     JAVA_TOOL_OPTIONS: >-
       -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
@@ -115,36 +117,6 @@ services:
     networks:
       default:
         ipv4_address: 172.28.0.13
-
-  searxng:
-    # 网页检索自托管后端（MoonAgent web_search 默认 provider=searxng）。
-    # 放进统一栈是为了随栈一起启停与开机自恢复：独立跑 deploy/docker/searxng 也能用，
-    # 但那个 compose 项目不会被本栈的 up/down 带着走。
-    # 配置复用同一份 settings.yml：已开 search.formats: [json]（否则请求 json 会 403）。
-    image: docker.io/searxng/searxng:2026.10.13-22c64b8d3
-    container_name: searxng
-    restart: unless-stopped
-    environment:
-      # 与独立部署同一个变量；容器内没有 .env 时必填
-      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET is required（生成：openssl rand -hex 32）}
-      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8888/}
-      TZ: Asia/Shanghai
-    volumes:
-      - ../docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - searxng-cache:/var/cache/searxng
-    ports:
-      # 只为排障/手工验证暴露；moon-agent 走 compose 网络内的 searxng:8080，不经这个端口
-      - "127.0.0.1:${SEARXNG_PORT:-8888}:8080"
-    healthcheck:
-      # CMD-SHELL 让容器里的 shell 解析命令，避免不同镜像 PATH 差异导致误判不健康
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      default:
-        ipv4_address: 172.28.0.21
 
   sandbox-egress-proxy:
     build:
@@ -373,10 +345,9 @@ services:
       AI_GATEWAY_BASE_URL: http://llm-gateway:8083
       AI_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY_AGENT}
       LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY_AGENT}
-      # 网页搜索：默认自托管 SearXNG（provider=searxng，无需第三方 key），
-      # 想改用 DeepSeek 原生搜索则把 AGENTSCOPE_WEB_SEARCH_PROVIDER 设为 deepseek 并填 key。
-      AGENTSCOPE_WEB_SEARCH_PROVIDER: ${AGENTSCOPE_WEB_SEARCH_PROVIDER:-searxng}
-      AGENTSCOPE_SEARXNG_URL: ${AGENTSCOPE_SEARXNG_URL:-http://searxng:8080}
+      # 网页搜索：唯一后端是 DeepSeek 原生搜索（Anthropic 兼容 Messages + 服务端工具
+      # web_search_20250305）。曾经还有一个自托管 SearXNG 容器可选；那个实例不常驻时
+      # /chat 的每次「网页搜索」都报连接失败，所以整条链路已移除，只留可用的这条。
       AGENTSCOPE_WEB_SEARCH_API_KEY: ${AGENTSCOPE_WEB_SEARCH_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       AGENTSCOPE_WEB_SEARCH_BASE_URL: ${AGENTSCOPE_WEB_SEARCH_BASE_URL:-https://api.deepseek.com/anthropic/v1}
@@ -470,8 +441,6 @@ volumes:
     name: aistoryboard-uploads
   redis-data:
   sandbox-workspaces:
-  # SearXNG 运行期缓存（uWSGI 状态等）；删掉只会让下次启动慢一点，不丢配置
-  searxng-cache:
 
 networks:
   default:

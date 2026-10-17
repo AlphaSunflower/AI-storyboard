@@ -19,6 +19,7 @@ import { ChatAppsHost } from '../components/agent/apps/ChatAppsHost';
 import { ChatAppsProvider } from '../components/agent/apps/ChatAppsContext';
 import { useChatApps } from '../components/agent/apps/useChatApps';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
+import { AssetDetailHost } from '../components/agent/AssetDetailHost';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
 import { ChatDockShell, type ChatDockPresentation } from '../components/agent/ChatDockShell';
 import {
@@ -1804,6 +1805,8 @@ export function ChatPage() {
       )}
     </div>
     <GenerationRecordsModal open={recordsOpen} onClose={() => setRecordsOpen(false)} />
+    {/* 会话里的图片/视频与生成中心的网格共用同一个素材详情弹窗，页面只挂一次宿主。 */}
+    <AssetDetailHost />
     <AgentTaskDrawer />
     <ConversationSearchModal
       open={searchOpen}
@@ -1844,8 +1847,9 @@ function CanvasTechAtmosphere({ active }: { active: boolean }) {
       aria-hidden="true"
       className={`chat-canvas-tech-atmosphere${active ? ' is-active' : ''}`}
     >
+      {/* 只保留静态纹理与极缓漂移。曾有第三条 __beam（34% 宽发光带每 7.4s 横扫一次），
+          扫过时会把视线从对话内容上拽走，已移除，不要再加回来。 */}
       <span className="chat-canvas-tech-atmosphere__grid" />
-      <span className="chat-canvas-tech-atmosphere__beam" />
       <span className="chat-canvas-tech-atmosphere__line" />
     </div>
   );

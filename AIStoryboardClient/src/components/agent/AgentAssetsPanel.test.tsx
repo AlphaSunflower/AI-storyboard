@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentApi, type AgentAsset } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
-import { AgentAssetsModal } from './AgentAssetsPanel';
+import { AgentAssetBrowser, AgentAssetsModal } from './AgentAssetsPanel';
 
 vi.mock('gsap', () => ({
   default: { fromTo: vi.fn() },
@@ -224,5 +224,76 @@ describe('AgentAssetsPanel asset tiles', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
 
     await waitFor(() => expect(deleteAsset).toHaveBeenCalledWith('image-record-2', undefined));
+  });
+});
+
+describe('AgentAssetBrowser 点开素材的去向', () => {
+  afterEach(() => {
+    cleanup();
+    useAgentStore.setState({
+      assets: null,
+      activeConversationId: null,
+      loadAssets: useAgentStore.getInitialState().loadAssets,
+    });
+    vi.restoreAllMocks();
+  });
+
+  function seed(records: AgentAsset[]) {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      assets: { records, total: records.length, page: 1, size: 20 },
+      loadAssets: vi.fn().mockResolvedValue(undefined),
+    });
+  }
+
+  it('宿主接了详情时，点格子把资产和下标一起报上去', () => {
+    seed([multiImageAsset]);
+    const onOpenDetail = vi.fn();
+    render(
+      <MemoryRouter>
+        <AgentAssetBrowser tab="image" active onOpenEditor={vi.fn()} onOpenDetail={onOpenDetail} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(mediaTiles()[1]);
+
+    expect(onOpenDetail).toHaveBeenCalledWith({
+      asset: multiImageAsset,
+      url: '/api/files/images/two.png',
+      index: 1,
+      kind: 'image',
+    });
+  });
+
+  it('宿主没接详情时退回灯箱看大图（产出素材弹窗保持老行为）', () => {
+    seed([multiImageAsset]);
+    render(
+      <MemoryRouter>
+        <AgentAssetBrowser tab="image" active onOpenEditor={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(mediaTiles()[0]);
+
+    expect(screen.getByRole('dialog', { name: '图片预览' })).toBeTruthy();
+  });
+
+  it('键盘回车与点击同一条路径', () => {
+    seed([videoAsset]);
+    const onOpenDetail = vi.fn();
+    render(
+      <MemoryRouter>
+        <AgentAssetBrowser tab="video" active onOpenEditor={vi.fn()} onOpenDetail={onOpenDetail} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.keyDown(mediaTiles()[0], { key: 'Enter' });
+
+    expect(onOpenDetail).toHaveBeenCalledWith({
+      asset: videoAsset,
+      url: '/api/files/videos/clip.mp4',
+      index: 0,
+      kind: 'video',
+    });
   });
 });

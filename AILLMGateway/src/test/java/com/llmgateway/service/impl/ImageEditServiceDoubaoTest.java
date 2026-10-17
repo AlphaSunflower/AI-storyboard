@@ -21,6 +21,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -89,5 +90,63 @@ class ImageEditServiceDoubaoTest {
         assertEquals("/images/generations", path.getValue());
         assertTrue(requestBody.getValue().contains("\"image\":["));
         assertTrue(requestBody.getValue().contains("洋红色区域"));
+    }
+
+    @Test
+    void usesNonStreamingPathForSingleImageModels() throws Exception {
+        ModelRouteMapper routeMapper = mock(ModelRouteMapper.class);
+        ChannelMapper channelMapper = mock(ChannelMapper.class);
+        KeyService keyService = mock(KeyService.class);
+        UpstreamClient upstreamClient = mock(UpstreamClient.class);
+        CallLogService callLogService = mock(CallLogService.class);
+
+        ModelRoute route = new ModelRoute();
+        route.setChannelId("channel-1");
+        when(routeMapper.selectList(any())).thenReturn(List.of(route));
+        Channel channel = new Channel();
+        channel.setId("channel-1");
+        channel.setName("doubao");
+        channel.setBaseUrl("https://ark.example.com/api/v3");
+        channel.setEnabled(true);
+        channel.setApiKey("encrypted");
+        when(channelMapper.selectById("channel-1")).thenReturn(channel);
+        when(keyService.decrypt("encrypted")).thenReturn("key");
+
+        // Seedream 5.0 flash 不支持流式输出：上游一次性返回 JSON，而不是 SSE
+        String json = """
+                {"created":1,"model":"doubao-seedream-5-0-flash-260915",
+                 "data":[{"url":"https://result.example.com/5.png","size":"2048x2048"}],
+                 "usage":{"generated_images":1}}
+                """;
+        @SuppressWarnings("unchecked")
+        HttpResponse<java.io.InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
+        when(upstreamClient.postJsonStream(eq(channel.getBaseUrl()), any(), eq("key"), any()))
+                .thenReturn(response);
+
+        BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream imageBytes = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", imageBytes);
+        byte[] multipart = new MultipartBuilder()
+                .field("model", "doubao-seedream-5-0-flash-260915")
+                .field("prompt", "把椅子改成蓝色")
+                .field("size", "4K")
+                .field("n", "4")
+                .file("image", "source.png", "image/png", imageBytes.toByteArray())
+                .build();
+
+        ImageEditServiceImpl service = new ImageEditServiceImpl(
+                routeMapper, channelMapper, keyService, upstreamClient, callLogService);
+        RouteResult result = service.edit(multipart, "application/octet-stream");
+
+        assertEquals(200, result.status());
+        assertTrue(result.body().contains("https://result.example.com/5.png"));
+        ArgumentCaptor<String> requestBody = ArgumentCaptor.forClass(String.class);
+        verify(upstreamClient).postJsonStream(
+                eq(channel.getBaseUrl()), any(), eq("key"), requestBody.capture());
+        assertFalse(requestBody.getValue().contains("\"stream\""));
+        assertFalse(requestBody.getValue().contains("sequential_image_generation"));
+        assertTrue(requestBody.getValue().contains("\"size\":\"2K\""));
     }
 }

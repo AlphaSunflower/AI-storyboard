@@ -11,7 +11,9 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Adds the active Canvas Run scope to server-side graph MCP calls and records
@@ -21,18 +23,82 @@ final class CanvasRunToolAdapter extends ToolBase {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /**
+     * 注入型参数：由本适配器在模型调用之后强制覆盖写入，模型永远不该看到或传它们。
+     *
+     * <p>MCP 侧声明必须保持 {@code required = false}（那边的 schema 测试兜底）；这里只负责
+     * "模型可见的那一份 schema"不再包含它们：15 个画布工具 × 5 个属性会在每次模型调用上重复计费。
+     */
+    static final Set<String> INJECTED_PARAM_NAMES = Set.of(
+            "userId", "projectId", "canvasId", "runId", "operationKey");
+
     private final ToolCallback callback;
     private final AgentCanvasRunService runs;
 
     CanvasRunToolAdapter(ToolCallback callback, AgentCanvasRunService runs) {
+        this(callback, runs, true);
+    }
+
+    /**
+     * @param hideInjectedParams 是否从模型可见 schema 中隐藏注入型参数（默认隐藏；
+     *                           由 {@code ai.agent.agentscope.canvas-schema-hide-injected-params} 控制）
+     */
+    CanvasRunToolAdapter(ToolCallback callback, AgentCanvasRunService runs, boolean hideInjectedParams) {
         super(ToolBase.builder()
                 .name(callback.getToolDefinition().name())
                 .description(callback.getToolDefinition().description())
-                .inputSchema(parseSchema(callback.getToolDefinition().inputSchema()))
+                .inputSchema(hideInjectedParams
+                        ? hideInjectedParams(parseSchema(callback.getToolDefinition().inputSchema()))
+                        : parseSchema(callback.getToolDefinition().inputSchema()))
                 .readOnly(false)
                 .concurrencySafe(false));
         this.callback = callback;
         this.runs = runs;
+    }
+
+    /**
+     * 从 JSON Schema 中移除注入型参数：{@code properties} 里删键，{@code required} 里删名。
+     *
+     * <p>只认 {@link #INJECTED_PARAM_NAMES} 这 5 个名字，业务参数原样保留；其余 schema 键
+     * （{@code type} 等）不动，保证仍是合法 JSON Schema。
+     *
+     * <p>真的删掉了属性时，把 {@code additionalProperties:false} 放宽成 {@code true}：
+     * 模型偶尔仍会凭旧记忆传 {@code userId}，而声明里已经没有它——若继续严格禁止额外属性，
+     * 这种"以前会被静默覆盖"的调用会变成硬失败（Parameter validation failed）。业务必填项
+     * 仍由 {@code required} 兜底，放宽只有好处。
+     */
+    static Map<String, Object> hideInjectedParams(Map<String, Object> schema) {
+        if (schema == null || schema.isEmpty()) {
+            return Map.of("type", "object", "properties", Map.of());
+        }
+        Map<String, Object> out = new LinkedHashMap<>(schema);
+        boolean removed = false;
+        Object properties = schema.get("properties");
+        if (properties instanceof Map<?, ?> map) {
+            Map<String, Object> filtered = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                if (INJECTED_PARAM_NAMES.contains(name)) {
+                    removed = true;
+                    continue;
+                }
+                filtered.put(name, entry.getValue());
+            }
+            out.put("properties", filtered);
+        } else {
+            out.put("properties", Map.of());
+        }
+        Object required = schema.get("required");
+        if (required instanceof List<?> list) {
+            out.put("required", list.stream()
+                    .map(String::valueOf)
+                    .filter(name -> !INJECTED_PARAM_NAMES.contains(name))
+                    .toList());
+        }
+        if (removed && Boolean.FALSE.equals(schema.get("additionalProperties"))) {
+            out.put("additionalProperties", true);
+        }
+        return out;
     }
 
     @Override
@@ -42,15 +108,33 @@ final class CanvasRunToolAdapter extends ToolBase {
             AgentScopeTurnState turnState = context == null ? null : context.turnState();
             String runId = turnState == null ? null : turnState.activeCanvasRunId();
             String canvasId = turnState == null ? null : turnState.activeCanvasId();
+            String turnId = context == null || context.request() == null
+                    ? "" : context.request().getTurnId();
             if ((runId == null || canvasId == null)
                     && context != null && context.request() != null) {
-                AgentCanvasRunService.CanvasRunView active =
-                        runs.activeByTurn(context.request().getTurnId());
+                AgentCanvasRunService.CanvasRunView active = runs.activeByTurn(turnId);
                 if (active != null) {
                     runId = active.runId();
                     canvasId = active.canvasId();
                     if (turnState != null) {
                         turnState.setActiveCanvasRun(runId, canvasId);
+                    }
+                }
+            }
+            // 用户已在画布编辑模式：直接在当前画布上作业，不要求先建任务、也不另建画布。
+            // turnId 为空时不做自动接管：run 记录以 turnId 去重，缺 turnId 会每调一次建一条 run。
+            if ((runId == null || canvasId == null) && turnId != null && !turnId.isBlank()
+                    && context != null && context.conversation() != null && context.request() != null) {
+                String editCanvasId = contextCanvasId(context.request().getCanvasContext());
+                if (editCanvasId != null) {
+                    AgentCanvasRunService.CanvasRunView adopted = runs.adoptCurrentCanvas(
+                            context.conversation(), turnId, editCanvasId);
+                    if (adopted != null) {
+                        runId = adopted.runId();
+                        canvasId = adopted.canvasId();
+                        if (turnState != null) {
+                            turnState.setActiveCanvasRun(runId, canvasId);
+                        }
                     }
                 }
             }
@@ -99,6 +183,13 @@ final class CanvasRunToolAdapter extends ToolBase {
     private static AgentScopeRunContext context(ToolCallParam param) {
         return param == null || param.getRuntimeContext() == null
                 ? null : param.getRuntimeContext().get(AgentScopeRunContext.class);
+    }
+
+    /** 画布编辑模式下随本轮消息带上的画布 id；非画布模式返回 null。 */
+    private static String contextCanvasId(com.moon.moonagent.ai.agent.CanvasSessionContext canvasContext) {
+        if (canvasContext == null || !canvasContext.isCanvasEditMode()) return null;
+        String canvasId = canvasContext.canvasId();
+        return canvasId == null || canvasId.isBlank() ? null : canvasId.trim();
     }
 
     private static String toolCallId(ToolCallParam param) {

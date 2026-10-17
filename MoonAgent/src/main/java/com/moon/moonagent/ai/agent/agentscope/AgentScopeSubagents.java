@@ -11,11 +11,17 @@ final class AgentScopeSubagents {
     }
 
     static List<SubagentDeclaration> readOnlyExecutors() {
-        return readOnlyExecutors("", "", "");
+        return readOnlyExecutors("", "");
     }
 
+    /**
+     * 只读创作子智能体清单。
+     *
+     * <p>{@code visual-critic} 已下线：它对每次生成结果都额外发起一次视觉模型评审，
+     * 既增加成本，又可能在用户已经满意首图时触发多余的修复重生成。
+     * 生成结果不再由智能体自动诊断，是否需要改图完全由用户决定。
+     */
     static List<SubagentDeclaration> readOnlyExecutors(String promptModel,
-                                                       String criticModel,
                                                        String visionModel) {
         return List.of(
                 declaration(
@@ -61,23 +67,6 @@ final class AgentScopeSubagents {
                                 AgentScopeAssetGroupTools.LIST_ASSET_GROUPS,
                                 AgentScopeCreativeTools.GET_CONTEXT),
                         promptModel, 6, false),
-                declaration(
-                        "visual-critic",
-                        "Reviews generated images against the request, hard constraints and "
-                                + "visual quality. Never creates media.",
-                        """
-                        You are a strict visual critic.
-                        Check hard constraints, subject, composition, style, artifacts,
-                        text integrity and reference consistency.
-                        Return JSON with decision, hardConstraintPass, scores,
-                        violations, reasons, summary, assetIds and unresolved.
-                        Never create media.
-                        """,
-                        List.of(
-                                AgentScopeCreativeTools.GET_CONTEXT,
-                                AgentScopeCreativeTools.LIST_CRITIQUES,
-                                AgentScopeCreativeTools.REVIEW_MEDIA),
-                        criticModel, 6, false),
                 declaration(
                         "continuity-editor",
                         "Checks cross-shot identity, style, material and temporal continuity.",

@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>分镜智能创作平台 · 系统架构（产品版）</title>
+<style>
+  :root{
+    --cream:#f3ece2;
+    --board:#faf9f5;
+    --card:#fffdfa;
+    --ink:#141413;
+    --ink-2:#4c463e;
+    --ink-3:#8b8278;
+    --coral:#cc785c;
+    --coral-deep:#a95539;
+    --coral-tint:#f8ebe4;
+    --coral-line:#e9cdbe;
+    --sand:#efe9de;
+    --line:#e7ddce;
+    --cool:#5d7078;
+    --cool-tint:#ecf1f2;
+    --cool-line:#d5e1e4;
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  body{
+    background:var(--cream);
+    font-family:"Inter","Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    padding:56px 40px;
+    display:flex;
+    justify-content:center;
+  }
+
+  .board{
+    width:1600px;
+    background:var(--board);
+    border:1px solid #eee5d8;
+    border-radius:22px;
+    padding:54px 58px 44px;
+    box-shadow:
+      0 1px 2px rgba(60,40,20,.04),
+      0 18px 48px -18px rgba(70,45,20,.22),
+      0 48px 100px -50px rgba(70,45,20,.28);
+    position:relative;
+    overflow:hidden;
+  }
+  .board::before{
+    content:"";
+    position:absolute; inset:-30% -10% auto auto;
+    width:900px; height:620px;
+    background:radial-gradient(closest-side, rgba(204,120,92,.13), transparent 72%);
+    pointer-events:none;
+  }
+
+  /* ── 标题区 ───────────────────────────────── */
+  .masthead{
+    padding-bottom:26px; margin-bottom:34px;
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:flex-end; justify-content:space-between;
+    position:relative;
+  }
+  .masthead h1{ font-size:38px; font-weight:700; letter-spacing:-.4px; line-height:1.1; }
+  .masthead h1 em{ font-style:normal; color:var(--coral-deep); }
+  .masthead .sub{ margin-top:11px; font-size:15px; color:var(--ink-3); letter-spacing:.2px; }
+  .masthead .stamp{ text-align:right; font-size:12.5px; color:var(--ink-3); line-height:1.9; }
+  .masthead .stamp b{
+    display:block; font-size:13px; color:var(--coral-deep);
+    font-weight:600; letter-spacing:1.4px; margin-bottom:3px;
+  }
+
+  /* ── 创作主流程 ───────────────────────────── */
+  .journey{
+    background:linear-gradient(180deg,#fdf4ef,#fbf0e8);
+    border:1px solid var(--coral-line);
+    border-radius:15px;
+    padding:22px 26px 24px;
+    margin-bottom:34px;
+  }
+  .journey .cap{
+    font-size:12px; font-weight:700; letter-spacing:1.6px;
+    color:var(--coral-deep); margin-bottom:16px;
+  }
+  .journey .track{ display:flex; align-items:stretch; gap:0; }
+  .journey .beat{
+    flex:1; background:#fff; border:1px solid var(--coral-line);
+    border-radius:10px; padding:12px 16px 13px;
+    box-shadow:0 1px 2px rgba(120,70,40,.05);
+    position:relative;
+  }
+  .journey .beat .n{
+    font-size:10.5px; font-weight:700; letter-spacing:1.6px;
+    color:var(--coral); opacity:.75; display:block; margin-bottom:5px;
+  }
+  .journey .beat .t{ font-size:14.5px; font-weight:700; }
+  .journey .beat .d{ margin-top:5px; font-size:12px; color:var(--ink-3); line-height:1.6; }
+  .journey .beats-between{
+    flex:none; width:34px; display:flex; align-items:center; justify-content:center;
+    color:var(--coral); font-size:15px; opacity:.6;
+  }
+
+  /* ── 层 ───────────────────────────────────── */
+  .layer{
+    display:grid; grid-template-columns:172px 1fr; gap:34px;
+    padding:23px 0;
+  }
+  .layer + .layer{ border-top:1px dashed #e9dfd0; }
+
+  .gutter{ position:relative; padding-left:20px; }
+  .gutter::before{
+    content:""; position:absolute; left:0; top:3px; bottom:3px;
+    width:3px; border-radius:2px; background:var(--coral);
+  }
+  .gutter .idx{
+    font-size:11.5px; font-weight:700; letter-spacing:2px;
+    color:var(--coral); opacity:.72; display:block; margin-bottom:5px;
+  }
+  .gutter .name{ font-size:19px; font-weight:700; letter-spacing:-.1px; line-height:1.28; }
+  .gutter .note{ margin-top:8px; font-size:12px; color:var(--ink-3); line-height:1.62; }
+  .layer.is-cool .gutter::before{ background:var(--cool); }
+  .layer.is-cool .gutter .idx{ color:var(--cool); }
+  .layer.is-cool .gutter .name{ color:#3d4f56; }
+
+  .cards{ display:flex; gap:16px; flex-wrap:wrap; align-items:stretch; }
+
+  /* ── 卡片 ─────────────────────────────────── */
+  .card{
+    flex:1 1 0; min-width:0;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:13px;
+    padding:18px 20px 19px;
+    box-shadow:0 1px 2px rgba(60,40,20,.035);
+  }
+  .card > h3{
+    font-size:16px; font-weight:700; letter-spacing:-.1px;
+    display:flex; align-items:center; gap:9px;
+  }
+  .card > h3 .tag{
+    font-size:10.5px; font-weight:600; letter-spacing:.6px;
+    color:var(--coral-deep); background:var(--coral-tint);
+    border:1px solid var(--coral-line); border-radius:5px;
+    padding:2px 7px; flex:none;
+  }
+  .card > h3 .tag.cool{
+    color:#41565e; background:var(--cool-tint); border-color:var(--cool-line);
+  }
+  .card .role{ margin-top:8px; font-size:13.5px; color:var(--ink-2); line-height:1.72; }
+  .card ul{ margin-top:11px; list-style:none; }
+  .card ul li{
+    font-size:12.5px; color:var(--ink-2); line-height:1.6;
+    padding-left:15px; position:relative; margin-top:7px;
+  }
+  .card ul li::before{
+    content:""; position:absolute; left:2px; top:8px;
+    width:5px; height:5px; border-radius:50%;
+    background:var(--coral); opacity:.5;
+  }
+
+  .card.hero{
+    border-color:var(--coral-line);
+    background:linear-gradient(178deg,#fffaf6 0%, var(--card) 62%);
+  }
+
+  /* Mood 卡：智能体能力四象限 */
+  .abilities{
+    flex:1 0 100%; display:flex; gap:16px; margin-top:2px;
+  }
+  .ability{
+    flex:1; background:#fffaf6; border:1px solid var(--coral-line);
+    border-radius:11px; padding:15px 17px 16px;
+  }
+  .ability .ic{
+    width:26px; height:26px; border-radius:7px;
+    background:var(--coral-tint); border:1px solid var(--coral-line);
+    display:flex; align-items:center; justify-content:center;
+    font-size:13px; color:var(--coral-deep); margin-bottom:11px;
+  }
+  .ability .t{ font-size:14px; font-weight:700; }
+  .ability .d{ margin-top:6px; font-size:12.5px; color:var(--ink-2); line-height:1.68; }
+
+  /* ── 层间流转 ─────────────────────────────── */
+  .flow{
+    display:flex; align-items:center; gap:12px;
+    padding:0 0 0 206px; margin:-3px 0;
+  }
+  .flow .chev{
+    width:0; height:0; flex:none;
+    border-left:5px solid transparent;
+    border-right:5px solid transparent;
+    border-top:7px solid var(--coral);
+    opacity:.5;
+  }
+  .flow .lbl{
+    font-size:11.5px; color:var(--ink-3); letter-spacing:.3px;
+    background:var(--board); padding:2px 10px;
+    border:1px solid var(--line); border-radius:20px;
+    white-space:nowrap;
+  }
+  .flow .rule{ height:1px; flex:1; background:linear-gradient(90deg,#e9dfd0,transparent); }
+
+  /* ── 底座 ─────────────────────────────────── */
+  .bedrock{ margin-top:32px; padding-top:30px; border-top:2px solid var(--cool-line); }
+  .bedrock .bedrock-tag{
+    display:inline-flex; align-items:center; gap:9px;
+    font-size:12px; letter-spacing:1.3px; font-weight:700;
+    color:#41565e; margin-bottom:18px;
+  }
+  .bedrock .bedrock-tag .dot{ width:7px; height:7px; border-radius:50%; background:var(--cool); }
+  .cool-card{ border-color:var(--cool-line); background:var(--cool-tint); }
+  .cool-card > h3{ color:#31454c; }
+  .cool-card ul li::before{ background:var(--cool); }
+  .cool-card ul li{ color:#4a5f66; }
+  .cool-card .role{ color:#4a5f66; }
+
+  /* ── 页脚 ─────────────────────────────────── */
+  .colophon{
+    margin-top:32px; padding-top:22px; border-top:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .colophon .creed{ font-size:13.5px; color:var(--ink-2); letter-spacing:.4px; }
+  .colophon .creed b{ color:var(--coral-deep); font-weight:700; letter-spacing:1px; margin-right:12px; }
+  .colophon .creed span + span::before{
+    content:"·"; color:var(--coral); margin:0 11px; opacity:.6;
+  }
+  .colophon .build{ font-size:11.5px; color:var(--ink-3); letter-spacing:.3px; }
+</style>
+</head>
+<body>
+<main class="board">
+
+  <div class="masthead">
+    <div>
+      <h1>分镜智能创作平台 · <em>系统架构</em></h1>
+      <div class="sub">从一句想法到可交付素材，一条链路跑通</div>
+    </div>
+    <div class="stamp">
+      <b>产品视角</b>
+      三层创作入口 · 一个智能体大脑<br>
+      人在环内，产物自动沉淀
+    </div>
+  </div>
+
+  <!-- 创作主流程 -->
+  <div class="journey">
+    <div class="cap">创作主流程</div>
+    <div class="track">
+      <div class="beat">
+        <span class="n">STEP 01</span>
+        <div class="t">说出想法</div>
+        <div class="d">一句需求、一段剧本，或一张参考图</div>
+      </div>
+      <div class="beats-between">→</div>
+      <div class="beat">
+        <span class="n">STEP 02</span>
+        <div class="t">澄清与规划</div>
+        <div class="d">智能体先问清必须确认的事，再拆解创作步骤</div>
+      </div>
+      <div class="beats-between">→</div>
+      <div class="beat">
+        <span class="n">STEP 03</span>
+        <div class="t">出方案</div>
+        <div class="d">分镜方案、画面方案、视频方案，逐条可读</div>
+      </div>
+      <div class="beats-between">→</div>
+      <div class="beat">
+        <span class="n">STEP 04</span>
+        <div class="t">人工确认</div>
+        <div class="d">满意就继续，不满意直接说，随时可打断</div>
+      </div>
+      <div class="beats-between">→</div>
+      <div class="beat">
+        <span class="n">STEP 05</span>
+        <div class="t">产出交付</div>
+        <div class="d">素材自动归档进项目库，随时下载复用</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 01 创作入口 -->
+  <section class="layer">
+    <div class="gutter">
+      <span class="idx">01</span>
+      <div class="name">创作入口</div>
+      <div class="note">创作者从哪里开始，都用同一份账号与创作上下文</div>
+    </div>
+    <div class="cards">
+      <article class="card">
+        <h3>Web 分镜编辑器 <span class="tag">主入口</span></h3>
+        <p class="role">从剧本到成片的主工作台</p>
+        <ul>
+          <li>剧本输入、分镜列表、画面与视频预览</li>
+          <li>右侧常驻智能体对话，边聊边改</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>创作画布</h3>
+        <p class="role">想自由编排时的节点式创作空间</p>
+        <ul>
+          <li>把创作步骤拆成节点，串起来跑</li>
+          <li>智能体可直接在画布上执行</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>移动端</h3>
+        <p class="role">不在电脑前也能看进度、提意见</p>
+        <ul>
+          <li>查看产物与分镜，轻量编辑</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <div class="flow"><span class="chev"></span><span class="lbl">登录一次，全端通用</span><span class="rule"></span></div>
+
+  <!-- 02 统一入口 -->
+  <section class="layer">
+    <div class="gutter">
+      <span class="idx">02</span>
+      <div class="name">统一入口</div>
+      <div class="note">所有请求都从这一道门进来，权限在这里收口</div>
+    </div>
+    <div class="cards">
+      <article class="card">
+        <h3>统一网关 <span class="tag">一次登录</span></h3>
+        <p class="role">一个地址、一套权限、一份调用记录</p>
+        <ul>
+          <li>请求自动找到对应服务，前端不需要关心后端有几个</li>
+          <li>生成过程边跑边出，不用等全部完成才看到</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>跨系统直达</h3>
+        <p class="role">从已有系统一键跳进创作台</p>
+        <ul>
+          <li>账号、密码与令牌三方校验后才放行</li>
+          <li>进去就是已登录状态，不用二次输入</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <div class="flow"><span class="chev"></span><span class="lbl">权限校验后分发</span><span class="rule"></span></div>
+
+  <!-- 03 创作业务 -->
+  <section class="layer">
+    <div class="gutter">
+      <span class="idx">03</span>
+      <div class="name">创作业务</div>
+      <div class="note">项目、分镜、素材这些产品数据，在这里定归属</div>
+    </div>
+    <div class="cards">
+      <article class="card">
+        <h3>分镜业务</h3>
+        <p class="role">项目与分镜的主流程</p>
+        <ul>
+          <li>项目草稿与生效状态，编辑自动转草稿</li>
+          <li>分镜增删改、生成记录与结果回填</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>项目库 <span class="tag">统一资产库</span></h3>
+        <p class="role">全平台素材与成品的唯一仓库</p>
+        <ul>
+          <li>上传、导入、分组、标签、文件夹</li>
+          <li>智能体产出的成品也归档到这里</li>
+          <li>分镜、画布、对话共用同一份素材，不再各存一份</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>画布服务</h3>
+        <p class="role">画布内容与执行结果的归属方</p>
+        <ul>
+          <li>画布状态保存与恢复</li>
+          <li>承接智能体下发的画布执行</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <div class="flow"><span class="chev"></span><span class="lbl">把创作任务交给智能体</span><span class="rule"></span></div>
+
+  <!-- 04 智能编排 -->
+  <section class="layer">
+    <div class="gutter">
+      <span class="idx">04</span>
+      <div class="name">智能编排</div>
+      <div class="note">平台的大脑与双手：一个负责想与决定，一个负责真实执行</div>
+    </div>
+    <div class="cards">
+      <article class="card hero" style="flex:1.3 1 0;">
+        <h3>Moon 智能体 <span class="tag">大脑</span></h3>
+        <p class="role">理解你的意图，转化成可确认、可执行的创作方案</p>
+        <div class="abilities">
+          <div class="ability">
+            <div class="ic">◐</div>
+            <div class="t">先问清楚</div>
+            <div class="d">需求里有必须遵守的硬约束时先澄清，不猜着往下做</div>
+          </div>
+          <div class="ability">
+            <div class="ic">◑</div>
+            <div class="t">会规划</div>
+            <div class="d">把长任务拆成步骤，过程中持续显示在想什么、在做什么</div>
+          </div>
+          <div class="ability">
+            <div class="ic">◒</div>
+            <div class="t">会动手</div>
+            <div class="d">调工具、写代码、跑脚本，能力可随时扩展新技能</div>
+          </div>
+          <div class="ability">
+            <div class="ic">◓</div>
+            <div class="t">听指挥</div>
+            <div class="d">要做不可逆的事先请示；你说停就停，说改就改</div>
+          </div>
+        </div>
+      </article>
+      <article class="card hero">
+        <h3>沙箱执行面 <span class="tag">双手</span></h3>
+        <p class="role">真实干活的地方，与你的环境完全隔开</p>
+        <ul>
+          <li>每个会话一个独立工作目录，互不串扰</li>
+          <li>能读写文件、执行代码，产出真实的文档、表格和图表</li>
+          <li>跑在受限容器里，配额明确，不会拖垮服务</li>
+          <li>只能访问白名单内的外部地址</li>
+          <li>长期闲置的会话自动回收，不白占资源</li>
+        </ul>
+      </article>
+      <div class="ability" style="flex:1 0 100%; background:#fff; border-color:var(--line);">
+        <div class="t" style="font-size:15px;">产物自动沉淀</div>
+        <div class="d" style="font-size:13px;">
+          每轮任务结束后，智能体产出的文件会被自动收走、校验、归档进项目库，
+          并在对话里生成可下载的文件卡 —— 不需要你手动保存，刷新或换设备也还在。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="flow"><span class="chev"></span><span class="lbl">需要生成时调用模型</span><span class="rule"></span></div>
+
+  <!-- 05 模型能力 -->
+  <section class="layer">
+    <div class="gutter">
+      <span class="idx">05</span>
+      <div class="name">模型能力</div>
+      <div class="note">跟着模型迭代走，业务侧不用改代码</div>
+    </div>
+    <div class="cards">
+      <article class="card" style="flex:1 1 100%;">
+        <h3>统一模型接入 <span class="tag">能力池</span></h3>
+        <p class="role">文本、生图、图改图、视觉理解、视频，一个池子统一供给</p>
+        <ul style="columns:2; column-gap:44px;">
+          <li>换模型、加渠道都不用动业务代码</li>
+          <li>各模型支持的参数与推荐值统一呈现，选型有依据</li>
+          <li>密钥集中在服务端加密保管，业务侧不接触</li>
+          <li>调用全量留痕，成本与效果可追溯</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- 底座 -->
+  <div class="bedrock">
+    <div class="bedrock-tag"><span class="dot"></span>所有能力共用的数据底座</div>
+
+    <section class="layer" style="padding-top:0;">
+      <div class="gutter">
+        <span class="idx">06</span>
+        <div class="name">数据底座</div>
+        <div class="note">业务数据、运行状态与成品素材分层存放</div>
+      </div>
+      <div class="cards">
+        <article class="card cool-card">
+          <h3>业务数据库</h3>
+          <p class="role">项目、分镜、素材与创作记录</p>
+          <ul>
+            <li>智能体的对话、步骤与执行痕迹同样入库存档</li>
+          </ul>
+        </article>
+        <article class="card cool-card">
+          <h3>缓存</h3>
+          <p class="role">保证同一会话不打架</p>
+          <ul>
+            <li>多端同时操作时，同一对话仍按顺序执行</li>
+          </ul>
+        </article>
+        <article class="card cool-card">
+          <h3>素材库存储</h3>
+          <p class="role">成品素材的最终存放地</p>
+          <ul>
+            <li>图片、视频、文档、表格与图表</li>
+            <li>有下载链接才算真正交付</li>
+          </ul>
+        </article>
+        <article class="card cool-card">
+          <h3>技能与提示词配置</h3>
+          <p class="role">智能体能力的版本化配置</p>
+          <ul>
+            <li>技能与全局提示词可灰度、可回退</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <div class="colophon">
+    <div class="creed">
+      <b>三条设计主线</b>
+      <span>约束生成</span><span>人在环内</span><span>产物沉淀</span>
+    </div>
+    <div class="build">分层视图 · 产品版</div>
+  </div>
+
+</main>
+</body>
+</html>

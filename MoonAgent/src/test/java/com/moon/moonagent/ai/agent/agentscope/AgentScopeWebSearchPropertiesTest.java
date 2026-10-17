@@ -7,23 +7,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentScopeWebSearchPropertiesTest {
 
     @Test
-    void selfHostedDefaultNeedsNoApiKey() {
+    void nativeSearchIsTheOnlyBackendAndNeedsAKey() {
         AgentScopeProperties properties = new AgentScopeProperties();
 
-        // 默认后端是自托管 SearXNG：只要实例地址在就算配置齐全，不需要任何第三方 key。
-        assertThat(properties.getWebSearch().getProvider())
-                .isEqualTo(AgentScopeProperties.WebSearch.Provider.SEARXNG);
-        assertThat(properties.getWebSearch().isConfigured()).isTrue();
-        assertThat(properties.getWebSearch().getSearxngEndpoint())
-                .isEqualTo("http://localhost:8888/search");
-    }
-
-    @Test
-    void deepSeekProviderNeedsAnApiKey() {
-        AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setProvider("deepseek");
-
+        // 只有一个后端（DeepSeek 原生搜索），它必须有 key 才算配置齐全。
+        // 默认不给 key：工具不注册，能力上报如实说不可用，而不是注册一个必然失败的工具。
         assertThat(properties.getWebSearch().isConfigured()).isFalse();
+        assertThat(properties.getWebSearch().getBaseUrl())
+                .isEqualTo(AgentScopeProperties.WebSearch.DEFAULT_BASE_URL);
 
         properties.getWebSearch().setApiKey("sk-test-key");
         assertThat(properties.getWebSearch().isConfigured()).isTrue();
@@ -32,7 +23,6 @@ class AgentScopeWebSearchPropertiesTest {
     @Test
     void configuredOnceApiKeyPresentAndEnabled() {
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setProvider("deepseek");
         properties.getWebSearch().setApiKey("sk-test-key");
 
         assertThat(properties.getWebSearch().isConfigured()).isTrue();

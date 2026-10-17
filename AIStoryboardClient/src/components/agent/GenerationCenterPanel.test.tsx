@@ -1,9 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentApi, type AgentTaskView } from '../../api/agent';
+import { agentApi, type AgentAsset, type AgentTaskView } from '../../api/agent';
+import { libraryApi } from '../../api/library';
 import { useAgentStore } from '../../stores/agentStore';
+import { useAssetDetailStore } from '../../stores/assetDetailStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { AssetDetailHost } from './AssetDetailHost';
 import { GenerationCenterPanel } from './GenerationCenterPanel';
 
 vi.mock('gsap', () => ({
@@ -479,5 +482,166 @@ describe('GenerationCenterPanel', () => {
     );
 
     expect(container.querySelector('.generation-center__scrim')).toBeNull();
+  });
+});
+
+const detailImageAsset: AgentAsset = {
+  id: 'image-record-1',
+  conversationId: 'conversation-1',
+  type: 'image',
+  url: '/api/files/images/one.png',
+  prompt: '精细国风东方龙图案',
+  model: 'Seedream 4.5',
+  status: 'completed',
+  taskId: null,
+  error: null,
+  createdAt: '2026-10-10T00:00:00.000Z',
+  params: JSON.stringify({ size: '1024x1024' }),
+  durationMs: 42_000,
+  resultUrls: '["/api/files/images/one.png"]',
+};
+
+/** 会话资产段：把一条图片素材铺到网格里。 */
+function seedAssetTab() {
+  stubDesktopViewport();
+  seedStore();
+  vi.spyOn(libraryApi, 'listAssets').mockResolvedValue({
+    data: { code: 0, message: '', data: { records: [], total: 0, page: 1, size: 200 } },
+  } as never);
+  useAgentStore.setState({
+    activeConversationId: 'conversation-1',
+    tasks: {},
+    storyboardVideoQueue: [],
+    storyboardImageQueue: [],
+    assets: { records: [detailImageAsset], total: 1, page: 1, size: 20 },
+    loadAssets: vi.fn(),
+    openTaskDrawer: vi.fn(),
+    addRefImageUrls: vi.fn(),
+    refImageUrls: [],
+  });
+}
+
+describe('GenerationCenterPanel 会话资产详情', () => {
+  afterEach(() => {
+    cleanup();
+    useAgentStore.setState({
+      tasks: {},
+      storyboardVideoQueue: [],
+      storyboardImageQueue: [],
+      assets: null,
+      activeConversationId: null,
+    });
+    useProjectStore.setState({ currentProject: null, scenes: [], generatingImage: {} });
+    useAssetDetailStore.getState().closeAssetDetail();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** 页面形态：侧边栏 + 详情宿主。弹窗由宿主渲染，不再挂在侧边栏里。 */
+  function renderPanel(props: Record<string, unknown> = {}) {
+    return render(
+      <MemoryRouter>
+        <GenerationCenterPanel open defaultTab="image" {...props} />
+        <AssetDetailHost />
+      </MemoryRouter>,
+    );
+  }
+
+  it('点一张素材把详情交给全局宿主，侧边栏和网格都不动', () => {
+    seedAssetTab();
+
+    const { container } = renderPanel();
+    const sidebar = container.querySelector('.generation-center__sidebar') as HTMLElement;
+    expect(sidebar.style.getPropertyValue('--generation-center-width')).toBe('380px');
+
+    fireEvent.click(container.querySelector('.agent-asset-tile.is-media') as HTMLElement);
+
+    // 网格留在原地（弹窗盖在上面），侧边栏宽度不变。
+    expect(container.querySelector('.agent-assets-grid')).toBeTruthy();
+    expect(sidebar.style.getPropertyValue('--generation-center-width')).toBe('380px');
+
+    // 详情走全局 store，聊天里的图片和网格共用同一个宿主。
+    expect(useAssetDetailStore.getState().target).toMatchObject({
+      url: '/api/files/images/one.png',
+      asset: { id: 'image-record-1' },
+    });
+
+    const dialog = screen.getByRole('dialog', { name: /素材详情$/ });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(sidebar.contains(dialog)).toBe(false);
+  });
+
+  it('关闭弹窗后焦点回到点开它的那个格子', () => {
+    seedAssetTab();
+    const { container } = renderPanel();
+
+    const tile = container.querySelector('.agent-asset-tile.is-media') as HTMLElement;
+    tile.focus();
+    fireEvent.click(tile);
+    expect(document.activeElement?.classList.contains('asset-detail')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(document.querySelector('.asset-detail')).toBeNull();
+    expect(document.activeElement).toBe(tile);
+  });
+
+  it('点空白遮罩关掉弹窗', () => {
+    seedAssetTab();
+    const { container } = renderPanel();
+
+    fireEvent.click(container.querySelector('.agent-asset-tile.is-media') as HTMLElement);
+    fireEvent.pointerDown(document.querySelector('.asset-detail__backdrop') as HTMLElement);
+
+    expect(document.querySelector('.asset-detail')).toBeNull();
+    expect(useAssetDetailStore.getState().target).toBeNull();
+  });
+
+  it('弹窗只由它自己关闭：换分类不会顺手把它收掉', () => {
+    seedAssetTab();
+    const { container } = renderPanel();
+
+    fireEvent.click(container.querySelector('.agent-asset-tile.is-media') as HTMLElement);
+    expect(document.querySelector('.asset-detail')).toBeTruthy();
+
+    const filter = screen.getByRole('tablist', { name: '会话资产筛选' });
+    fireEvent.click(within(filter).getByRole('tab', { name: '全部' }));
+
+    expect(document.querySelector('.asset-detail')).toBeTruthy();
+  });
+
+  it('悬浮与点开都不在弹窗外挂出多余的浮层', () => {
+    seedAssetTab();
+    const { container } = renderPanel();
+
+    const tile = container.querySelector('.agent-asset-tile.is-media') as HTMLElement;
+
+    // 悬浮：只在格子上描边，不该挂出预览卡片。
+    fireEvent.mouseEnter(tile);
+    expect(document.querySelector('.asset-preview')).toBeNull();
+
+    fireEvent.click(tile);
+
+    // 弹窗自己一个就够，别顺手把灯箱也弹出来。
+    expect(screen.queryByRole('dialog', { name: '图片预览' })).toBeNull();
+    expect(document.querySelectorAll('.asset-detail')).toHaveLength(1);
+  });
+
+  it('Esc 只关弹窗，侧边栏留着', () => {
+    seedAssetTab();
+    const onOpenChange = vi.fn();
+    const { container } = renderPanel({ onOpenChange });
+
+    fireEvent.click(container.querySelector('.agent-asset-tile.is-media') as HTMLElement);
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(document.querySelector('.asset-detail')).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(container.querySelector('.generation-center__sidebar')?.classList.contains('is-open'))
+      .toBe(true);
+
+    // 弹窗关掉之后 Esc 才轮到侧边栏。
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

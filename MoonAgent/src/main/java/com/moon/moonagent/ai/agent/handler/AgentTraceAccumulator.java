@@ -55,6 +55,14 @@ public class AgentTraceAccumulator {
     private volatile Consumer<AgentTraceEvent> eventSink;
     private final StringBuilder thinkingDetails = new StringBuilder();
     /**
+     * 本轮已经推送给前端的可见正文增量。
+     *
+     * <p>用户中途打断（「停止生成」/「打断并发送」）时本轮不会产出 {@code AgentTurnResult}，
+     * 前端直播到的这段文字会随流一起消失：刷新后既看不到、也不再进入会话上下文。
+     * 因此这里按与前端 {@code TEXT_BLOCK_DELTA} 完全相同的口径累积，供打断收口时落库。</p>
+     */
+    private final StringBuilder assistantText = new StringBuilder();
+    /**
      * 本轮工具调用草稿：key = toolCallId，与前端 `generating.toolDrafts` 同构。
      *
      * <p>用 {@link LinkedHashMap} 保住首次出现顺序——前端 `orderedToolDrafts` 在缺 `seq` 时
@@ -161,6 +169,17 @@ public class AgentTraceAccumulator {
         if (thinkingStartedAt == null) thinkingStartedAt = OffsetDateTime.now();
         thinkingDetails.append(delta);
         thinkingEndedAt = null;
+    }
+
+    /** 记录一段已经下发给前端的可见正文增量（与前端打字机同源）。 */
+    public synchronized void recordAssistantDelta(String delta) {
+        if (delta == null || delta.isEmpty()) return;
+        assistantText.append(delta);
+    }
+
+    /** 本轮打断时已经流出的可见正文（无正文时为空白）。 */
+    public synchronized String assistantText() {
+        return assistantText.toString();
     }
 
     public synchronized void recordThinkingEnd() {

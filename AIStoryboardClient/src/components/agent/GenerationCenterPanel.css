@@ -541,7 +541,6 @@
   .generation-center__sidebar.is-open {
     transition: visibility 0s linear 0s;
   }
-
   .generation-center__scrim {
     animation: none;
   }

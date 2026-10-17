@@ -152,6 +152,7 @@ class AgentScopeStoryboardToolsTest {
                         AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS,
                         AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT,
                         AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD,
+                        AgentScopeStoryboardTools.READ_PROJECT_SCENE,
                         AgentScopeStoryboardTools.UPDATE_PROJECT_STORYBOARD_SHOT,
                         AgentScopeStoryboardTools.UPSERT_STORYBOARD_SHOT,
                         AgentScopeStoryboardTools.DELETE_STORYBOARD_DRAFT_SHOT,
@@ -577,6 +578,85 @@ class AgentScopeStoryboardToolsTest {
                 .extracting(card -> card.get("taskId"))
                 .containsExactly("task-revision");
         verify(production, never()).revise(any(), any(), any(), any());
+    }
+
+    @Test
+    void readProjectSceneReturnsEveryFieldLikeTheListTool() {
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        Scene target = scene("scene-2", 2, "雨夜街头，霓虹倒影");
+        target.setImageUrl("/api/files/images/a.png");
+        target.setImagePrompt("霓虹雨夜特写");
+        target.setVideoPrompt("霓虹雨夜运镜");
+        target.setNegativePrompt("不要白天");
+        target.setCameraMovement("缓推");
+        target.setShotType("特写");
+        target.setSoundDesign("雨声");
+        target.setDuration(5);
+        when(storyboardClient.getProjectScenes("project-1")).thenReturn(List.of(target));
+        AgentScopeStoryboardTools tools = tools(storyboardClient);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.READ_PROJECT_SCENE)
+                .invoke(Map.of("scene_number", "2"), param("project-1"));
+
+        assertThat(result)
+                .containsEntry("ok", true)
+                .containsEntry("projectId", "project-1")
+                .containsKey("scene");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> sceneFields = (Map<String, Object>) result.get("scene");
+        assertThat(sceneFields)
+                .containsAllEntriesOf(Map.ofEntries(
+                        Map.entry("sceneId", "scene-2"),
+                        Map.entry("sceneNumber", 2),
+                        Map.entry("scriptContent", "雨夜街头，霓虹倒影"),
+                        Map.entry("imagePrompt", "霓虹雨夜特写"),
+                        Map.entry("videoPrompt", "霓虹雨夜运镜"),
+                        Map.entry("negativePrompt", "不要白天"),
+                        Map.entry("cameraMovement", "缓推"),
+                        Map.entry("shotType", "特写"),
+                        Map.entry("soundDesign", "雨声"),
+                        Map.entry("hasImage", true),
+                        Map.entry("hasVideo", false),
+                        Map.entry("needsImage", false),
+                        Map.entry("needsVideo", true),
+                        Map.entry("imageCount", 1),
+                        Map.entry("videoCount", 0)));
+    }
+
+    @Test
+    void readProjectSceneRejectsSceneOutsideTheCurrentProject() {
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        // 目标分镜属于别的项目，当前会话的项目列表里根本没有它
+        when(storyboardClient.getProjectScenes("project-1")).thenReturn(List.of());
+        when(storyboardClient.getScene("scene-foreign")).thenReturn(null);
+        AgentScopeStoryboardTools tools = tools(storyboardClient);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> forbidden = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.READ_PROJECT_SCENE)
+                .invoke(Map.of("scene_id", "scene-foreign"), param("project-1"));
+
+        assertThat(forbidden)
+                .containsEntry("ok", false)
+                .containsEntry("message", "未找到指定的项目分镜");
+        assertThat(forbidden).doesNotContainKey("scene");
+        // 越权场景不允许走单镜直读通道
+        verify(storyboardClient, never()).getScene("scene-foreign");
+    }
+
+    @Test
+    void readProjectSceneRequiresALocator() {
+        AgentScopeStoryboardTools tools = tools();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.READ_PROJECT_SCENE)
+                .invoke(Map.of(), param("project-1"));
+
+        assertThat(result).containsEntry("ok", false);
+        assertThat(String.valueOf(result.get("message"))).contains("scene_id 或 scene_number");
     }
 
     private static AgentScopeStoryboardTools tools() {

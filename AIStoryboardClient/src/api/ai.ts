@@ -70,6 +70,8 @@ export const aiApi = {
       imageModels: GatewayModelOption[];
       videoModels: GatewayModelOption[];
       understandingModels: GatewayModelOption[];
+      /** 网关模型目录版本号：任何一次模型变更都会换值，可用于跳过无变化的重渲染 */
+      version?: string;
       /** 网关模型列表拉取失败原因（成功时不带）；用于界面提示与排障 */
       modelsError?: string;
     }>>('/ai/models'),

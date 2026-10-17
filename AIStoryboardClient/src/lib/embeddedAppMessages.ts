@@ -53,12 +53,35 @@ export interface CanvasModeControlMessage {
   locked: boolean;
 }
 
+/**
+ * 画布增量补丁（wire 字段名 `patch`）。
+ *
+ * <p>来源：MoonAgent 把画布命令的增量**合并累积**到 `canvas-run` 消息 metadata 的
+ * `metadata.canvasPatch`；累积超限时 `metadata.canvasPatchOverflow === true`，
+ * 此时不发补丁、只发 revision，由画布整图重载兜底。
+ *
+ * <p>结构在 XiaoYueCanvasAgent/src/canvas/canvasEmbeddedMode.ts 有一份同形副本（两个包不共享代码），
+ * 改这里必须同步改那边。缺省 `patch` 时保持旧行为（零回归）。
+ */
+export interface CanvasGraphPatch {
+  nodes?: CanvasGraphPatchEntry[];
+  edges?: CanvasGraphPatchEntry[];
+  removedNodeIds?: string[];
+  removedEdgeIds?: string[];
+}
+
+export interface CanvasGraphPatchEntry {
+  id: string;
+  [key: string]: unknown;
+}
+
 export interface CanvasGraphUpdatedMessage {
   type: typeof CANVAS_GRAPH_UPDATED_MESSAGE;
   conversationId: string;
   projectId: string;
   canvasId: string;
   revision: number;
+  patch?: CanvasGraphPatch;
 }
 
 export interface SideChatContextItem {
@@ -131,6 +154,32 @@ export function isCanvasModeControlMessage(value: unknown): value is CanvasModeC
     && typeof message.locked === 'boolean';
 }
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0;
+
+const isPatchEntry = (value: unknown): value is CanvasGraphPatchEntry =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  && isNonEmptyString((value as { id?: unknown }).id);
+
+/**
+ * 补丁结构校验：缺省 patch → 合法（旧发送端）；给了 patch → nodes/edges 必须是数组、
+ * 元素至少要有非空 id、removed*Ids 必须是字符串数组，否则整条消息判为无效。
+ * 宁可不更新，也不要拿半截补丁写坏画布。
+ */
+export function isCanvasGraphPatch(value: unknown): value is CanvasGraphPatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const patch = value as Partial<CanvasGraphPatch>;
+  if (patch.nodes !== undefined
+      && (!Array.isArray(patch.nodes) || !patch.nodes.every(isPatchEntry))) return false;
+  if (patch.edges !== undefined
+      && (!Array.isArray(patch.edges) || !patch.edges.every(isPatchEntry))) return false;
+  if (patch.removedNodeIds !== undefined
+      && (!Array.isArray(patch.removedNodeIds) || !patch.removedNodeIds.every(isNonEmptyString))) return false;
+  if (patch.removedEdgeIds !== undefined
+      && (!Array.isArray(patch.removedEdgeIds) || !patch.removedEdgeIds.every(isNonEmptyString))) return false;
+  return true;
+}
+
 export function isCanvasGraphUpdatedMessage(value: unknown): value is CanvasGraphUpdatedMessage {
   if (!value || typeof value !== 'object') return false;
   const message = value as Partial<CanvasGraphUpdatedMessage>;
@@ -138,7 +187,8 @@ export function isCanvasGraphUpdatedMessage(value: unknown): value is CanvasGrap
     && typeof message.conversationId === 'string' && message.conversationId.length > 0
     && typeof message.projectId === 'string' && message.projectId.length > 0
     && typeof message.canvasId === 'string' && message.canvasId.length > 0
-    && typeof message.revision === 'number' && Number.isFinite(message.revision);
+    && typeof message.revision === 'number' && Number.isFinite(message.revision)
+    && (message.patch === undefined || isCanvasGraphPatch(message.patch));
 }
 
 function isSideChatContextItem(value: unknown): value is SideChatContextItem {

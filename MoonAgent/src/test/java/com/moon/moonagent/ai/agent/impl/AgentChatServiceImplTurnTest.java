@@ -454,6 +454,7 @@ class AgentChatServiceImplTurnTest {
                         "/api/files/files/plan.docx", "项目计划书.docx",
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         123L, "file", "upload", "asset-doc", null)),
+                List.of(),
                 new SseEmitter(0L));
 
         verify(assetMapper, timeout(2_000)).bindConversation(
@@ -744,6 +745,7 @@ class AgentChatServiceImplTurnTest {
                 mock(ProjectCreativeContextService.class),
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.class),
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.class),
+                mock(com.moon.moonagent.ai.agent.context.ConversationContextCleanupService.class),
                 transactionManager);
     }
 
@@ -772,6 +774,7 @@ class AgentChatServiceImplTurnTest {
                 mock(ProjectCreativeContextService.class),
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.class),
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.class),
+                mock(com.moon.moonagent.ai.agent.context.ConversationContextCleanupService.class),
                 transactionManager);
     }
 

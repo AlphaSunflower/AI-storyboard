@@ -200,27 +200,38 @@ public class ImageEditServiceImpl implements ImageEditService {
         List<ObjectNode> items = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         AtomicBoolean completed = new AtomicBoolean(false);
-        try (InputStream input = response.body()) {
-            SeedreamImageProtocol.readEvents(input, event -> {
-                switch (event.type()) {
-                    case PARTIAL_SUCCEEDED -> {
-                        ObjectNode item = objectMapper.createObjectNode();
-                        if (event.url() != null && !event.url().isBlank()) {
-                            item.put("url", event.url());
-                            items.add(item);
-                        } else if (event.b64Json() != null && !event.b64Json().isBlank()) {
-                            item.put("b64_json", event.b64Json());
-                            items.add(item);
-                        }
-                    }
-                    case PARTIAL_FAILED -> failures.add(event.message() == null ? "图片生成失败" : event.message());
-                    case ERROR -> throw new RuntimeException(
-                            event.message() == null ? "豆包图片生成失败" : event.message());
-                    case COMPLETED -> completed.set(true);
-                    case UNKNOWN -> {
+        // 5.0 pro/flash 等模型不支持流式输出，请求体不带 stream，响应是一次性 JSON
+        List<SeedreamImageProtocol.Event> events = new ArrayList<>();
+        if (SeedreamImageProtocol.supportsStreaming(model)) {
+            try (InputStream input = response.body()) {
+                SeedreamImageProtocol.readEvents(input, events::add);
+            }
+        } else {
+            String rawBody;
+            try (InputStream input = response.body()) {
+                rawBody = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            events.addAll(SeedreamImageProtocol.parseSyncResponse(rawBody));
+        }
+        for (SeedreamImageProtocol.Event event : events) {
+            switch (event.type()) {
+                case PARTIAL_SUCCEEDED -> {
+                    ObjectNode item = objectMapper.createObjectNode();
+                    if (event.url() != null && !event.url().isBlank()) {
+                        item.put("url", event.url());
+                        items.add(item);
+                    } else if (event.b64Json() != null && !event.b64Json().isBlank()) {
+                        item.put("b64_json", event.b64Json());
+                        items.add(item);
                     }
                 }
-            });
+                case PARTIAL_FAILED -> failures.add(event.message() == null ? "图片生成失败" : event.message());
+                case ERROR -> throw new RuntimeException(
+                        event.message() == null ? "豆包图片生成失败" : event.message());
+                case COMPLETED -> completed.set(true);
+                case UNKNOWN -> {
+                }
+            }
         }
         if (items.isEmpty()) {
             String detail = failures.isEmpty() ? "未收到图片结果" : String.join("; ", failures);

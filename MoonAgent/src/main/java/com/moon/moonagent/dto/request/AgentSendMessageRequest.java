@@ -18,6 +18,8 @@ public record AgentSendMessageRequest(
     @Size(max = 3, message = "参考视频最多 3 个") List<String> referenceVideos,
     @Size(max = 3, message = "参考音频最多 3 个") List<String> referenceAudios,
     @Size(max = 20, message = "附件最多 20 个") List<@Valid AgentAttachmentRequest> attachments,
+    // 正文里 @名称 标记的结构化伴随清单（与 attachments 并行透传；正文保留 @ 原文）
+    @Size(max = 10, message = "引用资料最多 10 项") List<@Valid AgentReferenceRequest> references,
     @Size(max = 20, message = "资产最多选择 20 个") List<String> assetIds,
     @Size(max = 10, message = "资产组最多 10 个") List<String> assetGroupIds,
     @Size(max = 10, message = "资产组快照最多 10 个") List<String> assetGroupSnapshotIds,

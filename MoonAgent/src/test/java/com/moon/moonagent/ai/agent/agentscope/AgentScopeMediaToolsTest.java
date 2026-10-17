@@ -1,8 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.AgentGenerationService;
-import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
-import com.moon.moonagent.ai.agent.creative.CreativeCritiqueService;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.entity.AgentConversation;
@@ -30,15 +28,13 @@ class AgentScopeMediaToolsTest {
         AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
         AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.setCritiqueEnabled(false);
         when(assets.urlsByIds("c1", List.of("a1"))).thenReturn(List.of("/a1.png"));
         when(generation.generateImage(any(), isNull(), eq("海边日落"), isNull(),
                 eq("1K"), eq("high"), eq(1), eq("edit"), eq(List.of("/a1.png")), isNull()))
                 .thenReturn(Map.of("imageUrls", List.of("/result.png"),
                         "assetIds", List.of("result-asset")));
         AgentScopeImageTools tools = new AgentScopeImageTools(
-                generation, assets, assetGroups, asyncTasks, properties,
-                mock(CreativeCritiqueService.class), mock(ConstraintExtractionService.class));
+                generation, assets, assetGroups, asyncTasks, properties);
         AgentScopeTurnState turnState = new AgentScopeTurnState();
 
         Map<String, Object> result = tools.generateImage(
@@ -57,15 +53,13 @@ class AgentScopeMediaToolsTest {
         AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
         AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.setCritiqueEnabled(false);
         when(assets.urlsByIds("c1", List.of())).thenReturn(List.of());
         when(asyncTasks.startBatchImageTask(any(), eq("海边日落"),
                 eq(List.of("运球场景", "扣篮场景")), eq(List.of("/uploaded.png")),
                 eq("1K"), eq("high"), eq(2), eq(false), eq(""), eq(""), eq(""), eq(""),
                 any())).thenReturn("batch-1");
         AgentScopeImageTools tools = new AgentScopeImageTools(
-                generation, assets, assetGroups, asyncTasks, properties,
-                mock(CreativeCritiqueService.class), mock(ConstraintExtractionService.class));
+                generation, assets, assetGroups, asyncTasks, properties);
         AgentConversation conversation = new AgentConversation();
         conversation.setId("c1");
         conversation.setUserId("u1");
@@ -90,14 +84,12 @@ class AgentScopeMediaToolsTest {
         AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
         AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.setCritiqueEnabled(false);
         properties.setBatchConfirmThreshold(2);
         when(assets.urlsByIds("c1", List.of())).thenReturn(List.of());
         when(asyncTasks.startBatchImageTask(any(), any(), any(), any(), any(), any(), eq(6),
                 eq(false), any(), any(), any(), any(), any())).thenReturn("batch-approved");
         AgentScopeImageTools tools = new AgentScopeImageTools(
-                generation, assets, assetGroups, asyncTasks, properties,
-                mock(CreativeCritiqueService.class), mock(ConstraintExtractionService.class));
+                generation, assets, assetGroups, asyncTasks, properties);
         AgentConversation conversation = new AgentConversation();
         conversation.setId("c1");
         conversation.setUserId("u1");
@@ -209,8 +201,7 @@ class AgentScopeMediaToolsTest {
         AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
         AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
         AgentScopeImageTools tools = new AgentScopeImageTools(
-                generation, assets, assetGroups, asyncTasks, new AgentScopeProperties(),
-                mock(CreativeCritiqueService.class), mock(ConstraintExtractionService.class));
+                generation, assets, assetGroups, asyncTasks, new AgentScopeProperties());
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         turnState.markStoryboardRequested();
 
@@ -230,15 +221,13 @@ class AgentScopeMediaToolsTest {
         AgentScopeAssetGroupService assetGroups = mock(AgentScopeAssetGroupService.class);
         AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.setCritiqueEnabled(false);
         when(assets.urlsByIds("c1", List.of())).thenReturn(List.of());
         when(generation.generateImage(any(), isNull(), eq("四宫格"), isNull(), isNull(), isNull(),
                 eq(1), eq("edit"), eq(List.of("/uploaded.png")), isNull()))
                 .thenThrow(new RuntimeException("参考图不存在: content"))
                 .thenReturn(Map.of("imageUrls", List.of("/result.png")));
         AgentScopeImageTools tools = new AgentScopeImageTools(
-                generation, assets, assetGroups, asyncTasks, properties,
-                mock(CreativeCritiqueService.class), mock(ConstraintExtractionService.class));
+                generation, assets, assetGroups, asyncTasks, properties);
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         AgentConversation conversation = new AgentConversation();
         conversation.setId("c1");

@@ -13,8 +13,8 @@ import LineSidebar from '../components/LineSidebar';
 import Magnet from '../components/Magnet';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import {
-  AlertTriangle, Archive, Bot, Brain, Camera, Clock, Eraser, Film, Folder, Handshake, Hash,
-  Image as ImageIcon, MessageSquare, Moon, Music, Package, Palette, Paperclip, Pencil, PenLine,
+  AlertTriangle, Archive, Bot, Brain, Camera, Clock, Film, Folder, Handshake, Hash,
+  Image as ImageIcon, MessageSquare, Minimize2, Moon, Music, Package, Palette, Paperclip, Pencil, PenLine,
   Loader, Puzzle, RotateCcw, Ruler, Save, Sparkles, Store, Trash2, User, Video, Zap,
 } from 'lucide-react';
 import '../styles/docs.css';
@@ -826,7 +826,8 @@ const CONV_POINTS = [
   { name: '新建协作会话', desc: '会话栏顶部「+ 新建对话」，一个项目可并行多个独立协作会话。' },
   { name: '归档 / 恢复', desc: <>会话项 <Archive size={12} strokeWidth={1.8}  /> 归档，归档后可切换「<Archive size={12} strokeWidth={1.8}  /> 已归档」查看并恢复。</> },
   { name: '重命名 / 删除', desc: <><Pencil size={12} strokeWidth={1.8}  /> 重命名，<Trash2 size={12} strokeWidth={1.8}  /> 删除（不可撤销）。</> },
-  { name: '清除聊天记录', desc: <>对话区右上「<Eraser size={12} strokeWidth={1.8}  /> 清除聊天记录」，重置 AI 上下文，产出素材保留。</> },
+  { name: '清空上下文', desc: <>输入框打「/」选 <Trash2 size={12} strokeWidth={1.8}  /> 清空上下文（也可直接输入 <code>/clear</code>）：真删除该会话的全部上下文，清空后等同新对话，产出素材保留。</> },
+  { name: '压缩上下文', desc: <>输入框打「/」选 <Minimize2 size={12} strokeWidth={1.8}  /> 压缩上下文（<code>/compact</code>）：只压缩历史，保留最近若干轮。</> },
 ];
 
 const FAQS = [

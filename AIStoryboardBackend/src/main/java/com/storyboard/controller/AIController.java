@@ -100,6 +100,11 @@ public class AIController {
         if (modelsError != null && !modelsError.isBlank()) {
             result.put("modelsError", modelsError);
         }
+        // 目录版本号：网关任何一次模型变更都会换值，前端据此跳过无变化的重渲染（轮询拉取时很有用）
+        String version = gatewayModelService.catalogVersion();
+        if (version != null && !version.isBlank()) {
+            result.put("version", version);
+        }
         return ApiResponse.ok(result);
     }
 }

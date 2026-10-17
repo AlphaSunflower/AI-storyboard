@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -13,16 +13,14 @@ import { Tooltip } from '../common/Tooltip';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { ContextMenuSurface, type ContextMenuItem } from '../common/ContextMenu';
 import { getSceneImageUrls } from '../../lib/sceneImages';
-import { copyImageToClipboard, copyPlainText } from '../../lib/chatBlockExport';
+import { copyMediaAsset, openInCanvas, quoteAsReference } from '../../lib/chatMediaActions';
 import { downloadMedia } from '../../lib/mediaDownload';
-import { openInCanvas, quoteAsReference } from '../../lib/chatMediaActions';
 import {
   AGENT_ASSET_DRAG_MIME,
   serializeAgentAssetDragPayload,
   type AgentAssetDragKind,
 } from '../../lib/agentAssetDrag';
 import { ImagePreviewModal } from './ImagePreviewModal';
-import { AssetPreviewPopover, type AssetPreviewTarget } from './AssetPreviewPopover';
 import { Copy, Download, FileText, Film, Folder, Frame, Image as ImageIcon, ImagePlus, Images, LayoutList, Paperclip, Play, Sparkles, Trash2, X } from 'lucide-react';
 import {
   assetUrls,
@@ -31,6 +29,7 @@ import {
   getAgentAssetCounts,
   splitAgentAssets,
   type AgentAssetBuckets,
+  type AgentAssetDetailTarget,
   type AssetsTab,
 } from './assetBrowserModel';
 import './AgentAssetsPanel.css';
@@ -62,10 +61,10 @@ interface AgentAssetBrowserProps {
   onOpenEditor: () => void;
   conversationId?: string | null;
   /**
-   * 悬浮预览的展开方向。只有停靠在屏幕右侧的生成中心才传 'left'：
-   * 浮层要往外侧（左）展开才不盖住网格。居中的产出素材弹窗不传，避免浮层糊在对话框上。
+   * 点媒体格子的去向。生成中心传进来，于是点一张素材会就地展开详情
+   * （左图右信息）；不传时退回灯箱看大图，产出素材弹窗仍是老行为。
    */
-  previewPlacement?: 'left';
+  onOpenDetail?: (target: AgentAssetDetailTarget) => void;
 }
 
 /** 右键菜单的锚点与上下文：一个网格共用一个菜单实例，格子只上报坐标。 */
@@ -85,9 +84,6 @@ interface PendingDelete {
   name: string;
 }
 
-/** 鼠标离开格子后浮层还能多留一会，避免从格子滑到缝隙时预览闪一下。 */
-const HOVER_LEAVE_GRACE_MS = 90;
-
 /**
  * 素材浏览内容：供产出素材弹窗和生成中心复用。
  * 只负责当前分类的内容、动画和预览，分类切换由外层容器控制。
@@ -97,24 +93,18 @@ export function AgentAssetBrowser({
   active,
   onOpenEditor,
   conversationId,
-  previewPlacement,
+  onOpenDetail,
 }: AgentAssetBrowserProps) {
   const { assets, loadAssets, addRefImageUrls, addPendingAttachments } = useAgentStore();
   const scenes = useProjectStore((state) => state.scenes);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
   const [menu, setMenu] = useState<AssetMenuState | null>(null);
-  const [hoverTarget, setHoverTarget] = useState<AssetPreviewTarget | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const hoverLeaveTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const storiesRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => () => {
-    if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-  }, []);
 
   const records = assets?.records ?? [];
   const total = assets?.total ?? 0;
@@ -157,45 +147,9 @@ export function AgentAssetBrowser({
     setPreviewUrl(url);
   };
 
-  const showHoverPreview = useCallback((target: AssetPreviewTarget) => {
-    if (!previewPlacement) return;
-    if (hoverLeaveTimer.current !== null) {
-      window.clearTimeout(hoverLeaveTimer.current);
-      hoverLeaveTimer.current = null;
-    }
-    setHoverTarget(target);
-  }, [previewPlacement]);
-
-  const hideHoverPreview = useCallback(() => {
-    if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-    hoverLeaveTimer.current = window.setTimeout(() => {
-      hoverLeaveTimer.current = null;
-      setHoverTarget(null);
-    }, HOVER_LEAVE_GRACE_MS);
-  }, []);
-
   /** 复制：图片走位图（浏览器不支持时自动退回链接），视频和文档只能复制带时效的链接。 */
-  const copyAsset = async (url: string, kind: AgentAssetDragKind) => {
-    const absolute = assetUrl(url);
-    if (kind === 'image') {
-      const result = await copyImageToClipboard(absolute);
-      if (result === 'failed') {
-        notify({ title: '复制失败', description: '浏览器不允许写入剪贴板', variant: 'error' });
-        return;
-      }
-      notify({
-        title: result === 'bitmap' ? '已复制图片' : '已复制图片链接',
-        description: result === 'bitmap' ? undefined : '链接带时效，过期后需要重新复制',
-        variant: 'info',
-      });
-      return;
-    }
-    const copied = await copyPlainText(absolute);
-    notify({
-      title: copied ? '已复制链接' : '复制失败',
-      description: copied ? '链接带时效，过期后需要重新复制' : '浏览器不允许写入剪贴板',
-      variant: copied ? 'info' : 'error',
-    });
+  const copyAsset = (url: string, kind: AgentAssetDragKind) => {
+    void copyMediaAsset(url, kind);
   };
 
   const setAsReference = (asset: AgentAsset, url: string, kind: AgentAssetDragKind) => {
@@ -219,7 +173,6 @@ export function AgentAssetBrowser({
       await agentApi.deleteAsset(pendingDelete.assetId, pendingDelete.resultIndex ?? undefined);
       notify({ title: '已删除', description: `${pendingDelete.name} 已从会话资产移除`, variant: 'success' });
       setPendingDelete(null);
-      setHoverTarget(null);
       await loadAssets(assets?.page ?? 1);
     } catch (error) {
       notify({
@@ -385,7 +338,6 @@ export function AgentAssetBrowser({
                     key={`${asset.id}-${url}`}
                     onContextMenu={(event) => {
                       event.preventDefault();
-                      setHoverTarget(null);
                       setMenu({ x: event.clientX, y: event.clientY, asset, url, index, kind: 'document' });
                     }}
                   >
@@ -424,11 +376,8 @@ export function AgentAssetBrowser({
                   url={url}
                   active={active}
                   onPreview={previewMedia}
-                  onHoverPreview={showHoverPreview}
-                  onHoverPreviewEnd={hideHoverPreview}
+                  onOpenDetail={onOpenDetail}
                   onOpenMenu={(position, kind) => {
-                    // 菜单一开就把悬浮预览收掉，否则两者叠在同一块区域上。
-                    setHoverTarget(null);
                     setMenu({ ...position, asset, url, index, kind });
                   }}
                 />
@@ -464,7 +413,6 @@ export function AgentAssetBrowser({
         )}
       </div>
       <ImagePreviewModal url={previewUrl} type={previewType} onClose={() => setPreviewUrl(null)} />
-      <AssetPreviewPopover target={hoverTarget} />
       {menu && (
         <ContextMenuSurface
           x={menu.x}
@@ -498,15 +446,14 @@ interface AssetTileProps {
   /** 所在面板是否可见：不可见时不拉视频元数据，避免隐藏的侧边栏偷偷发请求。 */
   active: boolean;
   onPreview: (url: string, type: 'image' | 'video') => void;
-  onHoverPreview: (target: AssetPreviewTarget) => void;
-  onHoverPreviewEnd: () => void;
+  onOpenDetail?: (target: AgentAssetDetailTarget) => void;
   onOpenMenu: (position: { x: number; y: number }, kind: AgentAssetDragKind) => void;
 }
 
 /**
  * 网格里的单个资产格子。视频出胶片首帧，图片出缩略图，文档和其他非媒体文件出图标格。
  *
- * 操作入口收敛成两条：悬浮看大图，右键出菜单。格子本身不再是按钮 ——
+ * 操作入口收敛成两条：点开看详情，右键出菜单。格子本身不再是按钮 ——
  * 小格子上塞操作按钮既挤又和右键菜单重复。
  */
 function AssetTile({
@@ -514,8 +461,7 @@ function AssetTile({
   url,
   active,
   onPreview,
-  onHoverPreview,
-  onHoverPreviewEnd,
+  onOpenDetail,
   onOpenMenu,
 }: AssetTileProps) {
   const isVideo = asset.type === 'video';
@@ -555,6 +501,14 @@ function AssetTile({
 
   const kind: AgentAssetDragKind = isVideo ? 'video' : 'image';
   const name = fileNameFromAssetUrl(url);
+  /** 点开素材：宿主接了详情就进详情，没接就退回灯箱看大图。 */
+  const openMedia = () => {
+    if (onOpenDetail) {
+      onOpenDetail({ asset, url, index: assetUrls(asset).indexOf(url), kind });
+      return;
+    }
+    onPreview(url, isVideo ? 'video' : 'image');
+  };
 
   return (
     <div
@@ -562,11 +516,11 @@ function AssetTile({
       role="button"
       tabIndex={0}
       draggable
-      onClick={() => onPreview(url, isVideo ? 'video' : 'image')}
+      onClick={openMedia}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onPreview(url, isVideo ? 'video' : 'image');
+          openMedia();
           return;
         }
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
@@ -584,19 +538,8 @@ function AssetTile({
           AGENT_ASSET_DRAG_MIME,
           serializeAgentAssetDragPayload({ url, name, kind }),
         );
-        // 拖拽时不弹预览，否则浮层会压在拖拽残影上。
-        onHoverPreviewEnd();
       }}
-      onMouseEnter={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        onHoverPreview({
-          url,
-          kind: isVideo ? 'video' : 'image',
-          rect: { top: rect.top, bottom: rect.bottom, left: rect.left },
-        });
-      }}
-      onMouseLeave={onHoverPreviewEnd}
-      title={isVideo ? '点击预览视频，右键更多操作' : '点击预览大图，右键更多操作'}
+      title={isVideo ? '点击查看视频详情，右键更多操作' : '点击查看图片详情，右键更多操作'}
     >
       {isVideo ? (
         <video src={assetUrl(url)} muted preload={active ? 'metadata' : 'none'} />

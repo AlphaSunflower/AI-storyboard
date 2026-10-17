@@ -80,6 +80,29 @@ export interface CanvasJobRequest {
   params: Record<string, unknown>;
 }
 
+/**
+ * 服务端图命令的增量补丁。
+ *
+ * <p>链路：MoonAgent `canvas_run_updated.payload.canvasPatch` → assistant 消息 metadata
+ * `canvasPatch`/`canvasPatchOverflow` → 父页 postMessage 的 wire 字段 `patch`。
+ *
+ * <p>应用语义：按 id **upsert**（同 id 覆盖）、`removed*Ids` 删除；MoonAgent 侧是「合并累积」，
+ * 因此同一份补丁可能被重复应用，应用实现必须幂等。
+ * 结构校验（guard）在 {@link ./canvasEmbeddedMode.isCanvasGraphPatch}，AIStoryboardClient 有一份同形副本。
+ */
+export interface CanvasGraphPatch {
+  nodes?: CanvasGraphPatchEntry[];
+  edges?: CanvasGraphPatchEntry[];
+  removedNodeIds?: string[];
+  removedEdgeIds?: string[];
+}
+
+/** 补丁条目：至少要有非空 id，其余字段原样并入本地图（结构校验在应用侧做）。 */
+export interface CanvasGraphPatchEntry {
+  id: string;
+  [key: string]: unknown;
+}
+
 export interface NodeRunContext {
   projectId: string;
   nodeId: string;

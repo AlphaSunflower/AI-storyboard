@@ -12,8 +12,9 @@ import { Tooltip } from '../common/Tooltip';
 import { AgentAssetBrowser } from './AgentAssetsPanel';
 import { AssetFilterNav } from './AssetFilterNav';
 import { RubberSegment, type RubberSegmentItem } from './RubberSegment';
-import type { AssetsTab } from './assetBrowserModel';
+import { assetUrls, type AgentAssetDetailTarget, type AssetsTab } from './assetBrowserModel';
 import { partitionImageQueueTasks } from './generationCenterImageTasks';
+import { openAssetDetail } from '../../stores/assetDetailStore';
 import './GenerationCenterPanel.css';
 
 export type GenerationCenterTab = 'active' | 'tasks' | AssetsTab;
@@ -207,6 +208,7 @@ export function GenerationCenterPanel({
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
+      // 素材详情弹窗会在捕获阶段把 Esc 吃掉（它只关自己），走不到这里。
       if (event.key === 'Escape') setOpen(false);
     };
     document.addEventListener('keydown', onKeyDown);
@@ -279,6 +281,21 @@ export function GenerationCenterPanel({
     }
     setRecordsPill(false);
     setSegment(key);
+  };
+
+  /**
+   * 网格里点开一张素材：交给全局详情宿主弹窗。
+   *
+   * 弹窗不挂在这一层里 —— 会话里的图片、工具槽位也要弹同一个窗，
+   * 状态放在 `assetDetailStore`，页面只挂一个 `<AssetDetailHost />`。
+   */
+  const handleOpenDetail = (target: AgentAssetDetailTarget) => {
+    openAssetDetail({
+      url: target.url,
+      asset: target.asset,
+      urls: assetUrls(target.asset),
+      kind: target.kind === 'document' ? undefined : target.kind,
+    });
   };
 
   const openEditor = () => {
@@ -449,8 +466,8 @@ export function GenerationCenterPanel({
                 active={open}
                 onOpenEditor={openEditor}
                 conversationId={activeConversationId ?? '__no_active_conversation__'}
-                /* 侧边栏贴屏幕右缘，预览只能往左展开才不会盖住网格本身。 */
-                previewPlacement="left"
+                /* 点一张素材弹详情窗，由页面上的 AssetDetailHost 渲染。 */
+                onOpenDetail={handleOpenDetail}
               />
             </div>
           )}

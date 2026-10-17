@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSceneInspectPrompt,
   canvasBindingStatusText,
+  isCanvasGraphPatch,
   isCanvasGraphUpdatedMessage,
 } from './embeddedAppMessages';
 
@@ -48,5 +49,45 @@ describe('isCanvasGraphUpdatedMessage', () => {
       canvasId: 'canvas-1',
       revision: '3',
     })).toBe(false);
+  });
+
+  // 与 XiaoYueCanvasAgent/src/canvas/canvasEmbeddedMode.test.ts 用同一份字面量 fixture：
+  // 两个包各一份 guard，形状必须一致。
+  const patchMessage = (patch: unknown) => ({
+    type: 'ai-storyboard:canvas-graph-updated',
+    conversationId: 'conversation-1',
+    projectId: 'project-1',
+    canvasId: 'canvas-1',
+    revision: 4,
+    patch,
+  });
+
+  const validPatch = {
+    nodes: [{ id: 'node-1', type: 'image', position: { x: 10, y: 20 }, data: { kind: 'image' } }],
+    edges: [{ id: 'edge-1', source: 'node-1', target: 'node-2' }],
+    removedNodeIds: ['node-9'],
+    removedEdgeIds: ['edge-9'],
+  };
+
+  it('accepts a graph update carrying a structurally valid patch', () => {
+    expect(isCanvasGraphPatch(validPatch)).toBe(true);
+    expect(isCanvasGraphUpdatedMessage(patchMessage(validPatch))).toBe(true);
+    // 只有 edges（create_edge）与只有 removed*Ids 的补丁也必须合法
+    expect(isCanvasGraphUpdatedMessage(patchMessage({ edges: validPatch.edges }))).toBe(true);
+    expect(isCanvasGraphUpdatedMessage(patchMessage({}))).toBe(true);
+  });
+
+  it('rejects the whole message when the patch is malformed', () => {
+    for (const bad of [
+      [], 'patch', 7, { nodes: {} },
+      { nodes: [{ position: { x: 0, y: 0 } }] },
+      { nodes: [{ id: '' }] },
+      { nodes: [null] },
+      { removedEdgeIds: [7] },
+      { removedNodeIds: 'node-1' },
+    ]) {
+      expect(isCanvasGraphPatch(bad)).toBe(false);
+      expect(isCanvasGraphUpdatedMessage(patchMessage(bad))).toBe(false);
+    }
   });
 });

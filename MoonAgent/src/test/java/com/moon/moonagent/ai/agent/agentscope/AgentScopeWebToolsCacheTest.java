@@ -180,7 +180,6 @@ class AgentScopeWebToolsCacheTest {
 
     private static AgentScopeTool tool(HttpClient http, String name) {
         AgentScopeProperties properties = new AgentScopeProperties();
-        properties.getWebSearch().setProvider("deepseek");
         properties.getWebSearch().setApiKey("sk-test");
         return new AgentScopeWebTools(properties, http).tools().stream()
                 .filter(tool -> name.equals(tool.getName()))

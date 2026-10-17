@@ -164,6 +164,10 @@ curl.exe -s -D - -X POST http://127.0.0.1:8083/mcp -H "Authorization: Bearer <�
   密码重置为 `123456`，并清除其它测试账号及其数据（含 asset schema 的 library_* 归属数据）。
 - `db/sql/seed-models.sql`（由 `04-seed-models.sh` 在还原后执行，幂等）补齐额外模型路由，
   当前包含 `doubao-seedream-5-0-flash-260915` → 豆包渠道（`type=image`，并写入 `model_params` 与 `channel.models`）。
+  该模型是**单图模型**：方舟不接受 `sequential_image_generation`（连 `disabled` 都 400）、
+  `sequential_image_generation_options` 和 `stream`，尺寸档位只有 1K/1.5K/2K，参考图最多 10 张，
+  所以 `model_params` 收敛为 `n_max=1` + `sizes=1K,1.5K,2K` + `ref_images_max=10`；
+  后端另有 `SeedreamImageProtocol` 按模型裁剪参数并对非流式响应走 JSON 分支（5.0 pro/flash 同理）。
   追加模型只要往这个文件里加一段同样的 `DO $$` 块即可；对运行中的栈也能重复执行：
 
   ```powershell

@@ -16,6 +16,7 @@ import com.moon.moonagent.entity.AgentMessage;
 import com.moon.moonagent.service.StoryboardImageQueueService;
 import com.moon.moonagent.service.StoryboardQueueRequestGuard;
 import com.moon.moonagent.service.StoryboardVideoQueueService;
+import com.moon.moonagent.service.TurnMediaCanonicalizer;
 import com.moon.moonagent.service.ProjectOutputMaterialService;
 import com.moon.moonagent.service.ConversationAssetGroupService;
 import com.moon.moonagent.security.FileUrlSigner;
@@ -58,7 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     StoryboardImageQueueController.class,
     StoryboardVideoQueueController.class
 })
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, TurnMediaCanonicalizer.class})
 @EnableConfigurationProperties(AgentAiConfigProperties.class)
 @TestPropertySource(properties = {
         "ai.agent.agentscope.enabled=true",
@@ -145,6 +146,8 @@ class MoonAgentControllerSmokeTest {
             .thenReturn(new AgentReferenceUpload(
                     "asset-1", "/api/files/images/x.png", "a.png", "image/png", 1L));
         when(chatService.confirmImageDone(anyString(), anyString())).thenReturn(true);
+        when(chatService.clearContext(anyString(), anyString()))
+            .thenReturn(new com.moon.moonagent.ai.agent.ClearContextResult(17, "新对话"));
         when(chatService.interrupt(anyString(), anyString())).thenReturn(true);
         when(chatService.getVideoTaskStatus(anyString(), anyString())).thenReturn(Map.of("status", "processing"));
         when(asyncTaskService.getStatus("u1", "task-1")).thenReturn(Map.of(
@@ -172,6 +175,10 @@ class MoonAgentControllerSmokeTest {
             .andExpect(status().isOk());
         mockMvc.perform(delete("/api/agent/conversations/c1/messages").header("X-User-Id", "u1"))
             .andExpect(status().isOk());
+        mockMvc.perform(post("/api/agent/conversations/c1/context/clear").header("X-User-Id", "u1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.deletedRows").value(17))
+            .andExpect(jsonPath("$.data.title").value("新对话"));
         mockMvc.perform(get("/api/agent/conversations/c1/messages").header("X-User-Id", "u1"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].role").value("assistant"));
         mockMvc.perform(post("/api/agent/conversations/c1/messages").header("X-User-Id", "u1")
@@ -315,6 +322,41 @@ class MoonAgentControllerSmokeTest {
         org.assertj.core.api.Assertions.assertThat(emitterTimeouts)
             .isNotEmpty()
             .allMatch(timeout -> timeout == 14_400_000L);
+    }
+
+    @Test
+    void turnStream_acceptsBrowserOriginMediaAndRejectsUntrustedOnes() throws Exception {
+        when(chatService.getOwnedConversation(anyString(), anyString())).thenReturn(conversation());
+        doAnswer(inv -> {
+            SseEmitter emitter = inv.getArgument(11);
+            emitter.complete();
+            return null;
+        })
+            .when(chatService).streamAgentScopeTurn(
+                anyString(), anyString(), anyString(), any(), any(), any(), any(), any(),
+                any(), any(), anyString(), any(SseEmitter.class));
+
+        // 画布编辑模式：浏览器 origin 的绝对 /api/files/** 地址不再 40001
+        mockMvc.perform(post("/api/agent/conversations/c1/turns/stream").header("X-User-Id", "u1")
+                .contentType("application/json")
+                .content("""
+                        {"content":"按这张图搭链路","clientRequestId":"canvas-1",
+                         "picUrls":["http://localhost:5173/api/files/images/a.png?token=1.abc"],
+                         "canvasContext":{"mode":"canvas-edit","projectId":"p1","canvasId":"canvas-1",
+                           "mediaRefs":[{"kind":"image","url":"http://localhost:5173/api/files/images/b.png",
+                             "source":"upload"}]}}
+                        """))
+            .andExpect(status().isOk());
+
+        // 非可信地址仍然拒绝，文案不变
+        mockMvc.perform(post("/api/agent/conversations/c1/turns/stream").header("X-User-Id", "u1")
+                .contentType("application/json")
+                .content("""
+                        {"content":"你好","clientRequestId":"canvas-2",
+                         "picUrls":["http://localhost:5173/other/a.png"]}
+                        """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("媒体地址不在允许的服务范围内"));
     }
 
     @Test

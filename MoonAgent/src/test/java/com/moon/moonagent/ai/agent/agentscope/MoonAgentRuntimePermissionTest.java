@@ -78,7 +78,7 @@ class MoonAgentRuntimePermissionTest {
     }
 
     @Test
-    void canvasRunNodeOperationsBypassApproval() {
+    void canvasGraphWritesBypassApprovalButExecutionRequiresConfirmation() {
         for (AgentApprovalMode mode : new AgentApprovalMode[]{
                 AgentApprovalMode.PLAN_APPROVAL,
                 AgentApprovalMode.REQUEST_APPROVAL}) {
@@ -89,17 +89,25 @@ class MoonAgentRuntimePermissionTest {
                     "canvas_graph_create_nodes",
                     "canvas_graph_import_media",
                     "canvas_graph_create_edge",
+                    // 批量连线与整图提交必须走 ALLOW：掉进 ASK 会让每次整图提交都弹一次 HITL 确认
+                    "canvas_graph_create_edges",
+                    "canvas_graph_apply_plan",
                     "canvas_graph_layout_graph",
-                    "canvas_execute_node",
-                    "canvas_execute_graph",
                     "todo_write",
                     "plan_write");
             assertThat(context.getAskRules()).doesNotContainKeys(
                     "canvas_graph_create_node",
                     "canvas_graph_import_media",
                     "canvas_graph_create_edge",
-                    "canvas_execute_graph",
+                    "canvas_graph_create_edges",
+                    "canvas_graph_apply_plan",
                     "todo_write");
+            // 画布执行 = 真实花费与长等待（图 30–60s / 视频 2–5min）：必须先经用户确认，
+            // 不允许被自动放行——否则智能体会在同一轮把整轮生成跑掉，用户没有插话机会。
+            assertThat(context.getAskRules()).containsKeys(
+                    "canvas_execute_node", "canvas_execute_graph");
+            assertThat(context.getAllowRules()).doesNotContainKeys(
+                    "canvas_execute_node", "canvas_execute_graph");
         }
     }
 

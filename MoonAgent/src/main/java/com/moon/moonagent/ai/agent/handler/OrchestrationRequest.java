@@ -6,6 +6,7 @@ import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.SuggestedAction;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
+import com.moon.moonagent.dto.request.AgentReferenceRequest;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
@@ -74,6 +75,23 @@ public class OrchestrationRequest {
 
     /** Structured attachment metadata, including stable library media ids. */
     private java.util.List<AgentAttachmentRequest> attachments = java.util.List.of();
+
+    /**
+     * 本轮「引用资料」清单（正文 {@code @名称} 标记的机器可读版本）。
+     * 与 {@link #attachments} 并行透传：新建轮、HITL 续流、编辑重发三条路径都会带上，
+     * 供每轮上下文注入（&lt;turn-references&gt;）消费。缺省空列表 = 本轮没有引用。
+     */
+    private java.util.List<AgentReferenceRequest> references = java.util.List.of();
+
+    /** 本轮引用资料（null 归一为空列表，消费方无需再判空）。 */
+    public java.util.List<AgentReferenceRequest> getReferences() {
+        return references == null ? java.util.List.of() : references;
+    }
+
+    /** 设置本轮引用资料；null 归一为空列表（无引用 = 空表，不是 null）。 */
+    public void setReferences(java.util.List<AgentReferenceRequest> references) {
+        this.references = references == null ? java.util.List.of() : references;
+    }
 
     /** 兼容标签；AgentScope 由 Skill 描述自行选择工具，不再依赖意图分发。 */
     private String intentType = "";

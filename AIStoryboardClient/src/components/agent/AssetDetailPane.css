@@ -1,0 +1,700 @@
+/*
+ * 会话资产详情弹窗：居中对话框，左舞台 / 右信息栏。
+ *
+ * 颜色全部沿用现有设计令牌；唯一新增的是一个加深的主色，
+ * 因为 --color-primary(#cc785c) 作小字号正文色只有 3.3:1，达不到 AA，
+ * 而详情里到处都是 12-13px 的主色文字。
+ */
+/* 遮罩层：压过侧边栏（190）与 app 子窗口（180），低于灯箱（4000）与确认框（5000）。 */
+.asset-detail__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(20, 20, 19, 0.5);
+  animation: asset-detail-backdrop-in 0.18s ease-out;
+}
+
+/*
+ * 尺寸跟着视口走，不设小上限：素材详情就是拿来看图的，
+ * 在 2K/4K 屏上固定 1080px 会让图只剩屏幕中间一小块。
+ * 上限只用来防止超宽屏把一行拉到读不下去（正文在右侧信息栏里，宽度另有 clamp）。
+ */
+.asset-detail {
+  --asset-detail-accent-ink: #a9522f;
+  --asset-detail-stage: #1b1917;
+  display: flex;
+  width: min(2560px, 96vw);
+  height: min(1200px, 92vh);
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(20, 20, 19, 0.34);
+  animation: asset-detail-dialog-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.asset-detail:focus-visible {
+  outline: none;
+}
+
+@keyframes asset-detail-backdrop-in {
+  from { opacity: 0; }
+}
+
+@keyframes asset-detail-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+}
+
+/* ── 左：媒体舞台 ─────────────────────────────────────────── */
+
+/* 舞台内边距跟着屏幕放大：大屏上贴边 18px 会显得图被框死，图应该占满视野。 */
+.asset-detail__stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(18px, 1.8vw, 48px) clamp(18px, 1.8vw, 48px) clamp(66px, 8vh, 92px);
+  background: var(--asset-detail-stage);
+}
+
+.asset-detail__back {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(20, 20, 19, 0.62);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.asset-detail__back:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(20, 20, 19, 0.82);
+}
+
+.asset-detail__back:active {
+  transform: scale(0.97);
+}
+
+/*
+ * 舞台中间那层是 Tooltip 的触发器 span。它必须是真实盒子而不是 display:contents ——
+ * tooltip 靠它的 getBoundingClientRect 定位，contents 元素量出来是空矩形。
+ * 所以这里把它改造成「占满舞台的居中 flex 容器」：尺寸全是确定值，
+ * 里面图片的 max-height:100% 才有参照，竖图不会顶穿舞台。
+ */
+.asset-detail__stage > .warm-tooltip__trigger {
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.asset-detail__media {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.asset-detail__media img,
+.asset-detail__media video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.42);
+}
+
+.asset-detail__media:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.72);
+  outline-offset: 6px;
+  border-radius: 10px;
+}
+
+.asset-detail__media:active img,
+.asset-detail__media:active video {
+  transform: scale(0.995);
+}
+
+/* 视频角标与返回按钮同一套玻璃质感，压在画面上任何颜色都能读。 */
+.asset-detail__play-badge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  min-height: 20px;
+  border-radius: 6px;
+  background: rgba(20, 20, 19, 0.72);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.asset-detail__strip {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  max-width: calc(100% - 32px);
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(20, 20, 19, 0.66);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.asset-detail__thumb {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.asset-detail__thumb img,
+.asset-detail__thumb video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.asset-detail__thumb:hover {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.asset-detail__thumb.is-active {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.asset-detail__thumb:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.asset-detail__steppers {
+  position: absolute;
+  right: 16px;
+  bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(20, 20, 19, 0.66);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.asset-detail__steppers button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.asset-detail__steppers button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* ── 右：信息栏 ───────────────────────────────────────────── */
+
+/*
+ * 信息栏宽度：小屏守住 336px 的可用下限，大屏跟着长一点，
+ * 但封顶 420px —— 提示词是长段落，再宽一行就长到读不下去了。
+ */
+.asset-detail__rail {
+  display: flex;
+  width: clamp(336px, 22%, 420px);
+  flex-shrink: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--color-hairline);
+  background: #fff;
+}
+
+.asset-detail__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.asset-detail__head-copy {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+
+.asset-detail__head-copy strong {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-detail__head-copy small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-detail__head-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+/* 下载用墨色实心：白色文字对 #141413 是 17:1，主色实心在这个字号只有 3.3:1。 */
+.asset-detail__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: white;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.asset-detail__button.is-solid {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: #fff;
+}
+
+.asset-detail__button.is-solid:hover {
+  border-color: #2c2a27;
+  background: #2c2a27;
+}
+
+.asset-detail__button.is-icon {
+  width: 30px;
+  padding: 0;
+}
+
+.asset-detail__button.is-icon:hover,
+.asset-detail__button.is-icon.is-active {
+  border-color: var(--color-muted-soft);
+  background: var(--color-surface-soft);
+}
+
+.asset-detail__button:active {
+  transform: scale(0.97);
+}
+
+.asset-detail__button:focus-visible {
+  outline: 2px solid var(--asset-detail-accent-ink);
+  outline-offset: 1px;
+}
+
+.asset-detail__scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0 14px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.asset-detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--color-hairline-soft);
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.asset-detail__meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.asset-detail__block {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-hairline-soft);
+}
+
+.asset-detail__block:last-of-type {
+  border-bottom: 0;
+}
+
+.asset-detail__block-head {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.asset-detail__block-label {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+/* 「使用提示词」默认藏起来，悬浮这一块或键盘聚焦到它时才现身：
+   提示词本身是主角，常驻按钮会把正文挤成配角。opacity:0 不影响 Tab 可达性。 */
+.asset-detail__use-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(169, 82, 47, 0.28);
+  border-radius: 999px;
+  background: rgba(169, 82, 47, 0.07);
+  color: var(--asset-detail-accent-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 550;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.16s ease, background 0.15s;
+}
+
+.asset-detail__block:hover .asset-detail__use-prompt,
+.asset-detail__block:focus-within .asset-detail__use-prompt {
+  opacity: 1;
+}
+
+.asset-detail__use-prompt:hover {
+  background: rgba(169, 82, 47, 0.14);
+}
+
+.asset-detail__use-prompt:focus-visible {
+  outline: 2px solid var(--asset-detail-accent-ink);
+  outline-offset: 1px;
+}
+
+.asset-detail__prompt {
+  margin: 7px 0 0;
+  color: var(--color-ink);
+  font-size: 13px;
+  line-height: 1.68;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.asset-detail__empty {
+  margin: 7px 0 0;
+  color: var(--color-muted-soft);
+  font-size: 12px;
+}
+
+.asset-detail__params {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 0;
+}
+
+.asset-detail__params > div {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--color-hairline-soft);
+  border-radius: 8px;
+  background: white;
+}
+
+.asset-detail__params > div.is-wide {
+  grid-column: 1 / -1;
+}
+
+.asset-detail__params dt {
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.asset-detail__params dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-detail__tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.asset-detail__tool {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: white;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.asset-detail__tool > svg {
+  flex-shrink: 0;
+  color: var(--color-muted);
+}
+
+.asset-detail__tool > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-detail__tool:hover {
+  border-color: var(--color-muted-soft);
+  background: var(--color-surface-soft);
+}
+
+/* 主色实心只给「重新生成」：一排里唯一的实心才说明它是主要动作，
+   加深到 5.3:1 才让白字在这个字号下过 AA。 */
+.asset-detail__tool.is-primary {
+  border-color: var(--asset-detail-accent-ink);
+  background: var(--asset-detail-accent-ink);
+  color: #fff;
+  font-weight: 550;
+}
+
+.asset-detail__tool.is-primary > svg {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.asset-detail__tool.is-primary:hover {
+  border-color: #8f4426;
+  background: #8f4426;
+}
+
+.asset-detail__tool:active {
+  transform: scale(0.98);
+}
+
+.asset-detail__tool:focus-visible {
+  outline: 2px solid var(--asset-detail-accent-ink);
+  outline-offset: 1px;
+}
+
+/* ── 视频抽帧 ─────────────────────────────────────────────── */
+
+.asset-detail__frames {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--color-hairline-soft);
+  border-radius: 10px;
+  background: white;
+}
+
+.asset-detail__frames-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.asset-detail__frames-head span {
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.asset-detail__frames-head small {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+.asset-detail__frames-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.asset-detail__frames-row button,
+.asset-detail__scrubber button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: white;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.asset-detail__frames-row button:hover:not(:disabled),
+.asset-detail__scrubber button:hover:not(:disabled) {
+  border-color: var(--color-muted-soft);
+  background: var(--color-surface-soft);
+}
+
+.asset-detail__frames-row button:disabled,
+.asset-detail__scrubber button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.asset-detail__scrubber {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.asset-detail__scrubber > span {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.asset-detail__scrubber > b {
+  color: var(--color-ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.asset-detail__scrubber input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--asset-detail-accent-ink);
+}
+
+.asset-detail__scrubber button {
+  grid-column: 1 / -1;
+}
+
+.asset-detail__hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+/* ── 窄屏：弹窗转纵向堆叠 ─────────────────────────────────── */
+
+/* 左右分栏在这个宽度下会把两边都挤成一条：舞台固定一段高度，信息栏在下面继续滚。 */
+@media (max-width: 720px) {
+  .asset-detail__backdrop {
+    padding: 12px;
+  }
+
+  .asset-detail {
+    width: 100%;
+    height: min(88vh, 720px);
+    flex-direction: column;
+  }
+
+  .asset-detail__stage {
+    flex: 0 0 auto;
+    height: 38vh;
+    min-height: 190px;
+    padding: 14px 14px 58px;
+  }
+
+  .asset-detail__rail {
+    width: 100%;
+    flex: 1;
+    border-left: 0;
+    border-top: 1px solid var(--color-hairline);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-detail__backdrop,
+  .asset-detail {
+    animation: none;
+  }
+
+  .asset-detail__back,
+  .asset-detail__button,
+  .asset-detail__tool,
+  .asset-detail__use-prompt,
+  .asset-detail__frames-row button,
+  .asset-detail__scrubber button {
+    transition: none;
+  }
+}

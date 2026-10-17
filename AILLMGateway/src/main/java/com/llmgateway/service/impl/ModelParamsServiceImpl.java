@@ -6,6 +6,7 @@ import com.llmgateway.dto.admin.ModelParamsRequest;
 import com.llmgateway.entity.ModelParams;
 import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.ModelParamsMapper;
+import com.llmgateway.service.ModelCatalogCache;
 import com.llmgateway.service.ModelParamsService;
 import com.llmgateway.service.ModelRouteService;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class ModelParamsServiceImpl implements ModelParamsService {
 
     private final ModelParamsMapper modelParamsMapper;
     private final ModelRouteService modelRouteService;
+    private final ModelCatalogCache catalogCache;
 
     /** PUT /admin/model-params：按 model_name upsert（type 空默认 text；nMin/nMax 均提供时须 nMin<=nMax） */
     @Override
@@ -66,6 +68,9 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         ModelParams existing = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
                 .eq(ModelParams::getModelName, req.modelName().trim())
                 .eq(ModelParams::getType, type));
+        // 参数能力（sizes/durations/resolutions/contextWindow 等）也随 /v1/models 下发，
+        // 所以任何一次 upsert 都要清列表缓存——不能只依赖「顺手设了默认」这条路径
+        catalogCache.evict(type);
         if (existing != null) {
             applyNonNull(existing, req);
             existing.setUpdatedAt(OffsetDateTime.now());

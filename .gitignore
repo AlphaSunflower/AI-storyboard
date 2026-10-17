@@ -44,3 +44,11 @@ scripts/e2e/seed_tmp/
 # 一次性排查/重构草稿（asar 抽取探针、临时计划文件），禁止入库
 .tmp-*/
 .tmp-*.md
+
+# Playwright 产物：MCP 浏览器截图/console 日志，与仓库根的运行结果
+# /test-results/ 锚定到仓库根，避免影响 XiaoYueCanvasAgent 自己的 e2e 截图目录
+.playwright-mcp/
+/test-results/
+
+# 第三方产品 OpenClaw 的参考文档抓取（与本项目无关的研究资料）
+.openclaw-research/

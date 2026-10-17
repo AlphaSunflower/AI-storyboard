@@ -7,6 +7,7 @@ import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.ChannelMapper;
 import com.llmgateway.service.ChannelService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelCatalogCache;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +21,8 @@ public class ChannelServiceImpl implements ChannelService {
 
     private final ChannelMapper channelMapper;
     private final KeyService keyService;
+    /** 渠道的 enabled/priority 直接决定 /v1/models 的成员与顺序，任何变更都要清模型目录缓存 */
+    private final ModelCatalogCache catalogCache;
 
     @Override
     public Channel create(ChannelRequest request) {
@@ -45,6 +48,8 @@ public class ChannelServiceImpl implements ChannelService {
         channel.setCreatedAt(OffsetDateTime.now());
         channel.setUpdatedAt(OffsetDateTime.now());
         channelMapper.insert(channel);
+        // 新渠道可能立刻挂上路由：清掉全部类型的模型列表缓存（禁用渠道的模型不该继续出现在列表里）
+        catalogCache.evictAll();
         channel.setApiKey("***");   // 返回脱敏
         return channel;
     }
@@ -72,6 +77,8 @@ public class ChannelServiceImpl implements ChannelService {
         if (request.getPriority() != null) channel.setPriority(request.getPriority());
         channel.setUpdatedAt(OffsetDateTime.now());
         channelMapper.updateById(channel);
+        // enabled/priority/baseUrl/models 任一变化都会影响模型目录；渠道是按类型共享的，只能全量失效
+        catalogCache.evictAll();
         channel.setApiKey("***");
         return channel;
     }
@@ -79,6 +86,7 @@ public class ChannelServiceImpl implements ChannelService {
     @Override
     public void delete(String id) {
         if (channelMapper.deleteById(id) == 0) throw new BusinessException(40401, "渠道不存在");
+        catalogCache.evictAll();
     }
 
     @Override

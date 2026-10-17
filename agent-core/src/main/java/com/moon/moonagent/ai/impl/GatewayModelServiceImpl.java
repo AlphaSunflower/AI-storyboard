@@ -29,7 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * LLM 网关模型列表实现：
  * - 默认模型优先从 Redis 读取（网关 admin 切换后实时生效）
  * - Redis 不可用时回退 HTTP 网关 /v1/models，再兜底硬编码常量
- * - 完整模型列表仍走 HTTP（含 params 能力枚举，供前端下拉）
+ * - 完整模型列表仍走 HTTP（含 params 能力枚举，供前端下拉），但用网关下发的
+ *   {@code gateway:models:version} 做失效判定：版本一变就立刻重拉，不再干等 60s TTL
  */
 @Service
 @RequiredArgsConstructor
@@ -40,8 +41,16 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     /** Redis key 前缀：与网关 ModelParamsServiceImpl 一致 */
     private static final String REDIS_KEY_PREFIX = "gateway:default_model:";
 
+    /** 网关模型目录版本号 key（与网关 {@code ModelCatalogCache.VERSION_KEY} 一致） */
+    private static final String VERSION_KEY = "gateway:models:version";
+
     /** 上下文窗口缓存 TTL：网关模型列表缓存为 60s，这里取 2 分钟，兼顾实时性与请求量。 */
     private static final long CONTEXT_WINDOW_CACHE_TTL_MS = 120_000L;
+    /**
+     * 模型列表本地缓存 TTL：只作兜底 max-age。
+     * 正常失效走版本号（admin 改完下一次请求就能拿到新列表）；版本号缺失/被淘汰时退回这里的 TTL，
+     * 最坏表现与改造前一致，不会更陈旧。
+     */
     private static final long MODEL_LIST_CACHE_TTL_MS = 60_000L;
 
     /** 网关不可达时的兜底默认模型（每类型一个） */
@@ -61,9 +70,11 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     @Value("${ai.gateway.base-url:${LLM_GATEWAY_BASE_URL:http://localhost:8083}}")
     private String gatewayBaseUrl;
 
-    /** 模型名 → 上下文窗口 的短 TTL 缓存：modelName → [窗口, 过期时间毫秒] */
-    private final Map<String, long[]> contextWindowCache = new ConcurrentHashMap<>();
+    /** 模型名 → 上下文窗口 + 目录版本 的短 TTL 缓存 */
+    private final Map<String, ContextWindowEntry> contextWindowCache = new ConcurrentHashMap<>();
     private final Map<String, ModelListCacheEntry> modelListCache = new ConcurrentHashMap<>();
+    /** 最近一次从网关响应里看到的目录版本号（Redis 不可用时仍能把版本号透给前端） */
+    private volatile String lastCatalogVersion;
     /** 最近一次模型列表拉取失败原因：type → 可读原因（成功时清除） */
     private final Map<String, String> modelFetchErrors = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<List<Map<String, String>>>>
@@ -72,9 +83,10 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     @Override
     public List<Map<String, String>> fetchModels(String type) {
         String cacheKey = type == null ? "" : type;
+        String version = readCatalogVersion();
         ModelListCacheEntry cached = modelListCache.get(cacheKey);
         long now = System.currentTimeMillis();
-        if (cached != null && cached.expiresAt() > now) {
+        if (cached != null && cached.expiresAt() > now && versionStillCurrent(cached, version)) {
             return cached.models();
         }
         java.util.concurrent.CompletableFuture<List<Map<String, String>>> created =
@@ -87,8 +99,8 @@ public class GatewayModelServiceImpl implements GatewayModelService {
         try {
             List<Map<String, String>> models = fetchModelsRemote(cacheKey);
             List<Map<String, String>> copy = List.copyOf(models);
-            modelListCache.put(cacheKey,
-                    new ModelListCacheEntry(copy, System.currentTimeMillis() + MODEL_LIST_CACHE_TTL_MS));
+            modelListCache.put(cacheKey, new ModelListCacheEntry(
+                    copy, System.currentTimeMillis() + MODEL_LIST_CACHE_TTL_MS, version));
             created.complete(copy);
             return copy;
         } catch (RuntimeException error) {
@@ -97,6 +109,37 @@ public class GatewayModelServiceImpl implements GatewayModelService {
         } finally {
             modelListInflight.remove(cacheKey, created);
         }
+    }
+
+    /**
+     * 本地缓存是否仍然有效（在 TTL 之内时）。
+     *
+     * <p>版本号已知就用它比对：网关任何一次目录变更都会换新版本号，消费端下一次请求即重拉。
+     * 版本号未知（Redis 未装配/不可用、或尚无任何变更）时不做判断，退回纯 TTL——
+     * 这样 Redis 故障的最坏表现与改造前一致，也不会出现「每次请求都打网关」的请求风暴。
+     */
+    private boolean versionStillCurrent(ModelListCacheEntry cached, String version) {
+        if (version == null) return true;
+        return version.equals(cached.version());
+    }
+
+    /** 读网关目录版本号；未装配/不可用/尚未写入返回 null（= 未知，按 TTL 走） */
+    private String readCatalogVersion() {
+        try {
+            StringRedisTemplate r = redisTemplate.getIfAvailable();
+            if (r == null) return null;
+            String value = r.opsForValue().get(VERSION_KEY);
+            return value == null || value.isBlank() ? null : value;
+        } catch (Exception e) {
+            log.debug("读取模型目录版本号失败（退回 TTL 失效）: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public String catalogVersion() {
+        String version = readCatalogVersion();
+        return version != null ? version : lastCatalogVersion;
     }
 
     private List<Map<String, String>> fetchModelsRemote(String type) {
@@ -116,7 +159,10 @@ public class GatewayModelServiceImpl implements GatewayModelService {
                 log.warn("模型列表拉取失败: type={}, url={}, {}", type, endpoint, reason);
                 return models;
             }
-            JsonNode data = objectMapper.readTree(resp.body()).path("data");
+            JsonNode root = objectMapper.readTree(resp.body());
+            String responseVersion = root.path("version").asText("");
+            if (!responseVersion.isBlank()) lastCatalogVersion = responseVersion;
+            JsonNode data = root.path("data");
             if (data.isArray()) {
                 for (JsonNode n : data) {
                     String id = n.path("id").asText("");
@@ -177,7 +223,12 @@ public class GatewayModelServiceImpl implements GatewayModelService {
         }
     }
 
-    private record ModelListCacheEntry(List<Map<String, String>> models, long expiresAt) {
+    /** 模型列表缓存项；{@code version} 为写入时的网关目录版本号（未知时为 null） */
+    private record ModelListCacheEntry(List<Map<String, String>> models, long expiresAt, String version) {
+    }
+
+    /** 上下文窗口缓存项；{@code window} 为 0 表示负缓存（该模型没配置窗口） */
+    private record ContextWindowEntry(int window, long expiresAt, String version) {
     }
 
     @Override
@@ -204,15 +255,19 @@ public class GatewayModelServiceImpl implements GatewayModelService {
     public Integer resolveContextWindow(String modelName) {
         if (modelName == null || modelName.isBlank()) return null;
         String key = modelName.trim();
+        String version = readCatalogVersion();
         long now = System.currentTimeMillis();
-        long[] cached = contextWindowCache.get(key.toLowerCase());
-        if (cached != null && cached[1] > now) {
-            return cached[0] > 0 ? (int) cached[0] : null;
+        ContextWindowEntry cached = contextWindowCache.get(key.toLowerCase());
+        // 目录改过（换模型/改配置）时窗口可能一起变，所以缓存同样按版本号判定，
+        // 否则会出现「模型已经是新的、上下文窗口还是旧的」这种自相矛盾的状态
+        if (cached != null && cached.expiresAt() > now
+                && (version == null || version.equals(cached.version()))) {
+            return cached.window() > 0 ? cached.window() : null;
         }
         Integer resolved = fetchContextWindowFromGateway(key);
         // 命中时缓存正数；未命中缓存 0 作负缓存，避免未知模型每轮重复请求
-        contextWindowCache.put(key.toLowerCase(),
-                new long[]{resolved == null ? 0L : resolved, now + CONTEXT_WINDOW_CACHE_TTL_MS});
+        contextWindowCache.put(key.toLowerCase(), new ContextWindowEntry(
+                resolved == null ? 0 : resolved, now + CONTEXT_WINDOW_CACHE_TTL_MS, version));
         return resolved;
     }
 

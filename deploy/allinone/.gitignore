@@ -1,0 +1,10 @@
+# 构建暂存、离线包、运行期数据、本机密钥
+build/
+offline/
+data/
+.env
+.env.test
+
+# 本机数据库转储与管理员密码哈希（与 deploy/stack/.gitignore 对齐，不入库）
+db/*.dump
+db/admin-scrypt.txt

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>分镜智能创作平台 · 系统架构</title>
+<style>
+  :root{
+    --cream:#f2ebe1;
+    --board:#faf9f5;
+    --ink:#141413;
+    --ink-2:#585148;
+    --ink-3:#948b80;
+    --coral:#cc785c;
+    --coral-deep:#a95539;
+    --coral-tint:#f9ece6;
+    --coral-line:#eacfbf;
+    --line:#e8dfd1;
+    --cool:#5d7078;
+    --cool-tint:#edf2f3;
+    --cool-line:#d7e2e5;
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  body{
+    background:var(--cream);
+    font-family:"Inter","Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    padding:44px 36px;
+    display:flex; justify-content:center;
+  }
+
+  .board{
+    width:1560px;
+    background:var(--board);
+    border:1px solid #eee5d8;
+    border-radius:24px;
+    padding:46px 52px 34px;
+    box-shadow:
+      0 1px 2px rgba(60,40,20,.04),
+      0 20px 52px -20px rgba(70,45,20,.24),
+      0 60px 120px -60px rgba(70,45,20,.3);
+    position:relative; overflow:hidden;
+  }
+  .board::before{
+    content:"";
+    position:absolute; inset:-34% -8% auto auto;
+    width:1000px; height:680px;
+    background:radial-gradient(closest-side, rgba(204,120,92,.15), transparent 70%);
+    pointer-events:none;
+  }
+
+  /* ── 标题 ─────────────────────────────────── */
+  header{
+    position:relative;
+    padding-bottom:24px; margin-bottom:30px;
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:flex-end; justify-content:space-between;
+  }
+  header h1{
+    font-size:42px; font-weight:800; letter-spacing:-.6px; line-height:1.06;
+  }
+  header h1 em{ font-style:normal; color:var(--coral-deep); }
+  header .rule{
+    width:64px; height:4px; border-radius:2px;
+    background:var(--coral); margin-top:16px;
+  }
+
+  /* ── 层 ───────────────────────────────────── */
+  .stack{ position:relative; }
+
+  .layer{
+    display:grid; grid-template-columns:196px 1fr; gap:30px;
+    align-items:center;
+    padding:15px 0 15px 22px;
+    position:relative;
+  }
+  .layer::before{
+    content:""; position:absolute; left:0; top:14px; bottom:14px;
+    width:4px; border-radius:2px; background:var(--coral);
+  }
+  .layer.cool::before{ background:var(--cool); }
+
+  .rail{ display:flex; align-items:center; gap:14px; }
+  .rail .num{
+    font-size:32px; font-weight:800; letter-spacing:-1px;
+    color:var(--coral); opacity:.32; line-height:1;
+    font-variant-numeric:tabular-nums; flex:none;
+  }
+  .layer.cool .rail .num{ color:var(--cool); opacity:.34; }
+  .rail .lname{
+    font-size:23px; font-weight:800; letter-spacing:2px; line-height:1.2;
+  }
+  .layer.cool .rail .lname{ color:#3d4f56; }
+
+  .row{ display:flex; gap:15px; }
+
+  .box{
+    flex:1 1 0; min-width:0;
+    height:76px;
+    display:flex; align-items:center; justify-content:center;
+    background:#fffdfa;
+    border:1px solid var(--line);
+    border-radius:14px;
+    font-size:21px; font-weight:600; letter-spacing:.6px;
+    box-shadow:
+      0 1px 2px rgba(60,40,20,.05),
+      inset 0 1px 0 rgba(255,255,255,.9);
+  }
+
+  /* 单框独占整行（接入层 / 模型层） */
+  .box.solo{
+    background:linear-gradient(180deg,#fff9f5,#fdf1ea);
+    border-color:var(--coral-line);
+    color:#7d3f29;
+    font-weight:700;
+    font-size:22px; letter-spacing:1.2px;
+  }
+
+  /* 主角：智能编排层 */
+  .box.hero{
+    background:linear-gradient(165deg,#fdf1ea 0%, #f8e2d6 100%);
+    border-color:var(--coral-line);
+    color:#7d3f29;
+    font-weight:800; font-size:23px; letter-spacing:1.4px;
+    box-shadow:
+      0 1px 3px rgba(160,85,55,.1),
+      0 7px 16px -9px rgba(160,85,55,.34),
+      inset 0 1px 0 rgba(255,255,255,.7);
+  }
+  .box.mark{
+    flex:0 0 200px;
+    background:var(--coral);
+    border-color:var(--coral-deep);
+    color:#fff;
+    font-weight:800; font-size:20px; letter-spacing:1.6px;
+    box-shadow:
+      0 2px 5px rgba(160,85,55,.2),
+      0 8px 18px -10px rgba(160,85,55,.48);
+  }
+
+  /* 存储层 */
+  .box.cool{
+    background:var(--cool-tint);
+    border-color:var(--cool-line);
+    color:#31454c;
+    font-weight:600;
+  }
+
+  /* ── 层间连接 ─────────────────────────────── */
+  .link{
+    height:24px; margin-left:100px;
+    display:flex; align-items:center;
+    position:relative;
+  }
+  .link::before{
+    content:""; position:absolute; left:0; right:0; top:50%;
+    height:1px; background:linear-gradient(90deg, transparent, #e6dccd 18%, #e6dccd 82%, transparent);
+  }
+  .link .chev{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:9px; height:9px;
+    border-right:2px solid var(--coral); border-bottom:2px solid var(--coral);
+    rotate:45deg; opacity:.5;
+    background:var(--board); padding:0;
+  }
+
+  /* ── 底座分界 ─────────────────────────────── */
+  .divider{
+    margin:22px 0 8px;
+    display:flex; align-items:center; gap:16px;
+  }
+  .divider .bar{ flex:1; height:2px; border-radius:1px; background:var(--cool-line); }
+  .divider .tag{
+    font-size:13px; font-weight:800; letter-spacing:4px; color:#41565e;
+    background:var(--cool-tint); border:1px solid var(--cool-line);
+    border-radius:20px; padding:6px 20px;
+  }
+
+  /* ── 支撑服务 ─────────────────────────────── */
+  .layer.support{ padding-top:8px; }
+  .layer.support::before{ background:transparent; }
+  .layer.support .lname{
+    font-size:17px; font-weight:700; letter-spacing:2px; color:var(--ink-3);
+  }
+  .chip{
+    flex:1 1 0; height:56px;
+    display:flex; align-items:center; justify-content:center;
+    border:1px solid #e6dccd; border-radius:12px;
+    font-size:17px; font-weight:600; letter-spacing:.8px;
+    color:var(--ink-3); background:rgba(239,233,222,.42);
+  }
+
+  /* ── 页脚 ─────────────────────────────────── */
+  footer{
+    margin-top:30px; padding-top:22px;
+    border-top:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; gap:0;
+    position:relative;
+  }
+  footer .creed{
+    font-size:19px; font-weight:700; letter-spacing:6px; color:var(--coral-deep);
+  }
+  footer .creed span + span::before{
+    content:"·"; color:var(--coral); margin:0 16px; opacity:.55; letter-spacing:0;
+  }
+  footer .stamp{
+    position:absolute; right:0; bottom:2px;
+    font-size:12px; letter-spacing:2px; color:var(--ink-3);
+  }
+</style>
+</head>
+<body>
+<main class="board">
+
+  <header>
+    <div>
+      <h1>分镜智能创作平台 · <em>系统架构</em></h1>
+      <div class="rule"></div>
+    </div>
+  </header>
+
+  <div class="stack">
+
+    <!-- 01 -->
+    <section class="layer">
+      <div class="rail"><span class="num">01</span><span class="lname">客户端层</span></div>
+      <div class="row">
+        <div class="box">智能体对话</div>
+        <div class="box">分镜编辑器</div>
+        <div class="box">资产库</div>
+        <div class="box">创作画布</div>
+        <div class="box">移动端</div>
+      </div>
+    </section>
+
+    <div class="link"><span class="chev"></span></div>
+
+    <!-- 02 -->
+    <section class="layer">
+      <div class="rail"><span class="num">02</span><span class="lname">接入层</span></div>
+      <div class="row">
+        <div class="box solo">统一网关</div>
+      </div>
+    </section>
+
+    <div class="link"><span class="chev"></span></div>
+
+    <!-- 03 -->
+    <section class="layer">
+      <div class="rail"><span class="num">03</span><span class="lname">业务服务层</span></div>
+      <div class="row">
+        <div class="box">分镜业务服务</div>
+        <div class="box">项目库服务</div>
+        <div class="box">画布服务</div>
+        <div class="box">Moon 智能体</div>
+      </div>
+    </section>
+
+    <div class="link"><span class="chev"></span></div>
+
+    <!-- 04 -->
+    <section class="layer">
+      <div class="rail"><span class="num">04</span><span class="lname">智能编排层</span></div>
+      <div class="row">
+        <div class="box hero">规划与调度</div>
+        <div class="box hero">过程可见</div>
+        <div class="box hero">人工确认</div>
+        <div class="box hero">沙箱执行</div>
+        <div class="box mark">产物沉淀</div>
+      </div>
+    </section>
+
+    <div class="link"><span class="chev"></span></div>
+
+    <!-- 05 -->
+    <section class="layer">
+      <div class="rail"><span class="num">05</span><span class="lname">模型能力层</span></div>
+      <div class="row">
+        <div class="box solo">统一大模型网关</div>
+      </div>
+    </section>
+
+    <!-- 底座 -->
+    <div class="divider">
+      <span class="bar"></span>
+      <span class="tag">数 据 底 座</span>
+      <span class="bar"></span>
+    </div>
+
+    <section class="layer cool">
+      <div class="rail"><span class="num">06</span><span class="lname">存储层</span></div>
+      <div class="row">
+        <div class="box cool">关系型数据库</div>
+        <div class="box cool">缓存</div>
+        <div class="box cool">对象存储</div>
+        <div class="box cool">配置中心</div>
+      </div>
+    </section>
+
+    <!-- 支撑服务 -->
+    <section class="layer support">
+      <div class="rail"><span class="lname">支撑服务</span></div>
+      <div class="row">
+        <div class="chip">网页检索</div>
+        <div class="chip">语音识别</div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer>
+    <div class="creed"><span>约束生成</span><span>人在环内</span><span>产物沉淀</span></div>
+    <div class="stamp">分层架构视图</div>
+  </footer>
+
+</main>
+</body>
+</html>

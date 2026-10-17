@@ -16,6 +16,8 @@ import {
   isCanvasNodeKind,
   validateEdge,
   type CanvasExecution,
+  type CanvasGraphPatch,
+  type CanvasGraphPatchEntry,
   type CanvasGraphV2,
   type GenerationRecord,
   type NodePort,
@@ -167,6 +169,25 @@ interface CanvasState {
     updated: string[];
     stale: string[];
   };
+  /**
+   * 应用服务端增量补丁（远端改动）。
+   *
+   * <p>按 id upsert + removed*Ids 删除，**幂等**（同一份补丁重复应用结果一致）；
+   * 不写 past/future（远端改动不进用户撤销栈），也不动 store `revision`
+   * （避免触发 550ms 自动保存把刚收到的服务端状态再回写一遍）。
+   * 结构不合法时抛错，由调用方退回整图重载。
+   */
+  applyRemotePatch: (patch: CanvasGraphPatch) => RemotePatchSummary;
+}
+
+/** applyRemotePatch 的应用摘要，供调用方决定要不要补资产元数据。 */
+export interface RemotePatchSummary {
+  addedNodeIds: string[];
+  updatedNodeIds: string[];
+  removedNodeIds: string[];
+  addedEdgeIds: string[];
+  updatedEdgeIds: string[];
+  removedEdgeIds: string[];
 }
 
 const MAX_HISTORY = 40;
@@ -283,6 +304,33 @@ const selectedNodes = (state: Pick<CanvasState, 'nodes' | 'selectedNodeId'>) => 
   if (selected.length) return selected;
   const fallback = state.nodes.find((node) => node.id === state.selectedNodeId);
   return fallback ? [fallback] : [];
+};
+
+/** 补丁节点结构校验：guard 只保证 id，这里补 position{x,y} 与 data（缺了就没法渲染）。 */
+const requireRemotePatchNode = (entry: CanvasGraphPatchEntry): CanvasNode => {
+  const position = entry.position as { x?: unknown; y?: unknown } | undefined;
+  const x = position?.x;
+  const y = position?.y;
+  if (typeof x !== 'number' || !Number.isFinite(x)
+      || typeof y !== 'number' || !Number.isFinite(y)) {
+    throw new Error(`补丁节点 ${entry.id} 缺少合法 position`);
+  }
+  const data = entry.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`补丁节点 ${entry.id} 缺少合法 data`);
+  }
+  return entry as unknown as CanvasNode;
+};
+
+/** 补丁连线结构校验：source/target 必须是节点 id（端点不存在的边会被拒绝并退回整图重载）。 */
+const requireRemotePatchEdge = (entry: CanvasGraphPatchEntry): CanvasEdge => {
+  const source = entry.source;
+  const target = entry.target;
+  if (typeof source !== 'string' || !source
+      || typeof target !== 'string' || !target) {
+    throw new Error(`补丁连线 ${entry.id} 缺少 source/target`);
+  }
+  return entry as unknown as CanvasEdge;
 };
 
 const cloneSelection = (nodes: CanvasNode[], edges: CanvasEdge[], offset: XYPosition) => {
@@ -876,6 +924,78 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         created: reconciled.created.map((node) => node.id),
         updated: reconciled.updated.map((node) => node.id),
         stale: reconciled.stale.map((node) => node.id),
+      };
+    },
+    applyRemotePatch: (patch) => {
+      const state = get();
+      const incomingNodes = (patch.nodes ?? []).map(requireRemotePatchNode);
+      const incomingEdges = (patch.edges ?? []).map(requireRemotePatchEdge);
+      const removedNodeIds = new Set(patch.removedNodeIds ?? []);
+      const removedEdgeIds = new Set(patch.removedEdgeIds ?? []);
+
+      const addedNodeIds: string[] = [];
+      const updatedNodeIds: string[] = [];
+      const nodeById = new Map(state.nodes.map((node) => [node.id, node]));
+      for (const id of removedNodeIds) nodeById.delete(id);
+      for (const node of incomingNodes) {
+        const existing = nodeById.get(node.id);
+        if (existing) {
+          updatedNodeIds.push(node.id);
+          // 同 id 覆盖，但保留本地交互态（选中/拖拽）与本地 UI 标记（isGenerating / progress 等）。
+          nodeById.set(node.id, {
+            ...existing,
+            ...node,
+            position: node.position ?? existing.position,
+            data: { ...existing.data, ...node.data },
+            selected: existing.selected,
+            dragging: false,
+          });
+        } else {
+          addedNodeIds.push(node.id);
+          nodeById.set(node.id, { ...node, selected: false, dragging: false });
+        }
+      }
+      const survivingNodeIds = new Set(nodeById.keys());
+
+      const addedEdgeIds: string[] = [];
+      const updatedEdgeIds: string[] = [];
+      const edgeById = new Map(state.edges.map((edge) => [edge.id, edge]));
+      for (const id of removedEdgeIds) edgeById.delete(id);
+      for (const edge of incomingEdges) {
+        // 端点不在本地 → 说明中间漏了补丁；抛错让调用方整图重载，绝不留下悬挂边。
+        if (!survivingNodeIds.has(edge.source) || !survivingNodeIds.has(edge.target)) {
+          throw new Error(`补丁连线 ${edge.id} 的端点不在本地图中`);
+        }
+        if (edgeById.has(edge.id)) updatedEdgeIds.push(edge.id);
+        else addedEdgeIds.push(edge.id);
+        edgeById.set(edge.id, edge);
+      }
+      // 节点被删时服务端会一并下发 removedEdgeIds；这里再兜一层，防止渲染悬挂边。
+      const prunedEdgeIds: string[] = [];
+      for (const [id, edge] of [...edgeById]) {
+        if (survivingNodeIds.has(edge.source) && survivingNodeIds.has(edge.target)) continue;
+        edgeById.delete(id);
+        if (!removedEdgeIds.has(id)) prunedEdgeIds.push(id);
+      }
+
+      const nodes = [...nodeById.values()];
+      set({
+        nodes,
+        edges: [...edgeById.values()],
+        // 远端删掉了当前选中节点 → 清选中，避免选中一个不存在的节点。
+        selectedNodeId: state.selectedNodeId && !survivingNodeIds.has(state.selectedNodeId)
+          ? null
+          : state.selectedNodeId,
+        derivedAssetIdsBySource: indexDerivedAssets(nodes),
+        // 远端补丁不写 past/future，也不动 store revision（见 CanvasState.applyRemotePatch 注释）。
+      });
+      return {
+        addedNodeIds,
+        updatedNodeIds,
+        removedNodeIds: [...removedNodeIds].filter((id) => !nodeById.has(id)),
+        addedEdgeIds,
+        updatedEdgeIds,
+        removedEdgeIds: [...removedEdgeIds, ...prunedEdgeIds],
       };
     },
   };

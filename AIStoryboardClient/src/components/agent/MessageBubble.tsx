@@ -9,9 +9,9 @@ import {
   Check, ImagePlus, Images, Library, MessageSquarePlus, PanelRightOpen, Pencil, Play, Trash2,
 } from 'lucide-react';
 import { assetUrl } from '../../config';
-import { ImagePreviewModal } from './ImagePreviewModal';
 import type { AgentAttachment, AgentMessageMetadata } from '../../api/agent';
 import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
+import { openAssetDetail } from '../../stores/assetDetailStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import {
@@ -511,6 +511,8 @@ function renderContent(
   importDisabled?: boolean,
   importing?: boolean,
   dragProjectId?: string,
+  /** 本轮 `@` 引用标记：命中时渲染成品牌色，与输入框里的观感一致 */
+  mentionTokens?: string[],
 ) {
   // LLM 输出的 JSON 字符串中 \n 可能被转义为字面 \\n，split('\n') 无法匹配；
   // 统一将字面 \\n（及 \r\n）归一为真正换行后再拆行
@@ -597,16 +599,56 @@ function renderContent(
           />
       );
     }
-    // 加粗
-    const parts = line.split(/(\*\*[^*]+\*\*)/g).map((part, j) =>
-      part.startsWith('**') && part.endsWith('**') ? (
-        <strong key={j}>{part.slice(2, -2)}</strong>
-      ) : (
-        <span key={j}>{part}</span>
-      ),
-    );
+    // 加粗 + `@` 引用标记：标记优先（标记内部不再做加粗解析）
+    const parts = splitMentionParts(line, mentionTokens).flatMap((segment, j) => {
+      if (segment.mention) {
+        return [(
+          <span
+            key={`mention-${j}`}
+            data-mention="true"
+            style={{ color: 'rgb(65,118,230)', fontWeight: 500 }}
+          >
+            {segment.text}
+          </span>
+        )];
+      }
+      return segment.text.split(/(\*\*[^*]+\*\*)/g).map((part, k) =>
+        part.startsWith('**') && part.endsWith('**') ? (
+          <strong key={`bold-${j}-${k}`}>{part.slice(2, -2)}</strong>
+        ) : (
+          <span key={`text-${j}-${k}`}>{part}</span>
+        ),
+      );
+    });
     return <div key={i} style={{ marginBottom: 2 }}>{parts}</div>;
   });
+}
+
+/**
+ * 把一行文本按 `@` 引用标记切成片段。
+ *
+ * <p>只认「这一轮真实登记过的 token」，不做正则通配：否则用户随手打的 `@某人` 也会被当成引用。
+ */
+export function splitMentionParts(
+  line: string,
+  mentionTokens?: string[],
+): Array<{ text: string; mention: boolean }> {
+  const tokens = (mentionTokens ?? []).filter((token) => token.length > 1);
+  if (tokens.length === 0) return [{ text: line, mention: false }];
+  const pattern = new RegExp(
+    `(${tokens
+      .slice()
+      .sort((left, right) => right.length - left.length)
+      .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|')})`,
+    'g',
+  );
+  const parts: Array<{ text: string; mention: boolean }> = [];
+  for (const piece of line.split(pattern)) {
+    if (!piece) continue;
+    parts.push({ text: piece, mention: tokens.includes(piece) });
+  }
+  return parts.length > 0 ? parts : [{ text: line, mention: false }];
 }
 
 /**
@@ -1117,19 +1159,16 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     const conversation = state.conversations.find((item) => item.id === state.activeConversationId);
     return conversation?.status === 'archived' || conversation?.orchestrationMode === 'LEGACY';
   });
-  // 图片点击放大预览（灯箱）
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
-  const openPreview = (url: string, type: 'image' | 'video' = 'image') => {
-    setPreviewType(type);
-    setPreviewUrl(url);
+  // 点会话里的图片/视频 → 打开和生成中心同一个素材详情弹窗（提示词、参数、改图入口都在那儿）。
+  const openMediaDetail = (url: string, kind?: 'image' | 'video') => {
+    if (!url) return;
+    openAssetDetail({ url, kind });
   };
   const openAttachmentPreview = (attachment: AgentAttachment) => {
     if (attachment.kind === 'image' || attachment.kind === 'video') {
-      openPreview(attachment.url, attachment.kind === 'video' ? 'video' : 'image');
+      openMediaDetail(attachment.url, attachment.kind === 'video' ? 'video' : 'image');
       return;
     }
-    setPreviewUrl(null);
     useDocumentPreviewStore.getState().openDocument(attachment);
   };
   const [copied, setCopied] = useState(false);
@@ -1193,6 +1232,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         : legacyAttachment ? [legacyAttachment] : [])
     : [];
   const userTextContent = legacyAttachment ? '' : displayContent;
+  /** 本轮 `@` 引用标记（来自消息 metadata，刷新后仍在）：气泡里渲染成与输入框一致的蓝色 */
+  const mentionTokens = useMemo(
+    () => (metadata?.messageInput?.references ?? [])
+      .map((reference) => reference.token)
+      .filter((token): token is string => !!token),
+    [metadata],
+  );
   // 承担生成结果的后台任务一旦挂上，结果统一走预置位条，正文不再重复内联图片
   const mediaTaskIds = useMediaTaskIds(isUser ? undefined : metadata?.taskCards);
   const renderedContent = mediaTaskIds.length > 0 ? stripTaskMediaMarkdown(displayContent) : displayContent;
@@ -1484,7 +1530,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         <div style={{ width: '100%', maxWidth: '100%', marginBottom: 8 }}>
           <MarkdownContent
             content={renderedContent}
-            onImgClick={(url) => openPreview(url, 'image')}
+            onImgClick={(url) => openMediaDetail(url)}
             onImportMedia={(media) => void handleImportMedia([media])}
             importDisabled={importDisabled}
             streaming={streaming}
@@ -1585,7 +1631,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
       {
         y: 0, opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out',
         onComplete: () => {
-          // 清除残留 transform：气泡作为 containing block 会让内部 fixed 灯箱（ImagePreviewModal）错位
+          // 清除残留 transform：气泡作为 containing block 会让内部 fixed 浮层（工具提示、注释面板）错位
           gsap.set(bubbleRef.current, { clearProps: 'transform' });
         },
       }
@@ -1604,7 +1650,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
       <GenerationSlotStrip
         taskIds={mediaTaskIds}
         onOpen={onOpenGenerationCenter}
-        onOpenMedia={(url) => openPreview(url, 'image')}
+        onOpenMedia={(url) => openMediaDetail(url)}
       />
       <MessageAttachmentStrip
         attachments={sandboxAttachments}
@@ -1776,7 +1822,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                   {renderedContent && (
                     <MarkdownContent
                       content={renderedContent}
-                      onImgClick={(url) => openPreview(url, 'image')}
+                      onImgClick={(url) => openMediaDetail(url)}
                       onImportMedia={(media) => void handleImportMedia([media])}
                       importDisabled={importDisabled}
                       importing={projectImportState === 'importing'}
@@ -1808,11 +1854,12 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                   />
                   {userTextContent && renderContent(
                     userTextContent,
-                    (url) => openPreview(url, 'image'),
+                    (url) => openMediaDetail(url),
                     (media) => void handleImportMedia([media]),
                     importDisabled,
                     projectImportState === 'importing',
                     currentProject?.id,
+                    mentionTokens,
                   )}
                 </>
               )}
@@ -1916,11 +1963,6 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         </div>
       )}
     </div>
-    <ImagePreviewModal
-      url={previewUrl}
-      type={previewType}
-      onClose={() => setPreviewUrl(null)}
-    />
     {annotationsVisible && annotationCount > 0 && badgeAnchor && badgeVisible && createPortal(
       <button
         type="button"

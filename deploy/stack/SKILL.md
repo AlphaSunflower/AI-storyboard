@@ -9,7 +9,7 @@ metadata:
 
 # AI-storyboard 部署交付速查
 
-一个 compose 项目拉起全栈（12 个容器）：Postgres / Redis / MinIO / MoonSandbox
+一个 compose 项目拉起全栈（11 个容器）：Postgres / Redis / MinIO / MoonSandbox
 + 6 个 Java 服务（api-gateway、backend、llm-gateway、moon-agent、asset-service、canvas）+ 前端入口。
 
 栈内**不含 Nacos**：服务发现默认关闭（`NACOS_DISCOVERY_ENABLED=false`），ApiGateway 按 `.env` 的
@@ -70,7 +70,7 @@ metadata:
 
 ### 其它外部依赖
 
-- Agent 联网检索：默认自托管 SearXNG（`AGENTSCOPE_SEARXNG_URL`，`settings.yml` 需开 `search.formats: [html, json]`）；可选 DeepSeek 原生 `web_search`（Anthropic 兼容 Messages + `web_search_20250305`，`AGENTSCOPE_WEB_SEARCH_API_KEY`）
+- Agent 联网检索：唯一后端 DeepSeek 原生 `web_search`（Anthropic 兼容 Messages + `web_search_20250305`，key 走 `AGENTSCOPE_WEB_SEARCH_API_KEY` 或 `DEEPSEEK_API_KEY`；留空则工具不注册、能力上报为不可用）。自托管 SearXNG 后端已移除
 - 沙箱出网白名单（经 squid 代理）：`.pypi.org`、`.pythonhosted.org`（其它域名一律拒绝）
 - 仅构建期使用：npm 镜像 `registry.npmmirror.com`、apt 镜像 `mirrors.aliyun.com`、Docker 基础镜像（迁移后无需联网）
 
@@ -83,7 +83,7 @@ metadata:
 - 图像生成与改图（文生图/图生图/批量），视频生成与合并（ffmpeg 已内置）
 - 画布编排与执行（建节点/连线/布局/结果槽 + 触发执行；执行命令经 canvas 服务的信箱投给浏览器落地）
 - 文档解析（Tika：docx/pdf/xlsx/pptx/md）、资产库检索与引用
-- 联网检索（SearXNG 自托管 web_search / web_fetch，抓取页转 Markdown；可切 DeepSeek 原生搜索）
+- 联网检索（DeepSeek 原生 web_search / web_fetch，抓取页转 Markdown）
 - 沙箱执行（Python/shell，`sandbox-runner` 容器内，只读根文件系统 + 出网白名单）
 - 异步任务与任务中心（task_list/output/cancel、wait_async_results）、HITL 人工确认（request_human_input）
 - 多智能体协作（agent_spawn / agent_send / agent_list）、计划模式（plan_enter/plan_write）、todo 清单
@@ -111,8 +111,9 @@ metadata:
 - 分镜（19）：`start/approve/revise_storyboard_production`、`generate_storyboard_image(s)`、`generate_storyboard_video(s)`、
   `list_project_storyboard`、`list/reorder/delete_storyboard_draft_shot`、`upsert/update_project_storyboard_shot`、
   `clear_project_storyboard`、`merge_storyboard_videos`、`save/ get_timeline_manifest`、`choose_storyboard_commit_mode` 等
-- 媒体（10）：`generate_image`、`generate_image_batch`、`generate_video`、`refineImage`、`get_generation_task_status`、
-  `review_generated_media`、`get_media_critiques`、`assess_generation_risk`、`build_media_spec`、`resolve_reference_assets`
+- 媒体（9）：`generate_image`、`generate_image_batch`、`generate_video`、`refineImage`、`get_generation_task_status`、
+  `get_media_critiques`、`assess_generation_risk`、`build_media_spec`、`resolve_reference_assets`
+  （`review_generated_media` 默认不注册：生成结果不做自动诊断，只有显式打开 `AGENTSCOPE_CRITIQUE_ENABLED` 才交回模型）
 - 文件/文档/沙箱（11）：`read_file`、`write_file`、`edit_file`、`list_files`、`glob_files`、`grep_files`、`execute`、
   `run_python_script`、`read_document`、`list_conversation_documents`、`deliver_artifact`
 - 创意与资产（5）：`get/update_creative_context`、`extract_creative_constraints`、`list_asset_groups`、`list_session_assets`
@@ -146,7 +147,7 @@ AI 生图/生视频与下载 · 资产库（上传/分组/标签/引用/回收�
 
 ```powershell
 cd deploy\stack
-docker compose --env-file .env ps                      # 12 个服务应为 running/healthy
+docker compose --env-file .env ps                      # 11 个服务应为 running/healthy
 powershell -File scripts\verify.ps1                    # 14 项端到端验收（含真实模型调用、SSE）
 powershell -File scripts\down.ps1                      # 停栈（保留数据）
 docker logs aistoryboard-moon-agent --tail 50          # Agent 日志，找 “[MCP] 已注册远程工具: canvas=true, media=true”

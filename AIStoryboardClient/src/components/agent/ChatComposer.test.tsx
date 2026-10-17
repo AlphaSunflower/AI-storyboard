@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentApi, type AgentConversation } from '../../api/agent';
 import { libraryApi, type LibraryAsset, type LibraryAssetDetail } from '../../api/library';
@@ -611,6 +611,48 @@ describe('ChatComposer 斜杠命令', () => {
     expect(screen.getByText('压缩上下文')).toBeTruthy();
     expect(screen.getByText('状态')).toBeTruthy();
     expect(screen.getByText('侧边')).toBeTruthy();
+    // 新增：清空上下文（真删除）
+    expect(screen.getByText('清空上下文')).toBeTruthy();
+    // 命令同时展示英文别名，便于 /clear 这类输入直接命中
+    expect(screen.getByText('/compact')).toBeTruthy();
+    expect(screen.getByText('/clear')).toBeTruthy();
+  });
+
+  it('「清空上下文」点选后走真删除接口，并把会话态退回新对话', async () => {
+    const clearContextSpy = vi.spyOn(agentApi, 'clearContext').mockResolvedValue({
+      data: { code: 0, message: '', data: { deletedRows: 17, title: '新对话' } },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [conversation('AGENTSCOPE')],
+      messages: [{
+        id: 'm1', role: 'user', content: '旧对话', createdAt: new Date().toISOString(),
+      }],
+      // 生成中/等待确认时前端会前置拦截，这里显式置于可清空状态
+      streaming: false,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+    } as never);
+    render(<ChatComposer />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/清空' } });
+    fireEvent.click(screen.getByText('清空上下文'));
+
+    await waitFor(() => expect(clearContextSpy).toHaveBeenCalledWith('conversation-1'));
+    await waitFor(() => expect(useAgentStore.getState().messages).toHaveLength(0));
+    expect(useAgentStore.getState().waitingHumanInput).toBeNull();
+    // 标题跟着后端重置为「新对话」
+    expect(useAgentStore.getState().conversations.find((c) => c.id === 'conversation-1')?.title)
+      .toBe('新对话');
+  });
+
+  it('/clear 命中「清空上下文」（英文别名）', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/clear' } });
+
+    expect(screen.getByText('清空上下文')).toBeTruthy();
+    // 别名过滤同样生效：不匹配的命令不再出现
+    expect(screen.queryByText('状态')).toBeNull();
   });
 
   it('无用量数据时「状态」沿用静态说明', () => {
@@ -1008,10 +1050,14 @@ describe('ChatComposer compact mode', () => {
     expect(card?.style.flexDirection).toBe('row');
     expect(card?.style.background).toContain('rgba(255, 255, 255, 0.62)');
     expect(card?.style.backdropFilter).toContain('blur');
-    // 输入框与「发送」所在的底部行是卡片这一行里的兄弟节点
-    expect(input.parentElement).toBe(card);
+    // 输入框外面包了一层 `.chat-composer-input`（承载 `@` 标记的镜像高亮层），
+    // 这一层才是卡片这一行里的兄弟节点；收缩态的可伸缩性挂在这一层上。
+    const inputRow = input.parentElement as HTMLElement;
+    expect(inputRow.classList.contains('chat-composer-input')).toBe(true);
+    expect(inputRow.parentElement).toBe(card);
     expect(card?.contains(send)).toBe(true);
-    expect(input.nextElementSibling).toBe(send.parentElement?.parentElement);
+    expect(inputRow.nextElementSibling).toBe(send.parentElement?.parentElement);
+    expect(inputRow.style.flex).toContain('1');
     expect(input.style.flex).toContain('1');
   });
 });
@@ -1071,5 +1117,333 @@ describe('ChatComposer 窄栏底部行（画布 /canvas 内嵌小窗）', () => 
 
     const trigger = screen.getByRole('button', { name: '生成偏好：自定义' });
     expect(trigger.textContent).toBe('自定');
+  });
+});
+
+describe('ChatComposer 输入框上方只保留还没发出去的素材', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      streaming: false,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      canvasBinding: null,
+      canvasExitPending: false,
+      refImageUrls: ['/api/files/images/a.png', '/api/files/images/b.png'],
+      pendingAttachments: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+    });
+    useProjectStore.setState({ currentProject: { id: 'p1', name: '测试项目' } as never });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useAgentStore.getState().newConversation();
+  });
+
+  it('发送后输入框上方不再有旧素材，打字也不会让它回来', () => {
+    render(<ChatComposer />);
+    expect(screen.getByRole('button', { name: '预览参考图 1：图 1' })).toBeTruthy();
+
+    // 本轮发送成功后由 store 清空输入框素材（clearPendingAttachments）
+    act(() => {
+      useAgentStore.getState().clearPendingAttachments();
+    });
+
+    expect(document.querySelector('.chat-reference-preview')).toBeNull();
+    expect(useAgentStore.getState().refImageUrls).toEqual([]);
+
+    // 继续写新指令：旧素材不该再出现（否则看起来像又被带了一遍）
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '再改一版' } });
+    expect(screen.queryByRole('button', { name: '预览参考图 1：图 1' })).toBeNull();
+    expect(document.querySelector('.chat-reference-preview')).toBeNull();
+  });
+
+  it('之后再添素材只展示新素材', () => {
+    render(<ChatComposer />);
+    act(() => {
+      useAgentStore.getState().clearPendingAttachments();
+    });
+
+    act(() => {
+      useAgentStore.getState().addRefImageUrls(['/api/files/images/c.png']);
+    });
+
+    const previews = screen.getAllByRole('button', { name: /预览参考图/ });
+    expect(previews).toHaveLength(1);
+    expect(previews[0].querySelector('img')?.getAttribute('src')).toContain('c.png');
+  });
+});
+
+
+describe('ChatComposer 提示词回填', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      composerInjection: null,
+      refImageUrls: [],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+    });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useAgentStore.setState({ composerInjection: null });
+  });
+
+  it('把素材详情送来的提示词填进空输入框', () => {
+    render(<ChatComposer />);
+
+    act(() => {
+      useAgentStore.getState().injectComposerText('精细国风东方龙图案');
+    });
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('精细国风东方龙图案');
+  });
+
+  it('已经写过的内容不会被提示词覆盖，只换行追加', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '帮我把这张图改成夜景' } });
+
+    act(() => {
+      useAgentStore.getState().injectComposerText('精细国风东方龙图案');
+    });
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value)
+      .toBe('帮我把这张图改成夜景\n精细国风东方龙图案');
+  });
+
+  it('同一次注入不会被重复应用（重渲染不会把用户改掉的内容冲回去）', () => {
+    render(<ChatComposer />);
+
+    act(() => {
+      useAgentStore.getState().injectComposerText('精细国风东方龙图案');
+    });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我自己改过的内容' } });
+
+    // 强制重渲染：seq 没变，输入框不该再动它一次。
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我自己改过的内容' } });
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('我自己改过的内容');
+  });
+
+  it('第二次注入（seq 前进）才再次生效', () => {
+    render(<ChatComposer />);
+
+    act(() => {
+      useAgentStore.getState().injectComposerText('第一段');
+    });
+    act(() => {
+      useAgentStore.getState().injectComposerText('第二段');
+    });
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('第一段\n第二段');
+  });
+
+  it('空白提示词不产生注入', () => {
+    render(<ChatComposer />);
+
+    act(() => {
+      useAgentStore.getState().injectComposerText('   ');
+    });
+
+    expect(useAgentStore.getState().composerInjection).toBeNull();
+  });
+});
+
+describe('ChatComposer @ 引用资料', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      refImageUrls: [],
+      pendingAttachments: [],
+      pendingReferences: [],
+      conversations: [
+        {
+          id: 'conversation-1', userId: 'user-1', projectId: 'p1', title: '当前对话',
+          status: 'active', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'conversation-2', userId: 'user-1', projectId: 'p1', title: '分镜重做',
+          status: 'active', messageCount: 23, createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          id: 'conversation-9', userId: 'user-1', projectId: 'p1', title: '别的项目',
+          status: 'archived', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    useProjectStore.setState({
+      // 与 mockChatLibrary 的 ownerProjectId 对齐，避免选择器同时拉 PROJECT/GLOBAL 两份导致同名重复
+      currentProject: { id: 'p1', name: '测试项目' } as never,
+      scenes: [
+        { id: 'scene-3', sceneNumber: 3, scriptContent: '雨夜街头，霓虹倒影' },
+        { id: 'scene-4', sceneNumber: 4, scriptContent: '天台追逐' },
+      ] as never,
+    });
+    vi.spyOn(agentApi, 'listConversationAssetGroups').mockResolvedValue({
+      data: { code: 0, message: '', data: [] },
+    } as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  const typeMention = () => {
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '@' } });
+    return textarea;
+  };
+
+  it('输入 @ 列出四类来源，选中分镜后插入蓝色标记并登记引用', async () => {
+    render(<ChatComposer />);
+    const textarea = typeMention();
+
+    const menu = await screen.findByRole('listbox', { name: '引用资料' });
+    expect(menu.textContent).toContain('项目库文件');
+    expect(menu.textContent).toContain('本地文件');
+    expect(menu.textContent).toContain('分镜 3');
+    expect(menu.textContent).toContain('对话《分镜重做》');
+
+    fireEvent.click(screen.getByRole('option', { name: /分镜 3/ }));
+
+    expect(textarea.value).toBe('@分镜3 ');
+    expect(useAgentStore.getState().pendingReferences).toEqual([
+      expect.objectContaining({ kind: 'scene', id: 'scene-3', token: '@分镜3', sceneNumber: 3 }),
+    ]);
+    // 镜像高亮层把标记渲染成品牌色片段
+    const highlighted = document.querySelectorAll('[data-mention="true"]');
+    expect(highlighted).toHaveLength(1);
+    expect(highlighted[0].textContent).toBe('@分镜3');
+    // 标记是原子的：镜像层里普通文本仍逐字保留
+    expect(document.querySelector('.chat-composer-highlight')?.textContent).toContain('@分镜3');
+  });
+
+  it('退格一次删掉整个标记，并撤销这条引用', async () => {
+    render(<ChatComposer />);
+    const textarea = typeMention();
+    fireEvent.click(await screen.findByRole('option', { name: /分镜 3/ }));
+
+    fireEvent.change(textarea, { target: { value: '看 @分镜3 的效果' } });
+    textarea.setSelectionRange(7, 7);
+    fireEvent.keyDown(textarea, { key: 'Backspace' });
+
+    expect(textarea.value).toBe('看 的效果');
+    expect(useAgentStore.getState().pendingReferences).toEqual([]);
+  });
+
+  it('送出的引用清单只包含正文里还在的标记', async () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never });
+    render(<ChatComposer />);
+    const textarea = typeMention();
+    fireEvent.click(await screen.findByRole('option', { name: /分镜 3/ }));
+    fireEvent.click(screen.getByRole('option', { name: /分镜 4/ }));
+
+    // 用户把分镜 4 的标记删了：这条引用不该跟着发出去
+    fireEvent.change(textarea, { target: { value: '把 @分镜3 的镜头拉近一点' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [content, options] = sendMessage.mock.calls[0] as [string, { references?: unknown[] }];
+    expect(content).toContain('@分镜3');
+    expect(options.references).toEqual([
+      expect.objectContaining({ kind: 'scene', id: 'scene-3' }),
+    ]);
+  });
+
+  it('引用对话暂时置灰（会话摘要未上线），点击不登记引用', async () => {
+    render(<ChatComposer />);
+    typeMention();
+
+    const option = await screen.findByRole('option', { name: /对话《分镜重做》/ });
+    expect((option as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(option);
+    expect(useAgentStore.getState().pendingReferences).toEqual([]);
+  });
+
+  it('＋ → 上传分镜 也只插入标记，不再立即发送', async () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never });
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByRole('button', { name: '上传' }));
+    fireEvent.click(await screen.findByText('上传分镜'));
+
+    // 分镜选择器：第一个 checkbox 是「全选」，随后每个分镜一个
+    const checkboxes = await screen.findAllByRole('checkbox');
+    fireEvent.click(checkboxes[1]);
+    fireEvent.click(screen.getByRole('button', { name: /进入分镜审核/ }));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('@分镜3 ');
+    expect(useAgentStore.getState().pendingReferences).toEqual([
+      expect.objectContaining({ kind: 'scene', id: 'scene-3' }),
+    ]);
+  });
+
+  it('内容里没有标记时目录不再残留（额度不被幽灵引用占满）', async () => {    render(<ChatComposer />);
+    const textarea = typeMention();
+    fireEvent.click(await screen.findByRole('option', { name: /分镜 3/ }));
+    expect(useAgentStore.getState().pendingReferences).toHaveLength(1);
+
+    // 全选删除后再插一条：目录里只剩新的这一条
+    fireEvent.change(textarea, { target: { value: '@' } });
+    await act(async () => { /* 等一次渲染，避免点到上一帧的旧节点 */ });
+    fireEvent.click(screen.getByRole('option', { name: /分镜 4/ }));
+
+    const references = useAgentStore.getState().pendingReferences;
+    expect(references).toHaveLength(1);
+    expect(references[0]).toMatchObject({ id: 'scene-4', token: '@分镜4' });
+  });
+
+  it('从 @ 菜单选项目库文件：既挂素材也插标记，引用带 mediaId（后端据此转存会话资产）', async () => {
+    mockChatLibrary();
+    render(<ChatComposer />);
+    const textarea = typeMention();
+
+    fireEvent.click(await screen.findByRole('option', { name: /项目库文件/ }));
+    // 选择器按项目/全局两个 scope 各渲染一次同一份 mock 数据，取第一条即可
+    fireEvent.click((await screen.findAllByText('a.png'))[0]);
+    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+
+    await waitFor(() => expect(useAgentStore.getState().pendingReferences).toHaveLength(1));
+    expect(useAgentStore.getState().pendingReferences[0]).toMatchObject({
+      kind: 'library_file',
+      name: 'a.png',
+      mediaId: 'm1',
+    });
+    expect(textarea.value).toBe('@a.png ');
+    // 素材照旧挂上：图片作为本轮参考媒体走既有附件通路
+    expect(useAgentStore.getState().pendingAttachments).toHaveLength(1);
+  });
+
+  it('从 ＋ 菜单选项目库素材：只挂素材、不插标记（老行为保持）', async () => {
+    mockChatLibrary();
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByLabelText('上传'));
+    fireEvent.click(screen.getByText('上传项目库素材'));
+    fireEvent.click((await screen.findAllByText('a.png'))[0]);
+    fireEvent.click(screen.getByRole('button', { name: '确认选择' }));
+
+    await waitFor(() => expect(useAgentStore.getState().pendingAttachments).toHaveLength(1));
+    expect(useAgentStore.getState().pendingReferences).toEqual([]);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
   });
 });

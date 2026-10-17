@@ -55,7 +55,7 @@ class SkillExpanderTests {
                 "canvas_get_node_model_config", "canvas_set_node_model_config",
                 "canvas_update_node", "canvas_create_edge",
                 "canvas_move_nodes", "canvas_layout_graph", "canvas_execute_node", "canvas_execute_graph",
-                "canvas_get_execution", "canvas_cancel_execution", "canvas_delete_nodes", "canvas_delete_edges")
+                "canvas_get_execution", "canvas_cancel_execution")
                 .stream()
                 .map(name -> {
                     ToolDefinition definition = mock(ToolDefinition.class);

@@ -1,0 +1,353 @@
+# 单 JVM 全栈部署（2 核 2G 公网测试）
+# 与 deploy/stack 的差别：6 个 Java 服务合并成 1 个容器 / 1 个 JVM；不含 Nacos；
+# vosk 不在本栈内；注册由入口 nginx 关闭（后端注册接口代码未改）；账号收敛为两个。
+#
+# 用法（deploy/allinone 目录下）：
+#   docker compose --env-file .env up -d --no-build
+# 需要 Agent 沙箱（文件/Python 产物）时：
+#   docker compose --env-file .env --profile sandbox up -d --no-build
+name: ${COMPOSE_PROJECT_NAME:-aistoryboard-lite}
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  postgres:
+    <<: *restart
+    image: postgres:18-alpine
+    container_name: ${STACK_PREFIX:-ai-lite}-postgres
+    # 2G 机器：把 PG 自身的共享内存/连接数压下来，否则光是 PG 就能吃掉半个机器
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=60
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - wal_compression=on
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # postgres:18 的 PGDATA 是 /var/lib/postgresql/18/docker，卷挂在上一级
+      - pgdata:/var/lib/postgresql
+      # 首启自动建库 + 还原转储 + 账号收敛（恰好两个账号）
+      - ./db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    mem_limit: ${POSTGRES_MEM_LIMIT:-384m}
+    cpus: ${POSTGRES_CPUS:-1.0}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    networks:
+      - default
+
+  redis:
+    <<: *restart
+    image: redis:7-alpine
+    container_name: ${STACK_PREFIX:-ai-lite}-redis
+    # 2G 机器：256mb 上限在 LRU 下会把整机拖进 swap，压到 128mb
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    mem_limit: ${REDIS_MEM_LIMIT:-192m}
+    cpus: ${REDIS_CPUS:-0.5}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - default
+
+  minio:
+    <<: *restart
+    image: quay.io/minio/minio
+    container_name: ${STACK_PREFIX:-ai-lite}-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_ROOT_USER_FILE: ""
+      MINIO_ROOT_PASSWORD_FILE: ""
+      MINIO_ACCESS_KEY_FILE: ""
+      MINIO_SECRET_KEY_FILE: ""
+      MINIO_CONFIG_ENV_FILE: ""
+      MINIO_KMS_SECRET_KEY_FILE: ""
+      # Go GC 更积极一点，小机器上少占内存
+      GOGC: "50"
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      # 宿主目录：可选地把本地已有对象数据（deploy/docker/minio/data）拷进来复用历史图片/视频
+      - ./data/minio:/data
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    mem_limit: ${MINIO_MEM_LIMIT:-384m}
+    cpus: ${MINIO_CPUS:-0.5}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    networks:
+      - default
+
+  # ── 6 个 Java 服务的唯一容器：同一个 JVM，6 个隔离类加载器 ──────────────
+  allinone:
+    <<: *restart
+    image: aistoryboard/allinone:${IMAGE_TAG}
+    container_name: ${STACK_PREFIX:-ai-lite}-allinone
+    env_file:
+      # 默认就是 .env；本地测试栈用 --env-file .env.test 时，.env.test 里的
+      # STACK_ENV_FILE=.env.test 会让容器也拿到同一份配置，避免两套密钥/端口串味。
+      - ${STACK_ENV_FILE:-.env}
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SPRING_PROFILES_ACTIVE: prod
+      # 容器内拓扑：6 个 Java 服务在同一个容器里，互相走回环；
+      # Postgres / Redis / MinIO 仍是独立容器，必须走 compose 服务名（写成 127.0.0.1 会连不上自己）。
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      STORYBOARD_STORAGE_ENDPOINT: http://minio:9000
+      STORYBOARD_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
+      STORYBOARD_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      STORYBOARD_STORAGE_BUCKET: storyboard
+      STORYBOARD_STORAGE_REGION: us-east-1
+      # 文件/资产 URL 签名密钥（原 deploy/stack 里由 compose 显式传入，缺了 asset-service 的
+      # MediaUrlSigner 构造会直接抛异常）
+      FILE_SIGNING_SECRET: ${INTERNAL_SECRET}
+      ASSET_SIGNING_SECRET: ${INTERNAL_SECRET}
+      STORYBOARD_ORPHAN_SCAN_ENABLED: "false"
+      STORYBOARD_TRASH_RETENTION_DAYS: "3"
+      LLM_GATEWAY_BASE_URL: http://127.0.0.1:8083
+      AI_GATEWAY_BASE_URL: http://127.0.0.1:8083
+      STORYBOARD_INTERNAL_URL: http://127.0.0.1:8082
+      ASSET_SERVICE_URL: http://127.0.0.1:8085
+      # ApiGateway 直连路由
+      NACOS_DISCOVERY_ENABLED: "false"
+      BACKEND_URI: http://127.0.0.1:8082
+      ASSET_SERVICE_URI: http://127.0.0.1:8085
+      CANVAS_URI: http://127.0.0.1:9090
+      MOON_AGENT_URI: http://127.0.0.1:8084
+      MORROW_CANVAS_SERVER_URL: http://127.0.0.1:9090
+      # 兜底数据源（5 个服务用 ai_storyboard；llm_gateway 由 config/llm-gateway.json 精确覆盖）
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ai_storyboard
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      UPLOAD_ROOT: /data/uploads
+      # 沙箱（默认关闭；docker compose --profile sandbox 且 AGENT_SANDBOX_ENABLED=true 才生效）
+      AGENT_SANDBOX_ENABLED: ${AGENT_SANDBOX_ENABLED:-false}
+      MOON_SANDBOX_BASE_URL: http://sandbox-runner:8090
+      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET}
+      # 联网检索的唯一后端是 DeepSeek 原生搜索，需要自己的 key；本镜像不带 key，
+      # 所以显式关掉，避免能力上报与实际可用性不一致。
+      AGENTSCOPE_WEB_SEARCH_ENABLED: "false"
+      AGENTSCOPE_NACOS_ENABLED: "false"
+      # ── 2 核 2G 限流：线程/连接池/并发全部压到小机器能承受的量级 ──
+      SERVER_TOMCAT_THREADS_MAX: "20"
+      SERVER_TOMCAT_THREADS_MIN_SPARE: "2"
+      SERVER_TOMCAT_ACCEPT_COUNT: "50"
+      SERVER_TOMCAT_MAX_CONNECTIONS: "200"
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "4"
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "1"
+      DB_POOL_MAX: "4"
+      DB_POOL_MIN: "1"
+      SPRING_TASK_SCHEDULING_POOL_SIZE: "2"
+      AGENT_MAX_PARALLEL_AGENTS: "2"
+      AGENT_GLOBAL_CONCURRENCY: "2"
+      AGENT_PER_USER_CONCURRENCY: "1"
+      AGENT_RECOVERY_MAX_PARALLEL: "2"
+      STORYBOARD_VIDEO_QUEUE_CONCURRENCY: "1"
+      AGENTSCOPE_IMAGE_BATCH_CONCURRENCY: "2"
+      AGENTSCOPE_OTEL_TRACING_ENABLED: "false"
+      VIDEO_MERGE_FFMPEG_PATH: /usr/bin/ffmpeg
+      VIDEO_MERGE_FFPROBE_PATH: /usr/bin/ffprobe
+      # 让各服务从 nginx 的 X-Forwarded-* 推导真实 host/port：
+      # 否则 canvas 会把同源的 POST/PATCH/PUT（浏览器会带 Origin）误判成跨域请求。
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # CORS 白名单：PUBLIC_ORIGIN 是浏览器实际访问地址（.env 里必须按公网 IP/域名改）。
+      # 少了它 → canvas 的写操作返回 403 "Invalid CORS request"（静默、无日志）。
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost},http://localhost,http://127.0.0.1
+      # JVM 内存：单 JVM 里跑 6 个 Spring 上下文，堆 + Metaspace 都要显式给死
+      JAVA_TOOL_OPTIONS: >-
+        -Xms256m -Xmx${JVM_XMX:-768m}
+        -XX:MaxMetaspaceSize=${JVM_METASPACE:-640m}
+        -XX:ReservedCodeCacheSize=${JVM_CODE_CACHE:-128m}
+        -XX:MaxDirectMemorySize=128m
+        -XX:ParallelGCThreads=2 -XX:ConcGCThreads=1 -XX:CICompilerCount=2
+        -XX:+ExitOnOutOfMemoryError
+        -Djava.util.concurrent.ForkJoinPool.common.parallelism=4
+        -Djava.security.egd=file:/dev/./urandom
+        -Duser.timezone=${TZ:-Asia/Shanghai} -Dfile.encoding=UTF-8
+        ${JVM_EXTRA_OPTS:-}
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      # 模型网关（/v1/** 与管理后台 /admin-ui、/admin/**）发布到宿主回环，方便运维配渠道；
+      # 其余 5 个服务不需要对外暴露（入口只有 nginx）。
+      - "127.0.0.1:${GATEWAY_PORT:-8083}:8083"
+    mem_limit: ${ALLINONE_MEM_LIMIT:-1500m}
+    cpus: ${ALLINONE_CPUS:-2.0}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && exec 4<>/dev/tcp/127.0.0.1/8083'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 240s
+    stop_grace_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - default
+
+  # ── 公网入口：静态站 + /api 反代 + 关闭注册 ─────────────────────────────
+  frontend:
+    <<: *restart
+    image: aistoryboard/frontend-lite:${IMAGE_TAG}
+    container_name: ${STACK_PREFIX:-ai-lite}-frontend
+    ports:
+      - "${HTTP_BIND_IP:-0.0.0.0}:${HTTP_PORT:-80}:80"
+    mem_limit: ${FRONTEND_MEM_LIMIT:-64m}
+    cpus: ${FRONTEND_CPUS:-0.5}
+    depends_on:
+      allinone:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - default
+
+  # ── 可选：Agent 沙箱（默认不启动）──────────────────────────────────────
+  # 需要 Agent 的 write_file / run_python_script / 产物文件卡时再开：
+  #   AGENT_SANDBOX_ENABLED=true docker compose --env-file .env --profile sandbox up -d --no-build
+  sandbox-runner:
+    <<: *restart
+    profiles: ["sandbox"]
+    image: moon-sandbox-runner:${SANDBOX_IMAGE_TAG:-lite}
+    container_name: ${STACK_PREFIX:-ai-lite}-sandbox-runner
+    user: "10001:10001"
+    environment:
+      MOON_SANDBOX_WORKSPACE_ROOT: /workspaces
+      MOON_SANDBOX_PYTHON: python3
+      MOON_SANDBOX_DEFAULT_TIMEOUT_SECONDS: "300"
+      MOON_SANDBOX_MAX_TIMEOUT_SECONDS: "600"
+      MOON_SANDBOX_MAX_CONCURRENT_EXECUTIONS: "2"
+      MOON_SANDBOX_IDLE_EXPIRY: 24h
+      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET:?SANDBOX_INTERNAL_SECRET is required}
+      HTTP_PROXY: http://sandbox-egress-proxy:3128
+      HTTPS_PROXY: http://sandbox-egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,::1,sandbox-runner,sandbox-egress-proxy
+      HOME: /tmp
+      TMPDIR: /tmp
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      JAVA_TOOL_OPTIONS: >-
+        -Xmx256m -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError
+        -Djava.io.tmpdir=/tmp -Dfile.encoding=UTF-8 -Duser.timezone=${TZ:-Asia/Shanghai}
+    volumes:
+      - sandbox-workspaces:/workspaces
+    ports:
+      - "127.0.0.1:${SANDBOX_PORT:-8090}:8090"
+    read_only: true
+    tmpfs:
+      - /tmp:size=192m,mode=1777
+    pids_limit: 192
+    mem_limit: ${SANDBOX_MEM_LIMIT:-384m}
+    cpus: ${SANDBOX_CPUS:-1.0}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    stop_grace_period: 30s
+    depends_on:
+      sandbox-egress-proxy:
+        condition: service_healthy
+    networks:
+      - default
+      - sandbox-internal
+      - sandbox-edge
+
+  sandbox-egress-proxy:
+    <<: *restart
+    profiles: ["sandbox"]
+    image: moon-sandbox-egress-proxy:${SANDBOX_IMAGE_TAG:-lite}
+    container_name: ${STACK_PREFIX:-ai-lite}-sandbox-egress-proxy
+    environment:
+      SANDBOX_ALLOWED_DOMAINS: ${SANDBOX_ALLOWED_DOMAINS:?SANDBOX_ALLOWED_DOMAINS is required}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    pids_limit: 64
+    mem_limit: ${SANDBOX_PROXY_MEM_LIMIT:-128m}
+    cpus: ${SANDBOX_PROXY_CPUS:-0.25}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3128"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    stop_grace_period: 10s
+    networks:
+      - default
+      - sandbox-internal
+      - sandbox-egress
+
+volumes:
+  pgdata:
+    name: ${STACK_PREFIX:-ai-lite}-pgdata
+  redis-data:
+    name: ${STACK_PREFIX:-ai-lite}-redis-data
+  uploads:
+    name: ${STACK_PREFIX:-ai-lite}-uploads
+  sandbox-workspaces:
+    name: ${STACK_PREFIX:-ai-lite}-sandbox-workspaces
+
+networks:
+  default:
+    name: ${STACK_PREFIX:-ai-lite}-net
+  sandbox-internal:
+    name: ${STACK_PREFIX:-ai-lite}-sandbox-internal
+    internal: true
+  sandbox-egress:
+    name: ${STACK_PREFIX:-ai-lite}-sandbox-egress
+  sandbox-edge:
+    name: ${STACK_PREFIX:-ai-lite}-sandbox-edge

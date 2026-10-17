@@ -163,7 +163,7 @@ public class AgentScopeWebTools {
             return awaitShared(existing);
         }
         try {
-            Map<String, Object> result = searchUncached(config, query, limit);
+            Map<String, Object> result = searchDeepseek(config, query, limit);
             if (Boolean.TRUE.equals(result.get("ok"))) {
                 storeSearch(config, key, result);
             }
@@ -180,152 +180,10 @@ public class AgentScopeWebTools {
     }
 
     /**
-     * 按配置的后端分发一次搜索。信封形状两个后端完全一致，因此模型侧无需知道后端差异。
-     */
-    private Map<String, Object> searchUncached(AgentScopeProperties.WebSearch config,
-                                               String query,
-                                               int limit) {
-        return config.getProvider() == AgentScopeProperties.WebSearch.Provider.SEARXNG
-                ? searchSearxng(config, query, limit)
-                : searchDeepseek(config, query, limit);
-    }
-
-    /**
-     * 自托管 SearXNG：一次 {@code POST {searxng-url}/search}（form 参数 + {@code format=json}）。
-     * 所有计算在自己机器上，没有第三方 key、没有按次计费。
-     *
-     * <p>注意 SearXNG 默认**关闭** json 输出：实例的 {@code settings.yml} 里
-     * {@code search.formats} 必须含 {@code json}，否则这里会拿到 403 —— 这是自托管最常见的踩坑点，
-     * 所以 403 会被翻译成带配置指引的文案，而不是一句 "HTTP 403"。
-     */
-    private Map<String, Object> searchSearxng(AgentScopeProperties.WebSearch config,
-                                              String query,
-                                              int limit) {
-        try {
-            List<String> pairs = new ArrayList<>();
-            pairs.add("q=" + urlEncode(query));
-            pairs.add("format=json");
-            if (!config.getSearxngLanguage().isBlank()) {
-                pairs.add("language=" + urlEncode(config.getSearxngLanguage()));
-            }
-            String body = String.join("&", pairs);
-
-            HttpRequest request = HttpRequest.newBuilder(URI.create(config.getSearxngEndpoint()))
-                    .timeout(config.getTimeout())
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .header("Accept", "application/json")
-                    .header("User-Agent", USER_AGENT)
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            HttpResponse<String> response = http.send(request, BodyHandlers.ofString());
-            if (response.statusCode() == 403) {
-                return Map.of("ok", false, "error",
-                        "web_search failed: SearXNG refused format=json (HTTP 403). Enable it in the "
-                                + "instance settings.yml: search: formats: [html, json]");
-            }
-            if (response.statusCode() >= 400) {
-                return Map.of("ok", false,
-                        "error", "web_search failed: SearXNG returned HTTP " + response.statusCode());
-            }
-            JsonNode root = JSON.readTree(response.body() == null ? "{}" : response.body());
-            return searxngEnvelope(query, limit, root);
-        } catch (Exception error) {
-            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
-            return Map.of("ok", false, "error", "web_search failed: " + rootMessage(error));
-        }
-    }
-
-    /**
-     * 把 SearXNG 的 JSON 映射成工具结果。
-     *
-     * <p>SearXNG 已经把多引擎结果去重、打分、排序过了，这里只按顺序取前 limit 条；
-     * 每条主结果的摘要字段是 {@code content}（历史别名 {@code snippet}/{@code description} 也兼容），
-     * 日期字段是 {@code publishedDate}。一条主结果都没有时不报失败，而是让模型去细化 query ——
-     * 这与上游行为一致，也不该把"没搜到"当成工具故障。
-     */
-    private Map<String, Object> searxngEnvelope(String query, int limit, JsonNode root) {
-        JsonNode items = root.path("results");
-        if (!items.isArray()) {
-            return Map.of("ok", false, "error",
-                    "web_search failed: SearXNG response has no results array "
-                            + "(check that the instance returns JSON)");
-        }
-        List<Map<String, Object>> results = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-        List<String> suggestions = textArray(root.path("suggestions"));
-        List<String> answers = searxngAnswers(root.path("answers"));
-        for (JsonNode item : items) {
-            String url = item.path("url").asText("");
-            if (url.isBlank() || !seen.add(url)) continue;
-            if (results.size() >= limit) break;
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("title", item.path("title").asText(""));
-            entry.put("url", url);
-            String snippet = firstText(item, "content", "snippet", "description");
-            entry.put("snippet", trim(snippet, 1_200));
-            String publishedAt = item.path("publishedDate").asText("");
-            if (!publishedAt.isBlank()) entry.put("publishedAt", publishedAt);
-            List<String> engines = textArray(item.path("engines"));
-            if (!engines.isEmpty()) entry.put("engines", engines);
-            results.add(entry);
-        }
-
-        Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("ok", true);
-        envelope.put("query", query);
-        envelope.put("provider", "searxng");
-        envelope.put("results", results);
-        envelope.put("count", results.size());
-        envelope.put("truncated", items.size() > results.size());
-        if (!answers.isEmpty()) envelope.put("answer", trim(String.join("\n", answers), 4_000));
-        if (!suggestions.isEmpty()) envelope.put("suggestions", suggestions);
-        envelope.put("note", results.isEmpty()
-                ? "No results. Refine the query or rephrase it and search again."
-                : "Cite the relevant URLs above as markdown links in your answer.");
-        return envelope;
-    }
-
-    /** 数组字段转字符串列表，非数组或空项一律忽略。 */
-    private static List<String> textArray(JsonNode node) {
-        if (!node.isArray()) return List.of();
-        List<String> values = new ArrayList<>();
-        for (JsonNode item : node) {
-            String value = item.isTextual() ? item.asText("") : item.path("text").asText("");
-            if (!value.isBlank()) values.add(value.strip());
-        }
-        return values;
-    }
-
-    /** SearXNG 的 {@code answers} 既可能是字符串数组，也可能是 {@code {answer: ...}} 数组。 */
-    private static List<String> searxngAnswers(JsonNode node) {
-        List<String> values = textArray(node);
-        if (!values.isEmpty()) return values;
-        if (!node.isArray()) return List.of();
-        List<String> answers = new ArrayList<>();
-        for (JsonNode item : node) {
-            String value = item.path("answer").asText("");
-            if (!value.isBlank()) answers.add(value.strip());
-        }
-        return answers;
-    }
-
-    /** 按顺序取第一个非空字段。 */
-    private static String firstText(JsonNode node, String... fields) {
-        for (String field : fields) {
-            String value = node.path(field).asText("");
-            if (!value.isBlank()) return value.strip();
-        }
-        return "";
-    }
-
-    private static String urlEncode(String value) {
-        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    /**
      * DeepSeek 原生搜索：一次 Anthropic 兼容 Messages 调用。请求体与 DSH 的 provider 逐字段对齐
      * （model / max_tokens / 单条 user 文本 / 服务端工具），因此任何拒绝都会带着上游可读文案回到模型。
+     *
+     * <p>这里是唯一的搜索后端：不再有第二个可切换实现，配置里也就没有「选错后端」这种失败模式。
      */
     private Map<String, Object> searchDeepseek(AgentScopeProperties.WebSearch config,
                                                String query,

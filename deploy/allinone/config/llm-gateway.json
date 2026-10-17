@@ -1,0 +1,9 @@
+{
+  "spring": {
+    "datasource": {
+      "url": "jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/llm_gateway",
+      "username": "${POSTGRES_USER}",
+      "password": "${POSTGRES_PASSWORD}"
+    }
+  }
+}

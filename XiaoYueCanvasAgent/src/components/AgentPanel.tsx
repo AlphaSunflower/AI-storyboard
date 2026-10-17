@@ -6,16 +6,27 @@ import {
 import { jobAdapter } from '../services/capabilities';
 import { useAgentStore, type AgentJobState, type ConversationSummary } from '../store/agentStore';
 import { useCanvasStore } from '../store/canvasStore';
-import type { JobAdapter, JobEvent, ProjectDocumentV2 } from '../types';
+import type { JobAdapter, JobEvent, JobSnapshot, ProjectDocumentV2 } from '../types';
 import { createId } from '../utils/id';
 import { executeToolCall, getTool, shouldDryRun } from '../canvas/toolRegistry';
 import type { AgentToolCall, AgentToolResult } from '../types';
 import { materializeJobAsset } from '../canvas/generationRuntime';
 import type { GenerationRecord } from '../canvas/graphContracts';
 import { buildGenerationSources } from '../canvas/generationRecords';
-import { putGenerationQueueItem } from '../services/projectStorage';
+import { recoveryActionForQueueItem, type GenerationQueueItem } from '../canvas/generationQueue';
+import { listGenerationQueueItems, putGenerationQueueItem } from '../services/projectStorage';
 
 const terminalStatuses = new Set<AgentJobState['status']>(['completed', 'failed', 'cancelled']);
+
+/**
+ * 任务快照里的终态集合。
+ *
+ * <p>比 {@link terminalStatuses} 多一个 `interrupted`：它同样是"不会再产生事件"的状态，
+ * 刷新恢复时如果快照已经中断，就必须直接落终态而不是订阅一个永远不会再有事件的流。
+ */
+const terminalJobStatuses = new Set<JobSnapshot['status']>([
+  'completed', 'failed', 'cancelled', 'interrupted',
+]);
 
 const messageTime = (createdAt: number) => new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
@@ -283,6 +294,89 @@ export function AgentPanel({ project, adapter = jobAdapter }: { project: Project
       finishSubscription(event.jobId);
     }
   }, [appendAgentDelta, appendMessage, applyToolCall, finishSubscription, materializeAsset, persistJobQueue, project.id, updateJob, updateJobRecord]);
+
+  /**
+   * 刷新/重开页面后重新接上仍在运行的设计助理任务。
+   *
+   * <p>画布服务的任务事件流本身支持续传（`GET /jobs/{jobId}/events` 认 `Last-Event-ID` /
+   * `afterSeq`，见 canvas 服务 `DesignJobService#subscribeAndRun`），但刷新会丢掉本组件内存里的
+   * `subscriptionsRef`：此前只回放历史文本，于是出现「服务端任务还在跑、面板却一直停在等待执行」。
+   * 这里从 IndexedDB 生成队列里找出未终态的任务，先用真实快照分流，再决定"重新订阅"还是"落终态"。
+   *
+   * <p>与 `App.tsx` 启动时调用的 `recoverGenerationJobs()` 分工：那个负责画布生成记录与节点状态，
+   * 且在没有对应 generationRecord 时会跳过重订阅；这里只负责本面板的任务卡片与消息。
+   * 两条 SSE 订阅各自独立，服务端按 jobId 支持多连接回放。
+   */
+  const recoveredJobsProjectRef = useRef('');
+  useEffect(() => {
+    if (recoveredJobsProjectRef.current === project.id) return;
+    recoveredJobsProjectRef.current = project.id;
+    let cancelled = false;
+    void (async () => {
+      const canvasId = useCanvasStore.getState().canvasId ?? '';
+      let items: GenerationQueueItem[] = [];
+      try {
+        items = await listGenerationQueueItems(project.id, canvasId);
+      } catch {
+        return; // 本地库不可用：保持现状，不阻断面板
+      }
+      for (const item of items) {
+        if (cancelled) return;
+        const jobId = item.jobId;
+        if (!jobId || subscriptionsRef.current.has(jobId)) continue;
+        // 只有"确实在服务端跑着"的任务才重订阅；pending_submit/interrupted 交给生成队列自己的恢复逻辑。
+        if (recoveryActionForQueueItem(item) !== 'resume') continue;
+        const prompt = typeof item.requestSnapshot?.params?.prompt === 'string'
+          ? item.requestSnapshot.params.prompt
+          : '';
+        jobContextRef.current.set(jobId, {
+          prompt,
+          sourceNodeId: item.producerNodeId || undefined,
+          sourceAssetIds: item.requestSnapshot?.sourceAssetIds ?? [],
+          capabilityId: item.requestSnapshot?.capabilityId ?? 'agent.request',
+        });
+        let snapshot: JobSnapshot | undefined;
+        try {
+          snapshot = await adapter.getJob?.(jobId);
+        } catch {
+          // 快照取不到：仍然订阅，让事件流把后续状态推上来（一次查询失败不代表任务不存在）
+        }
+        if (cancelled || subscriptionsRef.current.has(jobId)) continue;
+        if (snapshot && terminalJobStatuses.has(snapshot.status)) {
+          const status: AgentJobState['status'] = snapshot.status === 'completed'
+            ? 'completed'
+            : snapshot.status === 'cancelled' ? 'cancelled' : 'failed';
+          updateJob(project.id, jobId, { status, progress: snapshot.progress ?? 1 });
+          updateJobRecord(jobId, {
+            status,
+            queueStatus: status === 'completed' ? 'terminal' : 'interrupted',
+            progress: snapshot.progress ?? 1,
+            error: snapshot.error,
+            completedAt: Date.now(),
+          });
+          // 队列项也要落终态：否则每次挂载都会重新查一遍这个已经结束的任务。
+          void putGenerationQueueItem({
+            ...item,
+            status: status === 'completed' ? 'terminal' : 'interrupted',
+            error: snapshot.error,
+            updatedAt: Date.now(),
+          }).catch(() => undefined);
+          continue;
+        }
+        putJob(project.id, {
+          id: jobId,
+          prompt,
+          sourceNodeId: item.producerNodeId || undefined,
+          capabilityId: item.requestSnapshot?.capabilityId ?? 'agent.request',
+          status: 'running',
+          progress: snapshot?.progress ?? 0,
+          createdAt: item.createdAt,
+        });
+        subscriptionsRef.current.set(jobId, adapter.subscribe(jobId, handleJobEvent));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [adapter, handleJobEvent, project.id, putJob, updateJob, updateJobRecord]);
 
   const submitPrompt = useCallback(async (prompt: string, sourceNodeId = selectedNodeId ?? undefined) => {
     const text = prompt.trim();

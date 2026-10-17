@@ -105,7 +105,8 @@ class TurnContextMiddlewareConstraintLedgerTest {
     void capabilityBlockIsInjectedWhenReporterIsWired() {
         TurnCapabilityReporter reporter = new TurnCapabilityReporter(
                 name -> false, new AgentScopeProperties(), noModelRoles(),
-                emptyProvider(), emptyProvider(), emptyProvider());
+                emptyProvider(), emptyProvider(), emptyProvider(), emptyProvider(),
+                emptyProvider());
 
         String prompt = promptFor(new ConstraintLedger(CreativeMode.BALANCED,
                 List.of(), List.of(), List.of()), reporter);

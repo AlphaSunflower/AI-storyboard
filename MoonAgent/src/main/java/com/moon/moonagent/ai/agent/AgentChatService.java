@@ -1,6 +1,7 @@
 package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
+import com.moon.moonagent.dto.request.AgentReferenceRequest;
 import com.moon.moonagent.dto.response.MessagePageVO;
 import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.entity.AgentConversation;
@@ -57,6 +58,24 @@ public interface AgentChatService {
      * 会话本身与生成资产保留；仅影响当前会话，其他会话不受影响。
      */
     void clearMessages(String userId, String conversationId);
+
+    /**
+     * 「/清空上下文」：把会话硬删除成「刚建出来的新对话」。
+     *
+     * <p>与 {@link #clearMessages} 的区别是「真删除 + 彻底重置」：
+     * <ul>
+     *   <li>真删该会话全部上下文行（消息、轮次与直播事件、待确认 checkpoint、画布会话与运行、
+     *       文档索引、异步任务、时间线清单、评审、工作流运行、外部动作台账、资产组绑定）；
+     *   <li>清空 AgentScope 运行时上下文与沙箱工作区；
+     *   <li>标题重置为「新对话」，{@code agentscope_session_initialized_at} 置空，
+     *       下一轮从零重建会话。
+     * </ul>
+     * 产出素材（{@code agent_assets}）保留。
+     *
+     * <p>执行期间持有会话锁：避免和进行中的 turn 互相踩踏。
+     */
+    ClearContextResult clearContext(String userId, String conversationId);
+
 
     /**
      * 满意完成：清空会话图片上下文（原图片上下文语义）。
@@ -175,6 +194,19 @@ public interface AgentChatService {
                               List<AgentAttachmentRequest> attachments,
                               SseEmitter emitter);
 
+    /**
+     * Same as above with the per-turn 引用资料清单（正文 {@code @名称} 的机器可读版本）。
+     * 与 attachments 并行透传，覆盖新建轮 / HITL 续流 / 编辑重发三条路径。
+     */
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              List<AgentAttachmentRequest> attachments,
+                              List<AgentReferenceRequest> references,
+                              SseEmitter emitter);
+
     void streamAgentScopeTurn(String userId, String conversationId, String content,
                               List<String> picUrls, List<String> assetIds,
                               String routingHint, String editMessageId,
@@ -182,6 +214,16 @@ public interface AgentChatService {
                               List<String> referenceVideos, List<String> referenceAudios,
                               String clientRequestId,
                               List<AgentAttachmentRequest> attachments,
+                              SseEmitter emitter);
+
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              String clientRequestId,
+                              List<AgentAttachmentRequest> attachments,
+                              List<AgentReferenceRequest> references,
                               SseEmitter emitter);
 
     /**
@@ -195,6 +237,20 @@ public interface AgentChatService {
                               List<String> referenceVideos, List<String> referenceAudios,
                               String clientRequestId,
                               List<AgentAttachmentRequest> attachments,
+                              AgentGenerationPreferences generationPreferences,
+                              SseEmitter emitter);
+
+    /**
+     * Same as above with per-turn 引用资料清单。生产入口（{@code /turns/stream}）走这个重载。
+     */
+    void streamAgentScopeTurn(String userId, String conversationId, String content,
+                              List<String> picUrls, List<String> assetIds,
+                              String routingHint, String editMessageId,
+                              CanvasSessionContext canvasContext,
+                              List<String> referenceVideos, List<String> referenceAudios,
+                              String clientRequestId,
+                              List<AgentAttachmentRequest> attachments,
+                              List<AgentReferenceRequest> references,
                               AgentGenerationPreferences generationPreferences,
                               SseEmitter emitter);
 
@@ -239,4 +295,17 @@ public interface AgentChatService {
     /** Replay persisted AgentScope turn events after the supplied sequence. */
     List<AgentTurnEventEnvelope> getTurnEvents(String userId, String conversationId,
                                                String turnId, int afterSequence);
+
+    /**
+     * 打开某个 turn 的事件续传流：先补 {@code afterSeq} 之后的历史，再持续接收新事件直到终态。
+     *
+     * <p>用于页面刷新 / 新开标签页接上<b>正在运行</b>的 turn（替代"全量重放 + 轮询"）。
+     * 该端点<b>不是执行入口</b>：不重复执行 turn、不分配序号、不因订阅者断开而中断 turn；
+     * turn 已终态或已收尾时，补完历史即关闭连接。
+     *
+     * @param afterSeq 客户端已收到的最大序号，从它之后开始补
+     * @param emitter  订阅连接（由调用方创建，超时策略与 turn 主连接一致）
+     */
+    void openTurnEventStream(String userId, String conversationId, String turnId,
+                             long afterSeq, SseEmitter emitter);
 }

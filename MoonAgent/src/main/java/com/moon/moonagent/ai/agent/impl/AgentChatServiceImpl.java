@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.util.RawValue;
 import com.moon.moonagent.ai.agent.AgentSceneItem;
 import com.moon.moonagent.entity.AgentAsset;
 import com.moon.moonagent.entity.AgentConversation;
@@ -18,6 +17,7 @@ import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.ClearContextResult;
 import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.ConversationLock;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
@@ -28,6 +28,7 @@ import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import com.moon.moonagent.ai.agent.CanvasSessionContext;
 import com.moon.moonagent.ai.agent.AgentTurnResult;
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
+import com.moon.moonagent.dto.request.AgentReferenceRequest;
 import com.moon.moonagent.dto.response.AgentMessageVO;
 import com.moon.moonagent.dto.response.MessagePageVO;
 import com.moon.moonagent.dto.response.MessageSearchHitVO;
@@ -38,6 +39,7 @@ import com.moon.moonagent.ai.agent.turn.AgentScopeEventMapper;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventPublisher;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
+import com.moon.moonagent.ai.agent.turn.AgentTurnFanout;
 import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
@@ -129,6 +131,8 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final ProjectCreativeContextService creativeContext;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService canvasRunService;
+    /** 「/清空上下文」的真删除执行器（会话级上下文行全部 DELETE）。 */
+    private final com.moon.moonagent.ai.agent.context.ConversationContextCleanupService contextCleanupService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /**
      * 专用 executor（I6）：SSE 长连接任务不再占用 ForkJoinPool.commonPool，
@@ -144,6 +148,13 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentTurnEventStore turnEventStore;
+
+    /**
+     * turn 事件扇出中心：把 publisher 已经落库并推送过的事件广播给"刷新后新接入"的 SSE 连接。
+     * 与 publisher 的写入语义完全解耦（不写库、不分配序号），因此不触碰红线 1。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient AgentTurnFanout turnEventFanout;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentScopeEventMapper agentScopeEventMapper;
@@ -385,23 +396,72 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     /**
-     * 清空会话聊天记录（上下文重置）：
-     * 删除该会话全部消息 + 清空会话ID —— 下一条消息会开启全新的会话，
-     * AI 不再记得任何历史。会话本身与生成资产保留；仅影响当前会话，其他会话不受影响。
+     * 清空会话聊天记录（上下文重置）：委托 {@link #clearContext}，
+     * 与「/清空上下文」保持同一口径，避免出现「清空程度不一样」的两条路径。
      */
     public void clearMessages(String userId, String conversationId) {
+        clearContext(userId, conversationId);
+    }
+
+    /**
+     * 「/清空上下文」：把该会话硬删除成「刚建出来的新对话」。
+     *
+     * <p>执行顺序（都在会话锁内，避免与在途 turn 互相踩踏）：
+     * <ol>
+     *   <li>取会话锁：进行中的 turn 先打断，拿不到锁直接 40901（前端提示稍后再试）；
+     *   <li>真删数据库里全部会话上下文行（见 {@link com.moon.moonagent.ai.agent.context.ConversationContextCleanupService}）；
+     *   <li>清空 AgentScope 运行时上下文（{@code resetSession}：就地清上下文 + 删持久化状态 + 清本地缓存）；
+     *   <li>清理沙箱会话与默认工作区目录；
+     *   <li>清内存态（标题调度、打断标志、计数与会话资产），并把标题重置为「新对话」、
+     *       {@code agentscope_session_initialized_at} 置空、退出画布编辑模式。
+     * </ol>
+     *
+     * <p>置空初始化时间戳是刻意的：下一轮 turn 走「从最近消息重建会话」的既有引导路径，
+     * 而此时数据库里已无任何消息，于是重建出一个空上下文——语义上就是新对话。
+     *
+     * <p>保留：会话行本身、产出素材（{@code agent_assets}）、工具调用审计。
+     */
+    @Override
+    public ClearContextResult clearContext(String userId, String conversationId) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
         requireWritable(conversation);
-        transactionTemplate().executeWithoutResult(tx -> {
-            messageMapper.delete(new LambdaQueryWrapper<AgentMessage>()
-                .eq(AgentMessage::getConversationId, conversationId));
-            conversationMapper.updateById(conversation); // 触发 updatedAt fill
-        });
-        if (agentScopeMediaRuntime != null) {
-            agentScopeMediaRuntime.clearSession(userId, conversationId);
+
+        // 会话锁：正在跑的 turn 先协作式打断，再尝试拿锁；拿不到说明旧回合还没收尾。
+        if (conversationLock.isLocked(conversationId)) {
+            orchestratorSupport.interrupt(conversationId);
         }
-        cleanupSandbox(conversationId);
-        log.info("已清空会话聊天记录: conversationId={}, userId={}", conversationId, userId);
+        boolean acquired = conversationLock.tryAcquire(conversationId);
+        if (!acquired) {
+            throw new BusinessException(40901, "当前对话仍在处理中，请稍后再清空上下文");
+        }
+        try {
+            var report = contextCleanupService.deleteConversationContext(conversationId);
+
+            if (agentScopeMediaRuntime != null) {
+                agentScopeMediaRuntime.resetSession(userId, conversationId);
+            }
+            cleanupSandbox(conversationId);
+
+            // 内存态清理：标题调度去重、已暂存的新标题、打断标志、计数与会话资产
+            titleScheduled.remove(conversationId);
+            renamedTitleByConversation.remove(conversationId);
+            orchestratorSupport.cleanupOnDelete(conversationId);
+
+            // 标题回到默认值 + 初始化时间戳置空（下一轮从空历史重建会话）+ 退出画布编辑模式
+            String defaultTitle = "新对话";
+            conversationMapper.update(null, new UpdateWrapper<AgentConversation>()
+                    .eq("id", conversationId)
+                    .set("title", defaultTitle)
+                    .set("canvas_context", null)
+                    .set("agentscope_session_initialized_at", null)
+                    .set("updated_at", OffsetDateTime.now()));
+
+            log.info("已清空会话上下文(真删除): conversationId={}, userId={}, deletedRows={}",
+                    conversationId, userId, report.total());
+            return new ClearContextResult(report.total(), defaultTitle);
+        } finally {
+            conversationLock.release(conversationId);
+        }
     }
 
     /**
@@ -796,7 +856,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                                          String requestedRoutingHint,
                                          List<String> requestedReferenceVideos,
                                          List<String> requestedReferenceAudios,
-                                         List<AgentAttachmentRequest> requestedAttachments) {
+                                         List<AgentAttachmentRequest> requestedAttachments,
+                                         List<AgentReferenceRequest> requestedReferences) {
         List<AgentMessage> messages = listMessages(conversation.getId());
         int targetIndex = -1;
         for (int i = 0; i < messages.size(); i++) {
@@ -832,6 +893,16 @@ public class AgentChatServiceImpl implements AgentChatService {
                 requestedAttachments == null || requestedAttachments.isEmpty()
                         ? attachmentList(previousInput.get("attachments"))
                         : requestedAttachments;
+        // 编辑重发：引用清单的「显式空数组」与「字段缺失」含义不同，不能混为一谈——
+        //   · 缺失（null）：老客户端/工具调用没带这个字段 → 从上一条消息的 messageInput 恢复，
+        //     否则「只改正文不改 @」的重发会把引用丢掉；
+        //   · 显式 []：调用方明确说「改后的正文不再引用任何东西」（用户在编辑框里删掉了标记）
+        //     → 必须尊重，不能恢复，否则被删掉的引用会复活。
+        // attachments 仍保持原来的 null || isEmpty 口径（那是既有行为，不在本次改动范围）。
+        List<AgentReferenceRequest> references =
+                requestedReferences == null
+                        ? referenceList(previousInput.get("references"))
+                        : requestedReferences;
         String routingHint = requestedRoutingHint == null || requestedRoutingHint.isBlank()
                 ? (previousInput.get("routingHint") == null
                         ? null : String.valueOf(previousInput.get("routingHint")))
@@ -849,7 +920,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         transactionTemplate().executeWithoutResult(tx -> {
             target.setContent(content);
             target.setMetadata(messageInputMetadata(
-                    picUrls, assetIds, routingHint, referenceVideos, referenceAudios, attachments));
+                    picUrls, assetIds, routingHint, referenceVideos, referenceAudios, attachments,
+                    references));
             messageMapper.updateById(target);
             if (!laterMessageIds.isEmpty()) {
                 messageMapper.deleteBatchIds(laterMessageIds);
@@ -857,24 +929,27 @@ public class AgentChatServiceImpl implements AgentChatService {
             conversationMapper.updateById(conversation);
         });
         return new EditedTurn(content, picUrls, assetIds, referenceVideos, referenceAudios,
-                routingHint);
+                routingHint, references);
     }
 
     private record EditedTurn(String content, List<String> picUrls, List<String> assetIds,
                               List<String> referenceVideos, List<String> referenceAudios,
-                              String routingHint) {
+                              String routingHint, List<AgentReferenceRequest> references) {
     }
 
     private Map<String, Object> messageInputMetadata(List<String> picUrls, List<String> assetIds,
                                                      String routingHint, List<String> referenceVideos,
                                                      List<String> referenceAudios,
-                                                     List<AgentAttachmentRequest> attachments) {
+                                                     List<AgentAttachmentRequest> attachments,
+                                                     List<AgentReferenceRequest> references) {
         Map<String, Object> input = new LinkedHashMap<>();
         if (picUrls != null && !picUrls.isEmpty()) input.put("picUrls", picUrls);
         if (assetIds != null && !assetIds.isEmpty()) input.put("assetIds", assetIds);
         if (referenceVideos != null && !referenceVideos.isEmpty()) input.put("referenceVideos", referenceVideos);
         if (referenceAudios != null && !referenceAudios.isEmpty()) input.put("referenceAudios", referenceAudios);
         if (attachments != null && !attachments.isEmpty()) input.put("attachments", attachments);
+        // 前端刷新后靠它渲染正文里的 @名称 标记与引用清单（非空才写）
+        if (references != null && !references.isEmpty()) input.put("references", references);
         if (routingHint != null && !routingHint.isBlank()) input.put("routingHint", routingHint);
         return Map.of("messageInput", input);
     }
@@ -883,13 +958,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                                     List<String> picUrls, List<String> assetIds,
                                     String routingHint, List<String> referenceVideos,
                                     List<String> referenceAudios,
-                                    List<AgentAttachmentRequest> attachments) {
+                                    List<AgentAttachmentRequest> attachments,
+                                    List<AgentReferenceRequest> references) {
         AgentMessage userMessage = new AgentMessage();
         userMessage.setConversationId(conversation.getId());
         userMessage.setRole("user");
         userMessage.setContent(content);
         userMessage.setMetadata(messageInputMetadata(picUrls, assetIds, routingHint,
-                referenceVideos, referenceAudios, attachments));
+                referenceVideos, referenceAudios, attachments, references));
         bindUploadedAttachments(conversation, attachments);
         maybeScheduleTitleRename(conversation, content);
         transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(userMessage));
@@ -954,6 +1030,55 @@ public class AgentChatServiceImpl implements AgentChatService {
         Object value = map.get(key);
         return value == null || String.valueOf(value).isBlank()
                 ? fallback : String.valueOf(value);
+    }
+
+    /**
+     * 从消息 metadata 的 {@code messageInput.references} 反序列化引用清单
+     * （刷新 / 编辑重发恢复用）。缺 kind/id/token 的残项直接丢弃：引用只是附加资料，
+     * 不能因为一条脏数据让整轮失败。
+     */
+    private List<AgentReferenceRequest> referenceList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        return list.stream()
+                .filter(Map.class::isInstance)
+                .map(item -> {
+                    Map<?, ?> map = (Map<?, ?>) item;
+                    Object size = map.get("sizeBytes");
+                    Long sizeBytes = size instanceof Number number ? number.longValue() : null;
+                    Object sceneNumber = map.get("sceneNumber");
+                    Integer scene = sceneNumber instanceof Number number ? number.intValue() : null;
+                    return new AgentReferenceRequest(
+                            attachmentString(map, "kind", ""),
+                            attachmentString(map, "id", ""),
+                            attachmentString(map, "token", ""),
+                            attachmentString(map, "name", null),
+                            attachmentString(map, "assetId", null),
+                            attachmentString(map, "mediaId", null),
+                            attachmentString(map, "url", null),
+                            attachmentString(map, "mimeType", null),
+                            sizeBytes,
+                            scene);
+                })
+                .filter(item -> !item.kind().isBlank()
+                        && !item.id().isBlank()
+                        && !item.token().isBlank())
+                .toList();
+    }
+
+    /**
+     * HITL 续流恢复本轮引用清单：从最近一条带 {@code messageInput.references} 的用户消息取
+     * （{@link #listMessages} 为 created_at 正序，因此倒着找）。找不到返回空表 = 本轮没有引用。
+     */
+    private List<AgentReferenceRequest> resumeReferences(String conversationId) {
+        List<AgentMessage> messages = listMessages(conversationId);
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            AgentMessage message = messages.get(i);
+            if (!"user".equals(message.getRole())) continue;
+            List<AgentReferenceRequest> references =
+                    referenceList(messageInput(message).get("references"));
+            if (!references.isEmpty()) return references;
+        }
+        return List.of();
     }
 
 
@@ -1096,7 +1221,43 @@ public class AgentChatServiceImpl implements AgentChatService {
         return saved;
     }
 
-    /** HITL 自定义输入落一条 user 消息（内容=自定义原文，不带「确认：」前缀）。 */
+    /**
+     * 用户打断收口：把本轮已经流出的可见正文落库，末尾补「…」。
+     *
+     * <p>不落库的话这段文字只活在直播流里：前端刷新后消失，后续回合的上下文也读不到它
+     * （AgentScope 自己的会话记忆里虽有部分正文，但产品消息与会话历史是另一条链路）。
+     * 落库内容与前端冻结后的气泡文案一致（正文 + 「…」），因此刷新前后看到的是同一段话。</p>
+     *
+     * @return 落库后的 assistant 消息 id；没有可保留的正文时为 {@code null}
+     */
+    private String persistInterruptedReply(AgentConversation conversation,
+                                           AgentTraceAccumulator trace) {
+        String content = interruptedReplyContent(trace == null ? "" : trace.assistantText());
+        if (content.isBlank()) return null;
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("interrupted", true);
+        metadata.put("truncated", true);
+        try {
+            AgentMessage saved = persistAssistant(conversation, content, metadata);
+            return saved == null ? null : saved.getId();
+        } catch (RuntimeException error) {
+            // 落库失败不能吞掉终态事件：打断收口必须照常把 turn 置为 cancelled
+            log.warn("打断收口落库被截断回复失败: conversationId={}, error={}",
+                    conversation.getId(), error.getMessage());
+            return null;
+        }
+    }
+
+    /** 被截断的回复以「…」收尾；已经以省略号结尾时不重复追加。 */
+    static String interruptedReplyContent(String partial) {
+        String text = partial == null ? "" : partial.stripTrailing();
+        if (text.isBlank()) return "";
+        return text.endsWith("…") || text.endsWith("...") ? text : text + "…";
+    }
+
+    /**
+     * HITL 自定义输入落一条 user 消息（内容=自定义原文，不带「确认：」前缀）。
+     */
     private void persistUserText(AgentConversation conversation, String text) {
         if (text == null || text.isBlank()) return;
         transactionTemplate().executeWithoutResult(tx -> {
@@ -1119,7 +1280,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      SseEmitter emitter) {
         streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                null, List.of(), emitter);
+                (String) null, List.of(), emitter);
     }
 
     @Override
@@ -1130,9 +1291,23 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      List<String> referenceVideos, List<String> referenceAudios,
                                      List<AgentAttachmentRequest> attachments,
                                      SseEmitter emitter) {
+        streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                attachments, List.of(), emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     List<AgentAttachmentRequest> attachments,
+                                     List<AgentReferenceRequest> references,
+                                     SseEmitter emitter) {
         streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                null, attachments, null, true, emitter);
+                null, attachments, references, null, true, emitter);
     }
 
     @Override
@@ -1159,7 +1334,22 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      SseEmitter emitter) {
         streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                clientRequestId, attachments, null, emitter);
+                clientRequestId, attachments, (List<AgentReferenceRequest>) null, emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     String clientRequestId,
+                                     List<AgentAttachmentRequest> attachments,
+                                     List<AgentReferenceRequest> references,
+                                     SseEmitter emitter) {
+        streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                clientRequestId, attachments, references, null, emitter);
     }
 
     @Override
@@ -1172,9 +1362,25 @@ public class AgentChatServiceImpl implements AgentChatService {
                                      List<AgentAttachmentRequest> attachments,
                                      AgentGenerationPreferences generationPreferences,
                                      SseEmitter emitter) {
+        streamAgentScopeTurn(userId, conversationId, content, picUrls, assetIds,
+                routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
+                clientRequestId, attachments, List.of(), generationPreferences, emitter);
+    }
+
+    @Override
+    public void streamAgentScopeTurn(String userId, String conversationId, String content,
+                                     List<String> picUrls, List<String> assetIds,
+                                     String routingHint, String editMessageId,
+                                     CanvasSessionContext canvasContext,
+                                     List<String> referenceVideos, List<String> referenceAudios,
+                                     String clientRequestId,
+                                     List<AgentAttachmentRequest> attachments,
+                                     List<AgentReferenceRequest> references,
+                                     AgentGenerationPreferences generationPreferences,
+                                     SseEmitter emitter) {
         streamAgentScopeTurnInternal(userId, conversationId, content, picUrls, assetIds,
                 routingHint, editMessageId, canvasContext, referenceVideos, referenceAudios,
-                clientRequestId, attachments, generationPreferences, true, emitter);
+                clientRequestId, attachments, references, generationPreferences, true, emitter);
     }
 
     private void streamAgentScopeTurnInternal(String userId, String conversationId, String content,
@@ -1184,6 +1390,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                                               List<String> referenceVideos, List<String> referenceAudios,
                                               String clientRequestId,
                                               List<AgentAttachmentRequest> attachments,
+                                              List<AgentReferenceRequest> references,
                                               AgentGenerationPreferences generationPreferences,
                                               boolean persistUser, SseEmitter emitter) {
         AgentConversation conversation = getOwnedConversation(userId, conversationId);
@@ -1198,7 +1405,6 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
-        orchestratorSupport.clearInterrupt(conversationId);
         configureEmitter(emitter);
 
         CompletableFuture.runAsync(() -> {
@@ -1209,6 +1415,12 @@ public class AgentChatServiceImpl implements AgentChatService {
             // 避免出现第二个 store writer；持久化失败仍由 close() 暴露，不静默跳号。
             AgentTurnEventPublisher orderedPublisher = null;
             try {
+                // 打断标志必须在**拿到会话锁之后**才清除：
+                // 「停止并发送」会在打断请求之后立刻提交新回合，若在请求线程就 clear，
+                // 旧回合还没观察到打断信号就被清掉，会一直跑到自然结束（用户看到「停止没反应」），
+                // 同时新回合因为会话锁仍在占用而被 40901 拒绝。
+                // 持锁即证明上一回合已终态（锁在 runnable 的 finally 里释放），此时 clear 只作用于本回合。
+                orchestratorSupport.clearInterrupt(conversationId);
                 bootstrapAgentScopeSession(userId, conversation);
                 String idempotencyKey = clientRequestId == null || clientRequestId.isBlank()
                         ? java.util.UUID.randomUUID().toString()
@@ -1229,24 +1441,34 @@ public class AgentChatServiceImpl implements AgentChatService {
                         referenceAudios == null ? List.of() : referenceAudios;
                 List<AgentAttachmentRequest> effectiveAttachments =
                         attachments == null ? List.of() : attachments;
+                // references 故意**不**在这里归一成空表：编辑重发路径上「null（字段缺失）」与
+                // 「[]（调用方明确说改后不再引用）」是两种语义，见 prepareEditedTurn 的注释。
+                // 非编辑路径单独把 null 当空表用（下方 persistUserMessage 处显式换算）。
+                List<AgentReferenceRequest> effectiveReferences = references;
                 String effectiveRoutingHint = routingHint;
                 if (editMessageId != null && !editMessageId.isBlank()) {
                     EditedTurn edited = prepareEditedTurn(
                             userId, conversation, editMessageId, content, effectivePicUrls, assetIds,
                             routingHint, effectiveReferenceVideos, effectiveReferenceAudios,
-                            effectiveAttachments);
+                            effectiveAttachments, effectiveReferences);
                     effectiveContent = edited.content();
                     effectivePicUrls = edited.picUrls();
                     effectiveAssetIds = edited.assetIds();
                     effectiveReferenceVideos = edited.referenceVideos();
                     effectiveReferenceAudios = edited.referenceAudios();
+                    effectiveReferences = edited.references();
                     effectiveRoutingHint = edited.routingHint();
                 } else if (persistUser) {
                     persistUserMessage(conversation, content, effectivePicUrls, effectiveAssetIds,
                             effectiveRoutingHint, effectiveReferenceVideos, effectiveReferenceAudios,
-                            effectiveAttachments);
+                            effectiveAttachments,
+                            effectiveReferences == null ? List.of() : effectiveReferences);
                 }
                 AgentTurnResult result = null;
+                // 打断收口要用到本轮已流出的正文；lambda 只能捕获 effectively-final 变量，
+                // 因此用引用持有 trace，catch 分支再取出来。
+                java.util.concurrent.atomic.AtomicReference<AgentTraceAccumulator> traceRef =
+                        new java.util.concurrent.atomic.AtomicReference<>();
                 try {
                     Map<String, Object> started = new LinkedHashMap<>();
                     started.put("turnId", turn.getId());
@@ -1266,6 +1488,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     request.setReferenceVideos(effectiveReferenceVideos);
                     request.setReferenceAudios(effectiveReferenceAudios);
                     request.setAttachments(effectiveAttachments);
+                    request.setReferences(effectiveReferences);
                     request.setGenerationPreferences(generationPreferences);
                     ConstraintLedger ledger = conversation.getProjectId() == null
                             || conversation.getProjectId().isBlank()
@@ -1280,6 +1503,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     final ConstraintLedger turnLedger = ledger;
                     AgentTraceAccumulator trace = new AgentTraceAccumulator(
                             request, resolveAgentContextWindow());
+                    traceRef.set(trace);
                     request.setTrace(trace);
                     orderedPublisher = eventPublisher(
                             turn.getId(), emitter, trace.contextWindowTokens());
@@ -1315,8 +1539,19 @@ public class AgentChatServiceImpl implements AgentChatService {
                                     Map.of("canvasRunId", canvasRun.runId(), "message", "用户停止"));
                         }
                         turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
-                        terminal.publish("turn_failed",
-                                Map.of("code", "40904", "message", "生成已停止"));
+                        // 打断不丢字：已流出的正文连同「…」落库，刷新后仍在、后续回合上下文也读得到
+                        AgentTraceAccumulator interruptedTrace = traceRef.get();
+                        String interruptedText = interruptedReplyContent(
+                                interruptedTrace == null ? "" : interruptedTrace.assistantText());
+                        String interruptedMessageId = persistInterruptedReply(
+                                conversation, interruptedTrace);
+                        Map<String, Object> stopped = new LinkedHashMap<>();
+                        stopped.put("code", "40904");
+                        stopped.put("message", "生成已停止");
+                        stopped.put("interrupted", true);
+                        if (!interruptedText.isBlank()) stopped.put("content", interruptedText);
+                        if (interruptedMessageId != null) stopped.put("messageId", interruptedMessageId);
+                        terminal.publish("turn_failed", stopped);
                     }
                     log.info("AgentScope turn 被用户打断: conversationId={}", conversationId);
                 } catch (Exception e) {
@@ -1374,6 +1609,8 @@ public class AgentChatServiceImpl implements AgentChatService {
             } finally {
                 lease.close();
                 try { emitter.complete(); } catch (Exception ignore) { }
+                // 本轮所有事件都已落库并推送完毕：释放续传订阅者（完成/失败/取消/暂停同一收口）
+                completeTurnFanout(turn == null ? null : turn.getId());
             }
         }, agentExecutor);
     }
@@ -1403,12 +1640,14 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
-        orchestratorSupport.clearInterrupt(conversationId);
         configureEmitter(emitter);
 
         CompletableFuture.runAsync(() -> {
             com.moon.moonagent.entity.AgentTurnEntity turn = null;
             try {
+                // 与 streamAgentScopeTurn 同一原因：打断标志必须在拿到会话锁之后再清，
+                // 否则旧回合观察不到打断、新回合又被会话锁拒绝。
+                orchestratorSupport.clearInterrupt(conversationId);
                 ResumeCommand command = ResumeCommand.of(
                         action, customText, params, assetIds, "", canvasContext);
                 CheckpointClaim claim = checkpointResumeService.claim(
@@ -1451,6 +1690,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 request.setAssetIds(assetIds == null ? List.of() : assetIds);
                 request.setCanvasContext(canvasContext);
                 request.setNativeEventsOnly(true);
+                // HITL 续流：引用清单属于发起本轮的那条用户消息，续流请求体不带该字段，
+                // 从已落库的 messageInput.references 恢复，避免续流轮的 @ 引用凭空消失。
+                request.setReferences(resumeReferences(conversationId));
                 request.setCheckpointAction(claim.checkpoint().getAction());
                 request.setCheckpointPlan(claim.checkpoint().getPlan());
                 AgentTraceAccumulator trace = new AgentTraceAccumulator(
@@ -1482,8 +1724,17 @@ public class AgentChatServiceImpl implements AgentChatService {
                                 ? orderedPublisher
                                 : eventPublisher(turn.getId(), emitter, resolveAgentContextWindow());
                         turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
-                        terminal.publish("turn_failed",
-                                Map.of("code", "40904", "message", "生成已停止"));
+                        // 打断不丢字：与 streamAgentScopeTurn 同一收口
+                        String interruptedText = interruptedReplyContent(
+                                trace == null ? "" : trace.assistantText());
+                        String interruptedMessageId = persistInterruptedReply(conversation, trace);
+                        Map<String, Object> stopped = new LinkedHashMap<>();
+                        stopped.put("code", "40904");
+                        stopped.put("message", "生成已停止");
+                        stopped.put("interrupted", true);
+                        if (!interruptedText.isBlank()) stopped.put("content", interruptedText);
+                        if (interruptedMessageId != null) stopped.put("messageId", interruptedMessageId);
+                        terminal.publish("turn_failed", stopped);
                     }
                 } catch (Exception e) {
                     if (turn != null) {
@@ -1531,6 +1782,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             } finally {
                 lease.close();
                 try { emitter.complete(); } catch (Exception ignore) { }
+                completeTurnFanout(turn == null ? null : turn.getId());
             }
         }, agentExecutor);
     }
@@ -1568,11 +1820,12 @@ public class AgentChatServiceImpl implements AgentChatService {
             emitter.complete();
             return;
         }
-        orchestratorSupport.clearInterrupt(conversationId);
         configureEmitter(emitter);
         CompletableFuture.runAsync(() -> {
             com.moon.moonagent.entity.AgentTurnEntity turn = null;
             try {
+                // 与 streamAgentScopeTurn 同一原因：打断标志必须在拿到会话锁之后再清
+                orchestratorSupport.clearInterrupt(conversationId);
                 turn = turnEventStore.resume(turnId);
                 if (turn == null) throw new BusinessException(40902, "画布轮次不存在或已过期");
                 Map<String, Object> started = new LinkedHashMap<>();
@@ -1625,8 +1878,17 @@ public class AgentChatServiceImpl implements AgentChatService {
                                 ? orderedPublisher
                                 : eventPublisher(turn.getId(), emitter, trace.contextWindowTokens());
                         turnEventStore.finish(turn.getId(), "cancelled", "用户停止", OffsetDateTime.now());
-                        terminal.publish("turn_failed",
-                                Map.of("code", "40904", "message", "生成已停止"));
+                        // 打断不丢字：与 streamAgentScopeTurn 同一收口
+                        String interruptedText = interruptedReplyContent(
+                                trace == null ? "" : trace.assistantText());
+                        String interruptedMessageId = persistInterruptedReply(conversation, trace);
+                        Map<String, Object> stopped = new LinkedHashMap<>();
+                        stopped.put("code", "40904");
+                        stopped.put("message", "生成已停止");
+                        stopped.put("interrupted", true);
+                        if (!interruptedText.isBlank()) stopped.put("content", interruptedText);
+                        if (interruptedMessageId != null) stopped.put("messageId", interruptedMessageId);
+                        terminal.publish("turn_failed", stopped);
                     }
                 } catch (Exception e) {
                     canvasSessionService.markRetryable(session.sessionId(), e.getMessage());
@@ -1678,6 +1940,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                     emitter.complete();
                 } catch (Exception ignore) {
                 }
+                completeTurnFanout(turn == null ? null : turn.getId());
             }
         }, agentExecutor);
     }
@@ -1849,11 +2112,35 @@ public class AgentChatServiceImpl implements AgentChatService {
         return turnEventStore.eventsAfter(turnId, afterSequence);
     }
 
+    /**
+     * 构造一轮的唯一有序事件发布器。
+     *
+     * <p>emitter 回调是"双发"：主连接仍然按原样逐帧推送（行为不变），同时把同一个 envelope
+     * 交给 {@link AgentTurnFanout} 广播给后接入的订阅连接。扇出只读不写，因此不影响
+     * publisher 的批次、序号与持久化语义。
+     */
     private AgentTurnEventPublisher eventPublisher(
             String turnId, SseEmitter emitter, long contextWindowTokens) {
         return new AgentTurnEventPublisher(
                 turnEventStore, agentScopeEventMapper, turnId, contextWindowTokens,
-                envelope -> sendRuntimeEnvelope(emitter, envelope));
+                envelope -> {
+                    sendRuntimeEnvelope(emitter, envelope);
+                    AgentTurnFanout fanout = turnEventFanout;
+                    if (fanout != null) {
+                        fanout.publish(turnId, envelope);
+                    }
+                });
+    }
+
+    /** 终态收尾：关闭该 turn 的全部续传订阅者（完成/失败/取消/暂停都必须调用）。 */
+    private void completeTurnFanout(String turnId) {
+        AgentTurnFanout fanout = turnEventFanout;
+        if (fanout == null || turnId == null || turnId.isBlank()) return;
+        try {
+            fanout.complete(turnId);
+        } catch (RuntimeException error) {
+            log.warn("关闭 turn 事件扇出失败（已忽略）turnId={}: {}", turnId, error.getMessage());
+        }
     }
 
     private <T> T withTraceStreaming(
@@ -1882,6 +2169,9 @@ public class AgentChatServiceImpl implements AgentChatService {
                 trace.recordThinkingDelta(thinking.getDelta());
             } else if (event instanceof ThinkingBlockEndEvent) {
                 trace.recordThinkingEnd();
+            } else if (event instanceof io.agentscope.core.event.TextBlockDeltaEvent text) {
+                // 与前端 TEXT_BLOCK_DELTA 同源：用户打断时用这段文字落库，回复才不会被清空
+                trace.recordAssistantDelta(text.getDelta());
             }
             // 同时累积工具明细草稿：落进终态 metadata 后，刷新/重放才能继续渲染工具调用明细。
             trace.recordToolEvent(event);
@@ -1894,7 +2184,12 @@ public class AgentChatServiceImpl implements AgentChatService {
                     if (run != null) {
                         String eventType = "canvas_create_run".equals(toolName)
                                 ? "canvas_run_started" : "canvas_run_updated";
-                        eventPublisher.publish(eventType, run.toMap());
+                        // 增量补丁只存在于 message metadata，run.toMap() 不含它。直播 payload 必须
+                        // 显式带上，否则前端的 canvasPatchFromMetadata 恒为 undefined，只能整图重载
+                        // （增量上屏退化成"只有刷新后才有效"）。
+                        Map<String, Object> canvasPayload = new LinkedHashMap<>(run.toMap());
+                        canvasPayload.putAll(canvasRunService.canvasPatchPayload(run.runId()));
+                        eventPublisher.publish(eventType, canvasPayload);
                     }
                 }
                 String special = switch (result.getToolCallName() == null
@@ -1936,9 +2231,53 @@ public class AgentChatServiceImpl implements AgentChatService {
     }
 
     private void replayTurnEvents(String turnId, SseEmitter emitter) {
-        for (AgentTurnEventEnvelope envelope : turnEventStore.eventsAfter(turnId, 0)) {
+        replayTurnEvents(turnId, 0L, emitter);
+    }
+
+    /** 从 afterSeq 之后补发历史事件（刷新/续传恢复用；afterSeq=0 即全量重放）。 */
+    private void replayTurnEvents(String turnId, long afterSeq, SseEmitter emitter) {
+        int after = (int) Math.min(Integer.MAX_VALUE, Math.max(0L, afterSeq));
+        for (AgentTurnEventEnvelope envelope : turnEventStore.eventsAfter(turnId, after)) {
             sendRuntimeEnvelope(emitter, envelope);
         }
+    }
+
+    /**
+     * 打开某个 turn 的事件续传流（刷新/新开页面接上正在跑的 turn）。
+     *
+     * <p>本方法<b>不是执行入口</b>：它不写事件、不分配序号、不碰会话锁，也不会因为订阅者断开
+     * 而 cancel turn。未装配扇出中心（老部署 / 单测）时降级为"补完历史即结束"。
+     */
+    @Override
+    public void openTurnEventStream(String userId, String conversationId, String turnId,
+                                    long afterSeq, SseEmitter emitter) {
+        getOwnedConversation(userId, conversationId);
+        if (emitter == null) return;
+        if (turnEventStore == null || turnId == null || turnId.isBlank()) {
+            sendRuntimeError(emitter, "40401", "轮次不存在");
+            try { emitter.complete(); } catch (Exception ignore) { }
+            return;
+        }
+        com.moon.moonagent.entity.AgentTurnEntity turn = turnEventStore.find(turnId);
+        if (turn == null || !conversationId.equals(turn.getConversationId())) {
+            sendRuntimeError(emitter, "40401", "轮次不存在");
+            try { emitter.complete(); } catch (Exception ignore) { }
+            return;
+        }
+        AgentTurnFanout fanout = turnEventFanout;
+        long from = Math.max(0L, afterSeq);
+        if (fanout == null) {
+            replayTurnEvents(turnId, from, emitter);
+            try { emitter.complete(); } catch (Exception ignore) { }
+            return;
+        }
+        // 订阅者断开只注销自己（onCompletion 在正常收尾时也会触发，unregister 对已移除订阅者是空操作）。
+        emitter.onCompletion(() -> fanout.unregister(turnId, emitter));
+        emitter.onTimeout(() -> fanout.unregister(turnId, emitter));
+        emitter.onError(ignored -> fanout.unregister(turnId, emitter));
+        // register 内部判断该 turn 是否仍可续传：已终态/已收尾/补历史即见终态 → 补完历史后关闭连接；
+        // 运行中 → 先补历史再进直播。两种情况下都不会重复执行 turn。
+        fanout.register(turnId, emitter, from);
     }
 
     /**
@@ -2146,12 +2485,9 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     private void sendRuntimeEnvelope(SseEmitter emitter, AgentTurnEventEnvelope envelope) {
         if (envelope.payloadJson() != null && !envelope.payloadJson().isBlank()) {
-            var node = objectMapper.createObjectNode();
-            node.put("turnId", envelope.turnId());
-            node.put("seq", envelope.seq());
-            node.put("type", envelope.type());
-            node.putRawValue("payload", new RawValue(envelope.payloadJson()));
-            sendEventRaw(emitter, envelope.type(), node.toString());
+            // 帧形状与续传扇出共用同一处组装（AgentTurnFanout.frameJson）：改这里必须同步改那边，
+            // 否则主连接与刷新后接入的订阅连接会收到不同形状的 data。
+            sendEventRaw(emitter, envelope.type(), AgentTurnFanout.frameJson(envelope));
             return;
         }
         sendEvent(emitter, envelope.type(), Map.of(

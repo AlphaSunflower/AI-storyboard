@@ -24,7 +24,6 @@ class AgentScopeSubagentsTest {
                         "creative-planner",
                         "prompt-director",
                         "reference-curator",
-                        "visual-critic",
                         "continuity-editor");
         assertThat(declarations)
                 .allSatisfy(declaration ->
@@ -33,9 +32,23 @@ class AgentScopeSubagentsTest {
                                         AgentScopeImageTools.GENERATE_IMAGE,
                                         AgentScopeImageTools.GENERATE_IMAGE_BATCH,
                                         AgentScopeVideoTools.GENERATE_VIDEO));
-        assertThat(declarations).extracting("steps").contains(8, 6, 6, 6, 8);
+        assertThat(declarations).extracting("steps").contains(8, 6, 6, 8);
         assertThat(declarations).extracting("persistSession")
-                .containsExactly(true, false, false, false, true);
+                .containsExactly(true, false, false, true);
+    }
+
+    @Test
+    void generatedMediaCriticIsNotRegisteredAsSubagent() {
+        // 结果诊断子智能体已下线：它会对每次生成结果追加一次付费视觉评审，
+        // 并可能替用户决定重生成，首图往往已经是用户想要的结果。
+        var declarations = AgentScopeSubagents.readOnlyExecutors();
+
+        assertThat(declarations).extracting("name")
+                .doesNotContain("visual-critic");
+        assertThat(declarations)
+                .allSatisfy(declaration ->
+                        assertThat(declaration.getTools())
+                                .doesNotContain(AgentScopeCreativeTools.REVIEW_MEDIA));
     }
 
     @Test

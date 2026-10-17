@@ -19,9 +19,10 @@ import { FileText, Paperclip } from 'lucide-react';
 import {
   PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X,
   Minimize2, Info, PanelRightOpen, Frame, MessagesSquare, ArrowUp,
+  FileUp, Library, Clapperboard,
 } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
-import { assetApi, type Asset, type AssetType } from '../../api/assets';
+import { assetApi, type Asset, type AssetType, type SceneMaterialReferenceInput } from '../../api/assets';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
@@ -41,7 +42,23 @@ import { ChatGenerationPreferences } from './ChatGenerationPreferences';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { SideChatContextChip } from './SideChatContextChip';
 import { ChatStatusBar } from './ChatStatusBar';
-import { ChatSlashMenu, type SlashCommandItem } from './ChatSlashMenu';
+import { ChatSlashMenu, slashItemMatches, type SlashCommandItem } from './ChatSlashMenu';
+import { ChatMentionMenu, type MentionMenuItem } from './ChatMentionMenu';
+import { ComposerMentionHighlight, COMPOSER_TEXT_METRICS } from './ComposerMentionHighlight';
+import {
+  MENTION_LIMITS,
+  activeReferences,
+  conversationReference,
+  insertMention,
+  libraryMediaReference,
+  localFileReference,
+  mentionRanges,
+  referenceQuotaExceeded,
+  removeMentionSegment,
+  resolveMentionQuery,
+  sceneReference,
+} from '../../lib/mentionReferences';
+import type { AgentReference } from '../../api/agent';
 import { ConversationStatusCard } from './ConversationStatusCard';
 import { summarizeConversationStatus } from './contextStatus';
 import { agentChatTokens, type AgentChatTokens } from './agentChatTokens';
@@ -111,6 +128,7 @@ export function ChatComposer({
     removeRefImageUrl,
     addRefImageUrls, setRefImageUrls,
     pendingAttachments, addPendingAttachments, removePendingAttachment,
+    pendingReferences, removePendingReference, setPendingReferences,
     pickedAssetIds, clearPickedAssetIds, setPickedAssetIds, addLocalUserMessage,
     pickedReferenceVideos, pickedReferenceAudios, setPickedReferenceMedia, clearPickedReferenceMedia,
     canvasEditContext,
@@ -239,6 +257,31 @@ export function ChatComposer({
   // 组件卸载：中断活跃识别
   useEffect(() => () => { sttRef.current?.cancel(); }, []);
 
+  /**
+   * 外部请求把一段文字放进输入框（素材详情的「使用提示词」）。
+   *
+   * 按 seq 消费一次：输入框正文是局部 state，只有这里知道用户已经改过什么，
+   * 所以由输入框决定怎么拼——已有内容时换行追加，不覆盖用户正在写的东西。
+   */
+  const composerInjection = useAgentStore((s) => s.composerInjection);
+  const appliedInjectionRef = useRef(0);
+  useEffect(() => {
+    if (!composerInjection || composerInjection.seq === appliedInjectionRef.current) return;
+    appliedInjectionRef.current = composerInjection.seq;
+    setText((current) => {
+      const existing = current.trim();
+      if (!existing) return composerInjection.text;
+      if (existing.includes(composerInjection.text)) return current;
+      return `${existing}\n${composerInjection.text}`;
+    });
+    // 提示词可能很长，输入框要跟着长高；等一帧让 textarea 先量到新内容。
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      const end = inputRef.current?.value.length ?? 0;
+      inputRef.current?.setSelectionRange(end, end);
+    });
+  }, [composerInjection]);
+
   // "+" 菜单状态
   const [menuOpen, setMenuOpen] = useState(false);
   const [sceneModalOpen, setSceneModalOpen] = useState(false);
@@ -253,10 +296,24 @@ export function ChatComposer({
   const [pendingGroup, setPendingGroup] = useState<import('../../api/library').AssetGroupSnapshot | null>(null);
   const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
   const [boundGroups, setBoundGroups] = useState<ConversationAssetGroupBinding[]>([]);
-  // 斜杠命令：状态浮层卡 / 压缩提示（输入框上方）
+  // 斜杠命令：状态浮层卡 / 压缩提示 / 清空上下文进度（输入框上方）
   const [statusOpen, setStatusOpen] = useState(false);
   const [compressNotice, setCompressNotice] = useState('');
   const [compressing, setCompressing] = useState(false);
+  const [clearingContext, setClearingContext] = useState(false);
+  // ── `@` 引用资料 ──
+  /** 光标位置（textarea 的 select 事件驱动）：`@` 命中判定必须基于光标，而不是整串 trim */
+  const [caret, setCaret] = useState(0);
+  /** 被 Esc 关掉的那次 mention 的起点：同一次提及不再自动弹回，换个位置再按 `@` 才重新打开 */
+  const [mentionDismissedStart, setMentionDismissedStart] = useState<number | null>(null);
+  /** 镜像高亮层要跟 textarea 同步的滚动量与滚动条宽度 */
+  const [inputScrollTop, setInputScrollTop] = useState(0);
+  const [inputScrollbarWidth, setInputScrollbarWidth] = useState(0);
+  /** 本次项目库选择来自 `@` 菜单：确认后要把选中项插成 `@名称` 标记（来自 `+` 菜单时保持原行为） */
+  const [libraryMentionMode, setLibraryMentionMode] = useState(false);
+  /** 同理：本次本地文件上传来自 `@` 菜单，上传成功后插入 `@文件名` */
+  const [localMentionMode, setLocalMentionMode] = useState(false);
+  const scenes = useProjectStore((s) => s.scenes);
 
   // 切换会话清空草稿，避免不同会话之间串草稿。
   useEffect(() => {
@@ -388,6 +445,37 @@ export function ChatComposer({
   };
 
   /**
+   * 「/清空上下文」：后端真删除该会话的全部上下文（不是标记删除），
+   * 执行完等同一个全新对话 —— 消息、待确认卡片、画布会话、轮次轨迹都不再存在，
+   * 标题也回到「新对话」。产出素材保留。
+   */
+  const runClearContext = async () => {
+    const store = useAgentStore.getState();
+    if (!store.activeConversationId || clearingContext) return;
+    setText('');
+    setClearingContext(true);
+    try {
+      const result = await useAgentStore.getState().clearContext();
+      if (!result) {
+        // null = 会话正在生成/等待确认：后端会因会话锁拒绝，这里直接给出原因
+        setCompressNotice('当前对话仍在处理中，稍后再清空上下文');
+        notify({ title: '当前对话仍在处理中', description: '请先停止生成或处理完确认卡片', variant: 'info' });
+        return;
+      }
+      const detail = result.deletedRows > 0
+        ? `已删除 ${result.deletedRows} 条上下文记录，现在就是一个新对话`
+        : '已经是新对话，没有需要清理的上下文';
+      setCompressNotice(`上下文已清空：${detail}`);
+      notify({ title: '上下文已清空', description: detail });
+    } catch {
+      setCompressNotice('清空上下文失败，请稍后重试');
+      notify({ title: '清空上下文失败', description: '请稍后重试', variant: 'error' });
+    } finally {
+      setClearingContext(false);
+    }
+  };
+
+  /**
    * 会话级用量聚合。与底部状态栏（ChatStatusBar）共用同一份口径，
    * 不再各自按消息求和 —— 否则「轮数」这类定义会两边漂移。
    */
@@ -416,6 +504,7 @@ export function ChatComposer({
   const slashItems: SlashCommandItem[] = [
     {
       id: 'compress',
+      aliases: ['compact'],
       icon: <Minimize2 size={16} strokeWidth={2} />,
       title: '压缩上下文',
       description: '压缩此对话的上下文，保留最近若干轮',
@@ -424,7 +513,20 @@ export function ChatComposer({
       run: () => { void runCompress(); },
     },
     {
+      // 真删除：后端把该会话的全部上下文 DELETE 掉，执行完等同一个全新对话。
+      // 与「压缩上下文」的区别是这里不保留任何历史，也不只是标记删除。
+      id: 'clear',
+      aliases: ['clear', 'reset'],
+      icon: <Trash2 size={16} strokeWidth={2} />,
+      title: '清空上下文',
+      description: '真删除此对话的全部上下文，清空后等同新对话（产出素材保留）',
+      disabled: !activeConversationId,
+      disabledHint: '先选择或新建一个对话',
+      run: () => { void runClearContext(); },
+    },
+    {
       id: 'status',
+      aliases: ['status'],
       icon: <Info size={16} strokeWidth={2} />,
       title: '状态',
       description: statusSlashDescription,
@@ -432,6 +534,7 @@ export function ChatComposer({
     },
     {
       id: 'side',
+      aliases: ['side', 'branch'],
       icon: <PanelRightOpen size={16} strokeWidth={2} />,
       title: '侧边',
       description: '基于当前对话开启临时分支',
@@ -449,6 +552,7 @@ export function ChatComposer({
     {
       // 画布子站：画布模式默认开启，通过 / 菜单显式进出（退出即回到普通 Moon 对话）
       id: canvasModeCommand?.active ? 'canvas-exit' : 'canvas-enter',
+      aliases: canvasModeCommand?.active ? ['canvas-exit'] : ['canvas', 'canvas-enter'],
       icon: <Frame size={16} strokeWidth={2} />,
       title: canvasModeCommand?.active ? '退出画布模式' : '进入画布模式',
       description: canvasModeCommand?.active
@@ -466,8 +570,134 @@ export function ChatComposer({
 
   // 没有任何匹配项时不进入命令模式（否则 "/随便写的文本" 会被吃掉 Enter 发不出去）
   const slashMenuVisible = slashQuery !== null && !readOnly && !busy && !statusOpen
-    && slashItems.some((item) => item.visible !== false
-      && (item.title.includes(slashQuery) || item.id.includes(slashQuery.toLowerCase())));
+    && slashItems.some((item) => item.visible !== false && slashItemMatches(item, slashQuery));
+
+  // ── `@` 引用资料：命中判定 / 目录 / 菜单项 ──
+  const mentionQuery = useMemo(() => resolveMentionQuery(text, caret), [text, caret]);
+  const mentionDismissed = !!mentionQuery && mentionDismissedStart === mentionQuery.start;
+
+  /**
+   * 插入引用标记：替换用户刚输入的 `@查询词`，光标落到标记之后。
+   *
+   * <p>多选（分镜选择器）时在本地字符串上连续插入——`textRef` 要等下一次渲染才更新，
+   * 循环里逐次调用单条插入会互相覆盖。
+   */
+  const insertReferences = (references: AgentReference[]) => {
+    if (references.length === 0) return;
+    const before = textRef.current;
+    let value = before;
+    let at = inputRef.current?.selectionStart ?? caret;
+    for (const reference of references) {
+      const active = resolveMentionQuery(value, at);
+      const inserted = insertMention(value, at, active ? active.start : at, reference.token);
+      value = inserted.value;
+      at = inserted.caret;
+    }
+    setText(value);
+    // 目录只保留正文里还活着的引用，再并入新插入的：否则用户删掉标记后目录越积越多，
+    // 额度会被"幽灵引用"占满（发送时本来就会过滤，这里让额度显示也一致）。
+    setPendingReferences([...activeReferences(before, pendingReferences), ...references]);
+    setMentionDismissedStart(null);
+    window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(at, at);
+      setCaret(at);
+    });
+  };
+
+  const insertReference = (reference: AgentReference) => insertReferences([reference]);
+
+  const dismissMention = () => setMentionDismissedStart(mentionQuery?.start ?? null);
+
+  const mentionItems: MentionMenuItem[] = useMemo(() => {
+    const sceneQuotaReached = referenceQuotaExceeded(pendingReferences, 'scene');
+    const conversationQuotaReached = referenceQuotaExceeded(pendingReferences, 'conversation');
+    const items: MentionMenuItem[] = [
+      {
+        id: 'source-library',
+        group: 'source',
+        icon: <Library size={16} strokeWidth={2} />,
+        title: '项目库文件',
+        description: '从项目库选择素材：文档会被读取，图片/视频作为参考',
+        keywords: '项目库 素材 资料 文件',
+        disabled: readOnly,
+        run: () => { dismissMention(); setLibraryMentionMode(true); setProjectLibraryOpen(true); },
+      },
+      {
+        id: 'source-local',
+        group: 'source',
+        icon: <FileUp size={16} strokeWidth={2} />,
+        title: '本地文件',
+        description: '从本机选择文件并上传到本对话',
+        keywords: '本地 上传 文件 附件',
+        disabled: readOnly,
+        run: () => { dismissMention(); setLocalMentionMode(true); fileRef.current?.click(); },
+      },
+    ];
+    items.push({
+      id: 'scene-all',
+      group: 'scene',
+      icon: <Clapperboard size={16} strokeWidth={2} />,
+      title: '全部分镜…',
+      description: `打开分镜选择器（当前项目 ${scenes.length} 个）`,
+      keywords: '分镜 全部 列表',
+      disabled: scenes.length === 0 || sceneQuotaReached,
+      disabledHint: scenes.length === 0
+        ? '当前项目还没有分镜'
+        : `分镜引用最多 ${MENTION_LIMITS.scene} 个`,
+      run: () => { dismissMention(); setSceneModalOpen(true); },
+    });
+    scenes.forEach((scene) => {
+      items.push({
+        id: `scene-${scene.id}`,
+        group: 'scene',
+        icon: <Clapperboard size={15} strokeWidth={2} />,
+        title: `分镜 ${scene.sceneNumber}`,
+        description: scene.scriptContent?.slice(0, 48) || '无描述',
+        keywords: `分镜${scene.sceneNumber} ${scene.scriptContent?.slice(0, 24) ?? ''}`,
+        disabled: sceneQuotaReached,
+        disabledHint: `分镜引用最多 ${MENTION_LIMITS.scene} 个`,
+        run: () => insertReference(sceneReference(scene, pendingReferences)),
+      });
+    });
+    conversations
+      .filter((conversation) => conversation.projectId === projectId
+        && conversation.id !== activeConversationId
+        && conversation.status !== 'archived'
+        && conversation.status !== 'temporary')
+      .forEach((conversation) => {
+        items.push({
+          id: `conversation-${conversation.id}`,
+          group: 'conversation',
+          icon: <MessagesSquare size={15} strokeWidth={2} />,
+          title: `对话《${conversation.title || '未命名'}》`,
+          description: [
+            conversation.messageCount ? `${conversation.messageCount} 条` : '',
+            conversation.updatedAt ? new Date(conversation.updatedAt).toLocaleDateString() : '',
+            '引用对话将在下一步（会话摘要）开放',
+          ].filter(Boolean).join(' · '),
+          keywords: `对话 会话 ${conversation.title ?? ''}`,
+          // P1 范围不含会话摘要索引与 read_conversation：暂时置灰，避免"插了标记但模型读不到"
+          disabled: true,
+          disabledHint: conversationQuotaReached
+            ? `对话引用最多 ${MENTION_LIMITS.conversation} 个`
+            : '引用对话将在下一步（会话摘要）开放',
+          run: () => insertReference(conversationReference(conversation, pendingReferences)),
+        });
+      });
+    return items;
+  }, [readOnly, scenes, pendingReferences, conversations, activeConversationId, projectId, mentionQuery]);
+
+  const mentionMenuVisible = !!mentionQuery && !mentionDismissed && !slashMenuVisible
+    && !readOnly && !busy && !statusOpen && mentionItems.length > 0;
+
+  /** 正文里真正存在的引用区间（高亮与发送共用同一口径）。 */
+  const activeRanges = useMemo(
+    () => mentionRanges(text, pendingReferences),
+    [text, pendingReferences],
+  );
 
   const handleSend = () => {
     const rawText = text.trim();
@@ -483,12 +713,21 @@ export function ChatComposer({
     const annotationContent = buildAnnotationContext(pendingAnnotationGroups.flat(), rawText);
     const content = buildSideChatSelectionContext(sideChatSelections, annotationContent);
     if (!content) return;
+    // 引用资料：只发正文里真实存在的标记（用户删掉的 `@名称` 不带走引用），
+    // 与 store 的目录做交集，避免"幽灵引用"。
+    const references = activeReferences(content, pendingReferences);
     if (activeConversationId) {
       useChatAnnotationStore.getState().consumeConversation(activeConversationId);
     }
     setText('');
+    // 已发出的素材由 store 在本轮发送后清空（见 sendMessage）：输入框上方只剩「还没发出去的」，
+    // 避免看起来像旧素材又被带了一遍。
     if (canInterruptSend) {
-      void interruptAndSend(content);
+      // 打断发送：先让智能体停下（已流出的文字以「…」留在气泡里），再把这句话发出去。
+      // 打断没能在超时内生效时消息不会发出，把输入内容还给用户，避免"点了没反应还丢了字"。
+      void interruptAndSend(content).then((delivered) => {
+        if (!delivered) setText((current) => (current.trim() ? current : content));
+      });
       return;
     }
     const groupUrls = pendingGroup?.items.map((item) =>
@@ -499,6 +738,7 @@ export function ChatComposer({
       assetIds: pickedAssetIds,
       assetGroupIds: pendingGroup ? [pendingGroup.groupId] : undefined,
       assetGroupSnapshotIds: pendingGroup ? [pendingGroup.snapshotId] : undefined,
+      references: references.length ? references : undefined,
       routingHint: pendingGroup ? 'intent-video' : undefined,
     });
     setPendingGroup(null);
@@ -520,12 +760,16 @@ export function ChatComposer({
     uploadDrafts.forEach((d) => URL.revokeObjectURL(d.preview));
     setUploadDrafts([]);
     setUploadError('');
+    // 取消上传（没确认）时不要把"下次上传就插标记"留在状态里
+    setLocalMentionMode(false);
   };
 
   const handleUploadConfirm = async () => {
     const drafts = uploadDrafts;
     if (readOnly || drafts.length === 0) return;
     setUploadError('');
+    // `@ → 本地文件` 进来的上传：上传成功后要把 `@文件名` 插进正文，先记住上传前的附件集合做差集
+    const beforeUrls = new Set(useAgentStore.getState().pendingAttachments.map((item) => item.url));
     try {
       await uploadRefImages(
         drafts.map((d) => d.file),
@@ -535,6 +779,19 @@ export function ChatComposer({
       // 失败保留草稿弹窗与文字，用户可直接重试（原 alert 打断且无处看原因）
       setUploadError('文件上传失败，请重试');
       return;
+    }
+    if (localMentionMode) {
+      const uploaded = useAgentStore.getState().pendingAttachments
+        .filter((item) => !beforeUrls.has(item.url) && item.assetId)
+        .map((item) => localFileReference({
+          assetId: item.assetId as string,
+          url: item.url,
+          name: item.name,
+          mimeType: item.mimeType,
+          sizeBytes: item.sizeBytes,
+        }, useAgentStore.getState().pendingReferences));
+      if (uploaded.length > 0) insertReferences(uploaded);
+      setLocalMentionMode(false);
     }
     closeUploadDrafts();
   };
@@ -628,11 +885,39 @@ export function ChatComposer({
     setMenuOpen(!menuOpen);
   };
 
+  /**
+   * 分镜选择器确认：**只把 `@分镜N` 插进正文，不自动发送**（2026-10-16 已定）。
+   *
+   * <p>与 `@` 菜单逐条选中同一条链路：用户可以接着补一句要求，再自己按发送。
+   * 此前这里是「勾完立刻发一条『请查看 分镜3』」，用户没法再补话。
+   */
   const handleSceneConfirm = (selected: SceneResponse[]) => {
     if (readOnly) return;
-    const sceneRefs = selected.map((scene) => `分镜${scene.sceneNumber}`).join('、');
-    sendMessage(`请查看 ${sceneRefs}`, { routingHint: 'intent-storyboard' });
     setSceneModalOpen(false);
+    if (selected.length === 0) return;
+    insertReferences(selected.map((scene) => sceneReference(scene, pendingReferences)));
+  };
+
+  /**
+   * 项目库选择结果 → 引用资料。
+   *
+   * <p>一律用 `library_file`（带 `mediaId`）：项目库媒体不在会话资产里，`/api/library/media/**`
+   * 目前读不到正文（`AgentDocumentService` 只认 `/api/files/files/` 的会话资产），
+   * 后端会按 `mediaId` 做归属校验并转存成会话内 reference 资产，之后才由文档链路提供摘要与
+   * `read_document` 读取；图片/视频/音频同时作为本轮参考媒体（既有附件通路）。
+   */
+  const referenceFromLibrary = (reference: SceneMaterialReferenceInput): AgentReference => {
+    const name = reference.fileName || `${reference.type} 素材`;
+    const assetId = (reference.sourceType === 'library_asset' ? reference.sourceId : '')
+      || reference.mediaId || reference.url;
+    return libraryMediaReference({
+      assetId,
+      mediaId: reference.mediaId,
+      url: reference.url,
+      name,
+      mimeType: reference.mimeType,
+      sizeBytes: reference.sizeBytes,
+    }, pendingReferences);
   };
 
   // ──「上传资产」：从已有资产库选择参考图（assetApi.list 拉取 → 选中资产的图片作为参考图） ──
@@ -772,7 +1057,7 @@ export function ChatComposer({
   );
   /** 输入框上方的附加行：收缩态整块收起，所以只有真的渲染了内容时才占位 */
   const hasComposerExtras = !!(
-    compressing || compressNotice
+    compressing || clearingContext || compressNotice
     || (!readOnly && hasPendingAnnotations) || (!readOnly && hasSideChatSelections)
     || hasAttachmentRow || pendingPicUrls.length > 0 || canvasBinding || canvasExitPending || readOnly
   );
@@ -781,7 +1066,7 @@ export function ChatComposer({
     // 让用户看得见落点。forceExpanded 由页面按「指针是否离开侧边栏」给出。
     && !forceExpanded
     && !menuOpen && !removeModalOpen && !sceneModalOpen && !projectLibraryOpen && !canvasMediaOpen
-    && !slashMenuVisible && !statusOpen;
+    && !slashMenuVisible && !mentionMenuVisible && !statusOpen;
 
   useEffect(() => {
     onCollapsedChange?.(collapsed);
@@ -824,6 +1109,14 @@ export function ChatComposer({
       boxSizing: 'border-box', position: 'relative',
     }}>
       {/* 两个向上弹出的浮层放在附加行之外：附加行收缩时要裁剪，浮层不能被裁 */}
+      {mentionMenuVisible && (
+        <ChatMentionMenu
+          items={mentionItems}
+          query={mentionQuery?.query ?? ''}
+          onClose={dismissMention}
+          anchorRef={cardRef}
+        />
+      )}
       {slashMenuVisible && (
         <ChatSlashMenu
           items={slashItems}
@@ -844,6 +1137,9 @@ export function ChatComposer({
       <div className="chat-composer-extra__inner">
       {compressing && (
         <div style={{ fontSize: 12, color: DS.textSecondary }}>正在压缩上下文…</div>
+      )}
+      {clearingContext && (
+        <div style={{ fontSize: 12, color: DS.textSecondary }}>正在清空上下文…</div>
       )}
       {compressNotice && (
         <div style={{
@@ -1102,32 +1398,101 @@ export function ChatComposer({
       </div>
       </div>
       )}
-      <textarea
-        ref={inputRef}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onKeyDown={(e) => {
-          // 斜杠命令模式下：面板自己消费 ↑↓/Enter/Esc，这里只阻止 Enter 换行
-          if (slashMenuVisible) {
-            if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
-            return;
-          }
-          // I5：中文输入法组合期（选词中）按下 Enter 不发送
-          if (e.nativeEvent.isComposing) return;
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-        }}
-        placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
-        disabled={readOnly || (busy && !canInterruptSend)}
-        rows={collapsed ? 1 : 2}
+      {/*
+        输入框 + `@` 标记镜像高亮层（方案 §2.3 已定的方案 a）。
+        只在正文里真的存在引用标记时才挂载镜像层：没有标记时一切照旧，零对齐风险。
+        收缩态下整块要能跟着 flex 布局伸缩，所以外层承担 flex 属性，textarea 填满它。
+      */}
+      <div
+        className="chat-composer-input"
         style={{
-          border: 'none', outline: 'none', resize: 'none', background: 'transparent',
-          fontSize: 16, lineHeight: 1.6, color: DS.ink, fontFamily: 'inherit',
-          boxSizing: 'border-box', overflowY: 'hidden', scrollbarWidth: 'thin',
-          ...(collapsed ? { flex: '1 1 auto', minWidth: 0, minHeight: 24 } : {}),
+          position: 'relative',
+          width: collapsed ? undefined : '100%',
+          minWidth: 0,
+          ...(collapsed ? { flex: '1 1 auto' } : {}),
         }}
-      />
+      >
+        {activeRanges.length > 0 && (
+          <ComposerMentionHighlight
+            value={text}
+            ranges={activeRanges}
+            scrollTop={inputScrollTop}
+            scrollbarWidth={inputScrollbarWidth}
+          />
+        )}
+        <textarea
+          ref={inputRef}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setCaret(e.target.selectionStart ?? 0);
+          }}
+          onSelect={() => {
+            if (inputRef.current) setCaret(inputRef.current.selectionStart ?? 0);
+          }}
+          onScroll={(e) => {
+            const input = e.currentTarget;
+            setInputScrollTop(input.scrollTop);
+            setInputScrollbarWidth(input.offsetWidth - input.clientWidth);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={(e) => {
+            // `@` 引用面板模式下：面板自己消费 ↑↓/Enter/Tab/Esc，这里只阻止 Enter 换行
+            if (mentionMenuVisible) {
+              if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
+              return;
+            }
+            // 斜杠命令模式下：面板自己消费 ↑↓/Enter/Esc，这里只阻止 Enter 换行
+            if (slashMenuVisible) {
+              if (e.key === 'Enter' && !e.shiftKey) e.preventDefault();
+              return;
+            }
+            // I5：中文输入法组合期（选词中）按下 Enter 不发送
+            if (e.nativeEvent.isComposing) return;
+            // 引用标记是原子的：退格一次删掉整个 `@名称`（含其后空格），不留 `@分镜` 这种半截标记
+            if (e.key === 'Backspace' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+              const input = e.currentTarget;
+              if (input.selectionStart === input.selectionEnd) {
+                const removed = removeMentionSegment(
+                  input.value, input.selectionStart ?? 0, pendingReferences,
+                );
+                if (removed) {
+                  e.preventDefault();
+                  setText(removed.value);
+                  removePendingReference(removed.reference.kind, removed.reference.id);
+                  window.requestAnimationFrame(() => {
+                    const element = inputRef.current;
+                    if (!element) return;
+                    element.setSelectionRange(removed.caret, removed.caret);
+                    setCaret(removed.caret);
+                  });
+                  return;
+                }
+              }
+            }
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+          }}
+          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
+          disabled={readOnly || (busy && !canInterruptSend)}
+          rows={collapsed ? 1 : 2}
+          style={{
+            ...COMPOSER_TEXT_METRICS,
+            position: 'relative',
+            display: 'block',
+            width: '100%',
+            outline: 'none',
+            resize: 'none',
+            background: 'transparent',
+            // 文字交给镜像层渲染（它有品牌色标记），这里只保留光标颜色
+            color: activeRanges.length > 0 ? 'transparent' : DS.ink,
+            caretColor: DS.ink,
+            overflowY: 'hidden',
+            scrollbarWidth: 'thin',
+            ...(collapsed ? { flex: '1 1 auto', minWidth: 0, minHeight: 24 } : {}),
+          }}
+        />
+      </div>
       <div
         style={{
           display: 'flex',
@@ -1274,7 +1639,7 @@ export function ChatComposer({
           selectedIds: boundGroups.map((binding) => binding.groupId),
           onConfirm: handleAssetGroupConfirm,
         }}
-        onClose={() => setProjectLibraryOpen(false)}
+        onClose={() => { setProjectLibraryOpen(false); setLibraryMentionMode(false); }}
         onConfirm={async (references) => {
           addPendingAttachments(references.map((reference) => ({
             url: reference.url,
@@ -1286,6 +1651,12 @@ export function ChatComposer({
             assetId: reference.sourceType === 'library_asset' ? reference.sourceId : undefined,
             mediaId: reference.mediaId,
           })));
+          // 从 `@` 菜单进来的选择：同时插成 `@名称` 标记（从 `+` 菜单进来时保持"只挂素材"的老行为）。
+          // 文档类引用由后端转存成会话资产后才能被 read_document 读到（方案 §4.2）。
+          if (libraryMentionMode) {
+            insertReferences(references.map(referenceFromLibrary));
+            setLibraryMentionMode(false);
+          }
         }}
       />
 

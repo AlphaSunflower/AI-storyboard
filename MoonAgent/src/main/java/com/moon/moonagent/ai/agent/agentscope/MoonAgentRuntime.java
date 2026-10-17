@@ -138,6 +138,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final AgentScopeCheckpointService checkpoints;
     private final AgentRuntimeSupport support;
     private final AgentScopeModelProvider modelProvider;
+    /** 默认模型的「每轮钉住、闲置才换」选择器（动态默认模型关闭时不生效） */
+    private final TurnModelPin turnModelPin;
     private final AgentScopeAssetGroupService assetGroups;
     private final ExternalActionLedgerService externalActions;
     private final AgentScopeAsyncTaskService asyncTasks;
@@ -152,6 +154,10 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final ProjectCreativeContextService creativeContext;
     private final ConstraintExtractionService constraintExtraction;
     private final AgentDocumentService documentService;
+    private final com.moon.moonagent.ai.agent.scene.SceneReferenceService sceneReferenceService;
+    /** 项目库文件 → 会话资产转存（`@项目库文档` 读得到正文的前提）。 */
+    private final com.moon.moonagent.ai.agent.document.LibraryReferenceAssetService
+            libraryReferenceAssetService;
     private final CreativeModelRouter modelRouter;
     private final TurnCapabilityReporter turnCapabilityReporter;
     private final AgentConcurrencyGuard concurrencyGuard;
@@ -210,11 +216,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                     new ArrayList<>(List.of(
                             new TurnContextMiddleware(
                                     workflowService, creativeContext, constraintExtraction,
-                                    documentService, turnCapabilityReporter),
+                                    documentService, turnCapabilityReporter, sceneReferenceService,
+                                    libraryReferenceAssetService),
                             toolCallContentMiddleware != null
                                     ? toolCallContentMiddleware
                                     : new ToolCallContentMiddleware(),
                             new AgentTraceBridgeMiddleware()));
+            // 速度两件事：① 每步耗时/token 埋点（只打日志）；② 画布结构性步骤压思考（只改模型选项）。
+            // 都放在最外层：埋点要覆盖整次模型调用，压思考要作用在真正发出去的那次调用上。
+            middlewares.add(new ModelStepTimingMiddleware());
+            middlewares.add(new CanvasStructuralThinkingMiddleware());
             if (frameworkToolAuditMiddleware != null) {
                 middlewares.add(frameworkToolAuditMiddleware);
             }
@@ -286,22 +297,43 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 builder.messageBus(messageBus.messageBus());
             }
             if (properties.isCompactionEnabled()) {
+                // 压缩阈值 = 模型真实窗口的一半（可配置比例），不再用固定 48k / 40 条：
+                // 固定阈值对"工具结果巨大的画布编排"会被反复误触发，压缩本身又是一次模型调用，
+                // 且会把刚建的 nodeId 摘要掉，逼模型重读整图 → token 再涨 → 再压缩（自激）。
+                int modelWindowTokens = model.getContextWindowSize() > 0
+                        ? model.getContextWindowSize()
+                        : AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
+                CompactionPolicy.Thresholds thresholds = CompactionPolicy.resolve(
+                        modelWindowTokens,
+                        properties.getCompactionTriggerRatio(),
+                        properties.getCompactionTriggerTokens(),
+                        properties.getCompactionTriggerTokensFloor(),
+                        properties.getCompactionTriggerMessages());
                 builder.compaction(CompactionConfig.builder()
-                        .triggerMessages(properties.getCompactionTriggerMessages())
-                        .triggerTokens(properties.getCompactionTriggerTokens())
+                        .triggerMessages(thresholds.triggerMessages())
+                        .triggerTokens(thresholds.triggerTokens())
                         .keepMessages(properties.getCompactionKeepMessages())
                         .keepTokens(properties.getCompactionKeepTokens())
                         .flushBeforeCompact(false)
                         .offloadBeforeCompact(false)
                         .summaryPrompt(COMPACTION_PROMPT)
                         .build());
+                log.info("[AgentScope] 压缩阈值 模型={} 窗口={} ratio={} floor={} → "
+                                + "triggerTokens={} triggerMessages={}{}",
+                        model.getModelName(),
+                        modelWindowTokens,
+                        properties.getCompactionTriggerRatio(),
+                        properties.getCompactionTriggerTokensFloor(),
+                        thresholds.triggerTokens(),
+                        thresholds.triggerMessages(),
+                        thresholds.messagesConditionDisabled() ? "（消息数条件已禁用）" : "");
             } else {
                 builder.disableCompaction();
+                log.info("[AgentScope] 上下文压缩已禁用（ai.agent.agentscope.compaction-enabled=false）");
             }
             if (properties.isSubagentsEnabled()) {
                 builder.subagents(AgentScopeSubagents.readOnlyExecutors(
                         modelRouter.resolveOrNull("creative.prompt"),
-                        modelRouter.resolveOrNull("creative.critic"),
                         modelRouter.resolveOrNull("vision.qa")));
             } else {
                 builder.disableSubagents();
@@ -310,6 +342,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 builder.asyncToolTimeout(properties.getAsyncToolTimeout());
             }
             agent = builder.build();
+            // HarnessAgent.build() 对传入的 Toolkit 做构建期深拷贝（Toolkit.copy() 复制注册表），
+            // agent 之后只认自己那份。画布工具是 MCP 连上后的延迟注册，必须绑定到 agent 的真实
+            // Toolkit，否则 refreshCanvasTools() 写进的是原始对象，模型看到的永远是空工具组
+            // （2026-10-15 实测：能力块宣称画布可用，每个 canvas_graph_* 调用都 Tool not found）。
+            toolkitFactory.bindAgentToolkit(agent.getToolkit());
             log.info("[AgentScope] Harness media runtime ready model={}", model.getModelName());
         } catch (Exception e) {
             throw new IllegalStateException("AgentScope media runtime initialization failed", e);
@@ -659,6 +696,20 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                    AgentTraceAccumulator trace, List<Msg> messages,
                                    String checkpointId, Consumer<AgentEvent> observer,
                                    Set<String> preApprovedTools) {
+        // 回合内钉住模型：只有「从闲置开始的第一轮」会重新解析网关默认模型；
+        // 在途回合（含并发会话）一律沿用已钉住的值，切默认模型绝不打断正在进行的发送。
+        boolean counted = turnModelPin.beginTurn();
+        try {
+            return streamTurn(conversation, request, trace, messages, checkpointId, observer, preApprovedTools);
+        } finally {
+            if (counted) turnModelPin.endTurn();
+        }
+    }
+
+    private AgentTurnResult streamTurn(AgentConversation conversation, OrchestrationRequest request,
+                                       AgentTraceAccumulator trace, List<Msg> messages,
+                                       String checkpointId, Consumer<AgentEvent> observer,
+                                       Set<String> preApprovedTools) {
         boolean ignoreGenerationPlan = request != null
                 && request.getGenerationPreferences().ignoreGenerationPlan();
         applyPermissionContext(conversation, preApprovedTools, ignoreGenerationPlan);
@@ -1085,6 +1136,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "agent_send",
                 "list_storyboard_draft",
                 "list_project_storyboard",
+                "read_project_scene",
                 "resolve_agent_workflow",
                 "canvas_get_context",
                 "canvas_get_browser_context",
@@ -1120,6 +1172,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_graph_create_nodes",
                 "canvas_graph_update_node",
                 "canvas_graph_create_edge",
+                "canvas_graph_create_edges",
+                "canvas_graph_apply_plan",
                 "canvas_graph_import_media",
                 "canvas_graph_import_media_batch",
                 "canvas_graph_create_result_slots",
@@ -1138,8 +1192,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_image_crop",
                 "canvas_image_split",
                 "canvas_image_adjust",
-                "canvas_execute_node",
-                "canvas_execute_graph",
+                // canvas_execute_node / canvas_execute_graph 不在这里：画布执行会真的花钱、花时间
+                // （每张图 30–60s、每段视频 2–5min），必须先经用户确认——见下面的 ASK 清单。
+                // canvas_cancel_execution 仍直接放行：用户随时要能停。
                 "canvas_cancel_execution",
                 "reorder_storyboard_draft",
                 "save_timeline_manifest",
@@ -1165,8 +1220,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "delete_storyboard_draft_shot",
                 "delete_project_storyboard_shot",
                 "clear_project_storyboard",
+                // 注意：这两个是**已退役的浏览器画布工具名**，当前工具面里并不存在（画布只有
+                // canvas_graph_* 的读/写/整图提交，没有任何删除接口）。保留在 ASK 清单里的唯一
+                // 目的是"将来若重新引入画布删除能力，必须走确认"，不是"现在可以删"。不要据此
+                // 认为智能体有删除能力，也不要把它们当成可用工具名写进技能或提示词。
                 "canvas_delete_nodes",
                 "canvas_delete_edges",
+                // 画布执行 = 真实花费与长等待（图 30–60s / 视频 2–5min），必须让用户先确认；
+                // 与 canvas-run 技能声明的「确认执行」以及本文件顶部「Canvas 执行进入 ASK/HITL」
+                // 保持一致。放进 ALLOW 会让智能体在同一轮把整轮生成跑掉，用户没有插话机会。
+                "canvas_execute_node",
+                "canvas_execute_graph",
                 "merge_storyboard_videos",
                 "write_file",
                 "run_python_script",
@@ -1308,6 +1372,33 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             log.warn("[AgentScope] clear session failed conversationId={}: {}",
                     conversationId, e.getMessage());
         }
+    }
+
+    /**
+     * 「/清空上下文」专用：把该会话的 AgentScope 运行时上下文退回全新状态。
+     *
+     * <p>两步都做，谁先谁后都不留残渣：
+     * <ol>
+     *   <li>{@code clearContext(userId, conversationId)} 就地清掉模型可见的对话消息与压缩摘要
+     *       （保留权限配置、工具状态与 Plan Mode 状态——这些是会话配置，不是对话记忆）；
+     *   <li>{@code clearSession} 释放本地缓存并删除 state store 里的持久化状态。
+     * </ol>
+     *
+     * <p>为什么不只删 store：持久化状态被删后，本地 {@code stateCache} 里的旧实例仍会被
+     * {@code getAgentState} 直接返回（computeIfAbsent 命中缓存），下一轮就会带着旧上下文继续推理。
+     * 两步都做才能保证下一轮从一个空上下文开始。
+     *
+     * <p>调用方必须确保该会话当前没有在途 turn（会话锁内调用）。
+     */
+    public void resetSession(String userId, String conversationId) {
+        if (!enabled() || conversationId == null || conversationId.isBlank()) return;
+        try {
+            agent.getDelegate().clearContext(userId, conversationId);
+        } catch (Exception e) {
+            log.warn("[AgentScope] clear context failed conversationId={}: {}",
+                    conversationId, e.getMessage());
+        }
+        clearSession(userId, conversationId);
     }
 
     /**

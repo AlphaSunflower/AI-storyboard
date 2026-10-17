@@ -11,8 +11,11 @@ import {
   isCanvasModeControlMessage,
   isCanvasGraphUpdatedMessage,
   parseCanvasEmbeddedMode,
+  planCanvasGraphUpdates,
   postCanvasModeMessage,
   type CanvasEmbeddedMode,
+  type CanvasGraphPatch,
+  type CanvasGraphUpdatedMessage,
 } from './canvas/canvasEmbeddedMode';
 import { MoonChatWindow } from './components/MoonChatWindow';
 import { CanvasWorkspace } from './components/CanvasWorkspace';
@@ -20,19 +23,24 @@ import { HomePage } from './components/HomePage';
 import { InspectorPanel } from './components/InspectorPanel';
 import { ProjectHome } from './components/ProjectHome';
 import { exportProjectPackage, importProjectPackage } from './services/projectPackage';
-import { cleanupGenerationQueue, createCanvas, createProject, deleteCanvas, deleteProject, getAssetMetadatas, listCanvases, listProjects, loadCanvas, loadProject, projectAssetIds, renameProject as patchProjectTitle, saveCanvas, saveProject, scheduleAssetGarbageCollection } from './services/projectStorage';
+import { cleanupGenerationQueue, createCanvas, createProject, deleteCanvas, deleteProject, getAssetMetadatas, getCanvasRevision, isRevisionConflict, listCanvases, listProjects, loadCanvas, loadProject, projectAssetIds, renameProject as patchProjectTitle, saveCanvas, saveProject, scheduleAssetGarbageCollection } from './services/projectStorage';
 import { useCanvasStore } from './store/canvasStore';
 import { useMediaStore } from './store/mediaStore';
 import type { CanvasDocumentV1, CanvasSummary, ProjectDocumentV2, ProjectSummary, SaveStatus } from './types';
 import { LoginScreen } from './components/LoginScreen';
 import { bootstrapJobAuth, clearToken, getJobToken, setJobToken, tokenExpired } from './services/jobAuth';
 import { recoverGenerationJobs } from './canvas/generationRuntime';
+import { decideLiveRefresh } from './canvas/liveRefresh';
 import { recoverGraphExecutions } from './canvas/graphExecutionService';
 import { usePresence } from './hooks/usePresence';
 import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
 
 type SideView = 'agent' | 'inspector';
 type View = 'home' | 'projectHome' | 'canvas';
+/** 一个防抖窗口里最多合并多少条图更新；超过就丢掉补丁、退回一次全量重载。 */
+const MAX_PENDING_GRAPH_UPDATES = 20;
+/** 保存失败提示的最小间隔：智能体持续写入时不刷屏。 */
+const SAVE_ERROR_NOTICE_INTERVAL_MS = 8000;
 // 视图层级：层级变大＝往里走（推入），变小＝往外退（退回）。动画方向按这个算。
 const VIEW_RANK: Record<View, number> = { home: 0, projectHome: 1, canvas: 2 };
 
@@ -83,6 +91,8 @@ export default function App() {
   // 聊天页「去画布编辑」带过来的媒体参数：只在本窗口内透传给内嵌 Moon 对话，用完即从 hash 抹掉
   const [chatMediaParam, setChatMediaParam] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  /** 本地存在未落库的改动（保存失败后为 true）：4s 轮询在此期间让路，不用服务端图覆盖本地编辑。 */
+  const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const canvasRef = useRef<CanvasDocumentV1 | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
@@ -90,6 +100,14 @@ export default function App() {
   const pendingSave = useRef<CanvasDocumentV1 | null>(null);
   const saveInFlight = useRef<Promise<CanvasDocumentV1 | null> | null>(null);
   const graphUpdateTimer = useRef<number | null>(null);
+  /** 一个防抖窗口内累积的图更新（可能带增量补丁），按到达顺序应用。 */
+  const pendingGraphUpdates = useRef<CanvasGraphUpdatedMessage[]>([]);
+  const lastSaveErrorNotice = useRef<{ message: string; at: number } | null>(null);
+  /**
+   * 保存失败后连续重试的次数：轮询每 4s 重试一次；超过 `MAX_SAVE_RETRIES` 就放弃保护本地改动、
+   * 重载远端并提示——否则智能体持续写入时会永远在"重试保存"里打转，画布照样看不到新数据。
+   */
+  const saveRetryCount = useRef(0);
   const maintenanceRunRef = useRef<string | null>(null);
   const revision = useCanvasStore((state) => state.revision);
   const loadProjectGraph = useCanvasStore((state) => state.loadProjectGraph);
@@ -100,6 +118,25 @@ export default function App() {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 2200);
   }, []);
+
+  /**
+   * 保存失败的可见提示（原来是 `.catch(() => undefined)` 静默吞掉）。
+   *
+   * <p>节流：智能体持续写入时同一原因最多每 8s 提示一次，避免提示条刷屏。
+   *
+   * <p>位置说明：必须定义在 4s 轮询 effect **之前**——轮询的依赖数组在渲染期求值，
+   * 定义在之后会触发 `Cannot access 'notifySaveFailure' before initialization`。
+   */
+  const notifySaveFailure = useCallback((error: unknown) => {
+    const message = isRevisionConflict(error)
+      ? '画布已被智能体/他人修改，已保留你的本地改动，请确认后重试'
+      : error instanceof Error ? error.message : '画布保存失败，已保留本地改动';
+    const last = lastSaveErrorNotice.current;
+    const now = Date.now();
+    if (last && last.message === message && now - last.at < SAVE_ERROR_NOTICE_INTERVAL_MS) return;
+    lastSaveErrorNotice.current = { message, at: now };
+    notify(message);
+  }, [notify]);
 
   // 画布 ↔ Moon 智能体面板 拖拽拉伸。健壮性要点：
   // - onMove 里 ev.buttons===0 直接停止 → 鼠标松开（含在 iframe 上松开导致 mouseup 未送达 document）后，悬浮不会再触发 resize；
@@ -325,6 +362,7 @@ export default function App() {
     };
     pendingSave.current = next;
     setSaveStatus('saving');
+    setHasLocalChanges(true);
     try {
       do {
         if (!saveInFlight.current) {
@@ -346,10 +384,15 @@ export default function App() {
         }
         await saveInFlight.current;
       } while (pendingSave.current);
+      // 落库成功（含 40901 重试后的成功）→ 本地与服务端对齐，轮询恢复工作。
+      setHasLocalChanges(false);
       void refreshProjects();
       return canvasRef.current?.id === next.id ? canvasRef.current : next;
     } catch (error) {
+      // 不再静默：保留本地改动标记（让轮询让路），并把原因交给调用方/提示条。
       setSaveStatus('error');
+      setHasLocalChanges(true);
+      console.warn('[canvas] 画布保存失败，本地改动已保留', error);
       throw error;
     }
   }, [refreshProjects]);
@@ -380,11 +423,47 @@ export default function App() {
     setCanvas(nextCanvas);
     setCanvases(await listCanvases(projectId));
     setSaveStatus('saved');
+    // 整图重载 = 本地图被服务端真相替换，未落库标记必须清掉，否则轮询会被永久挡住。
+    setHasLocalChanges(false);
     setSideView(embeddedWindow ? 'inspector' : 'agent');
     setSideOpen(embeddedWindow ? false : window.innerWidth > 1180);
     setView('canvas');
     window.history.replaceState(null, '', `#project=${encodeURIComponent(projectId)}&canvas=${encodeURIComponent(canvasId)}`);
   }, [clearAssets, embeddedMode, embeddedWindow, hydrateMetadata, loadProjectGraph]);
+
+  /**
+   * 应用一条远端增量补丁（不整图重载）。
+   *
+   * <p>身份键只有节点/边的 `id`：**绝不**用 `assetUrl` 相等判断"节点是否已存在/内容是否没变"
+   * （补丁里的 `assetUrl` 会被后端重新签名，字符串与本地存量不一致）。
+   * <p>返回 false 表示当前画布文档不可用（已切换/未打开），调用方必须退回全量重载。
+   */
+  const applyRemoteGraphPatch = useCallback((patch: CanvasGraphPatch): boolean => {
+    const current = canvasRef.current;
+    if (!current) return false;
+    const summary = useCanvasStore.getState().applyRemotePatch(patch);
+    const next: CanvasDocumentV1 = {
+      ...current,
+      nodes: useCanvasStore.getState().nodes,
+      edges: useCanvasStore.getState().edges,
+      updatedAt: Date.now(),
+    };
+    canvasRef.current = next;
+    setCanvas(next);
+    // 素材登记以 assetId 为准（assetUrl 只用于直接渲染，可能带 token，不参与判定）；
+    // 补丁里的节点没有 assetId 就按"没有素材"处理，不发多余请求。
+    const knownAssetIds = useMediaStore.getState().metadata;
+    const hasUnknownAsset = [...summary.addedNodeIds, ...summary.updatedNodeIds].some((nodeId) => {
+      const node = useCanvasStore.getState().nodes.find((item) => item.id === nodeId);
+      const assetId = node?.data.assetId;
+      if (!assetId) return false;
+      return !knownAssetIds[assetId];
+    });
+    if (hasUnknownAsset) {
+      void hydrateReferencedCanvasAssets(current.id).catch(() => undefined);
+    }
+    return true;
+  }, []);
 
   useEffect(() => {
     if (!embeddedMode) return;
@@ -393,10 +472,56 @@ export default function App() {
           || !isCanvasGraphUpdatedMessage(event.data)) return;
       if (event.data.conversationId !== embeddedMode.conversationId
           || event.data.projectId !== embeddedMode.projectId) return;
+      pendingGraphUpdates.current.push(event.data);
+      console.info(`[canvas-live] 收到图更新消息 revision=${event.data.revision} `
+        + `patch=${event.data.patch ? 'yes' : 'no'} 队列=${pendingGraphUpdates.current.length}`);
+      // 有界：一次防抖窗口里堆太多就丢弃补丁、退回一次全量重载（revision 高水位仍然正确）。
+      if (pendingGraphUpdates.current.length > MAX_PENDING_GRAPH_UPDATES) {
+        pendingGraphUpdates.current = [{ ...event.data, patch: undefined }];
+      }
       if (graphUpdateTimer.current !== null) window.clearTimeout(graphUpdateTimer.current);
       graphUpdateTimer.current = window.setTimeout(() => {
         graphUpdateTimer.current = null;
-        void openCanvas(event.data.projectId, event.data.canvasId)
+        const updates = pendingGraphUpdates.current;
+        pendingGraphUpdates.current = [];
+        const latest = updates.at(-1);
+        if (!latest) return;
+        const target = canvasRef.current;
+        const plan = planCanvasGraphUpdates(
+          updates,
+          target ? { canvasId: target.id, revision: target.revision ?? 0 } : null,
+        );
+        console.info(`[canvas-live] 决策=${plan?.mode ?? 'none'}`
+          + `${plan && plan.mode === 'reload' ? ` reason=${plan.reason}` : ''}`
+          + `${plan ? ` revision=${plan.revision}` : ''}`
+          + `${target ? ` local=${target.revision ?? 0}` : ' local=无画布'}`);
+        if (plan?.mode === 'patch' && target) {
+          try {
+            for (const patch of plan.patches) {
+              // false = 应用期间文档被换掉（切画布/关画布），revision 复核会兜住。
+              if (!applyRemoteGraphPatch(patch)) throw new Error('画布已切换，补丁未完整应用');
+            }
+            // 本地文档 revision 提升到本批最高 revision，下一轮轮询才不会又全量重载。
+            const next: CanvasDocumentV1 = {
+              ...target,
+              nodes: useCanvasStore.getState().nodes,
+              edges: useCanvasStore.getState().edges,
+              revision: plan.revision,
+            };
+            canvasRef.current = next;
+            setCanvas(next);
+            // 复核：补丁是**有界累积**的，可能只覆盖了部分变更。应用后本地 revision 必须正好
+            // 等于消息 revision，对不上就退回一次全量重载，绝不留半截图。
+            if ((canvasRef.current?.revision ?? -1) !== plan.revision) {
+              throw new Error('画布补丁不完整，已重新加载画布');
+            }
+            return;
+          } catch (error) {
+            // 半应用不可接受：退回一次整图重载把本地图对齐服务端真相。
+            notify(error instanceof Error ? error.message : '画布补丁应用失败，已重新加载画布');
+          }
+        }
+        void openCanvas(latest.projectId, latest.canvasId)
           .catch((error) => notify(error instanceof Error ? error.message : '画布更新加载失败'));
       }, 120);
     };
@@ -405,7 +530,78 @@ export default function App() {
       window.removeEventListener('message', onGraphUpdated);
       if (graphUpdateTimer.current !== null) window.clearTimeout(graphUpdateTimer.current);
     };
-  }, [embeddedMode, notify, openCanvas]);
+  }, [applyRemoteGraphPatch, embeddedMode, notify, openCanvas]);
+
+  // 独立窗口打开的画布收不到 parent 的 graph-updated 消息：轮询轻量 revision 接口，
+  // 智能体在服务端建节点/连线后把变化拉到本地。本地有未落库改动时让路，避免覆盖未提交的编辑。
+  useEffect(() => {
+    if (view !== 'canvas' || !project || !canvas) return;
+    const projectId = project.id;
+    const canvasId = canvas.id;
+    let stopped = false;
+    let lastSkipReason = '';
+    const tick = () => {
+      if (stopped) return;
+      const decision = decideLiveRefresh({
+        hidden: document.hidden,
+        // 看"是否真的有保存在飞"，而不是可能卡死的 saveStatus 字符串：
+        // persistCurrentCanvas 只在画布 id 未变时才把状态置回 'saved'，期间换过画布就永远是 'saving'。
+        savingInFlight: saveInFlight.current !== null,
+        hasPendingDebounce: saveTimer.current !== null,
+        hasLocalChanges,
+        saveRetryCount: saveRetryCount.current,
+      });
+      if (decision.action === 'skip') {
+        // 只在原因变化时打一行，避免每 4s 刷屏
+        if (lastSkipReason !== decision.reason) {
+          lastSkipReason = decision.reason;
+          console.info(`[canvas-live] 轮询让路 reason=${decision.reason}`);
+        }
+        return;
+      }
+      lastSkipReason = '';
+      if (decision.action === 'retry-save') {
+        // 上次保存失败留下的未落库改动，靠"重试保存"化解，而不是永久让路——
+        // 否则轮询再也不工作，表现为"必须刷新才出画布数据"。
+        saveRetryCount.current += 1;
+        console.info(`[canvas-live] 轮询转为重试保存（第 ${saveRetryCount.current} 次）`);
+        void persistCurrentCanvas()
+          .then(() => { saveRetryCount.current = 0; })
+          .catch((error) => notifySaveFailure(error));
+        return;
+      }
+      if (decision.action === 'reload-after-conflict') {
+        // 重试预算用尽：智能体一直在写，本地改动落不了库。优先让用户看到智能体的数据，
+        // 并明确告知本地改动已被放弃（旧行为是永久停摆，只能刷新）。
+        saveRetryCount.current = 0;
+        setHasLocalChanges(false);
+        console.info('[canvas-live] 重试保存已达上限，放弃本地改动并重载远端');
+        notify('画布已被智能体更新，已加载最新版本（本地未保存的改动已放弃）');
+        void openCanvas(projectId, canvasId)
+          .catch((error) => notify(error instanceof Error ? error.message : '画布更新加载失败'));
+        return;
+      }
+      void getCanvasRevision(canvasId)
+        .then((revision) => {
+          if (stopped) return;
+          const local = canvasRef.current?.revision ?? 0;
+          if (revision <= local) return;
+          console.info(`[canvas-live] 服务端有更新 server=${revision} local=${local} → 整图重载`);
+          return openCanvas(projectId, canvasId);
+        })
+        .catch(() => { /* 轮询失败静默，下一轮再试 */ });
+    };
+    const timer = window.setInterval(tick, 4000);
+    // 后台标签页刻意不发请求（document.hidden 让路）；切回前台时**立刻**补一次检查，
+    // 否则用户从聊天窗口切回画布要白等最多 4 秒才看到智能体的更新。
+    const onVisible = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [view, project, canvas, hasLocalChanges, openCanvas, persistCurrentCanvas, notifySaveFailure, notify]);
 
   const newProject = useCallback(async () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -566,17 +762,27 @@ export default function App() {
 
   useEffect(() => {
     if (view !== 'canvas' || !canvas) return;
+    // store revision 归零 = loadProjectGraph（整图重载 / 切换画布），**不是用户编辑**：
+    // 不能触发自动保存，否则会把刚从服务端拉下来的图再回写一遍（revision 乒乓 + 冲突风险，
+    // 而那次回写一旦失败就会让 hasLocalChanges 卡住、把 4s 轮询永久关掉）。
+    if (revision === 0) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     setSaveStatus('saving');
-    saveTimer.current = window.setTimeout(() => { void persistCurrentCanvas().catch(() => undefined); }, 550);
+    setHasLocalChanges(true);
+    saveTimer.current = window.setTimeout(() => {
+      void persistCurrentCanvas().catch((error) => notifySaveFailure(error));
+    }, 550);
     return () => { if (saveTimer.current !== null) window.clearTimeout(saveTimer.current); };
-  }, [persistCurrentCanvas, canvas?.id, canvas?.title, revision, view]);
+  }, [persistCurrentCanvas, canvas?.id, canvas?.title, revision, view, notifySaveFailure]);
 
   useEffect(() => {
-    const saveWhenHidden = () => { if (document.visibilityState === 'hidden' && canvasRef.current) void persistCurrentCanvas().catch(() => undefined); };
+    const saveWhenHidden = () => {
+      if (document.visibilityState !== 'hidden' || !canvasRef.current) return;
+      void persistCurrentCanvas().catch((error) => notifySaveFailure(error));
+    };
     document.addEventListener('visibilitychange', saveWhenHidden);
     return () => document.removeEventListener('visibilitychange', saveWhenHidden);
-  }, [persistCurrentCanvas]);
+  }, [persistCurrentCanvas, notifySaveFailure]);
 
   const returnToProject = async () => {
     if (!project) return;

@@ -19,6 +19,10 @@ export interface AgentConversation {
   engineVersion?: string;
   debugComparisonEnabled?: boolean;
   approvalMode?: AgentApprovalMode;
+  /** @ 引用菜单「对话」组展示用；后端尚未下发时为 undefined（前端按未知处理） */
+  messageCount?: number;
+  summaryStatus?: 'ready' | 'generating' | 'stale' | 'unavailable';
+  summaryPreview?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,6 +50,36 @@ export interface AgentAttachment {
   mediaId?: string;
 }
 
+/**
+ * `@` 引用资料的类别（与后端 `AgentReferenceRequest.kind` 一一对应）。
+ *
+ * <p>正文里保留 `@名称` 原文（系统提示词据此约定「@ = 引用资料、在你的可读范围内、必须先去读」），
+ * 这份结构化清单是同一批引用的机器可读版本：名字允许重名（同名文档/同名会话），
+ * 只靠名字解析会让模型读到错的东西，所以每轮都必须带 id。
+ */
+export type AgentReferenceKind = 'library_file' | 'local_file' | 'scene' | 'conversation';
+
+/** 本轮引用资料（见 docs/superpowers/specs/2026-10-16-mention-reference-materials-design.md §3.1） */
+export interface AgentReference {
+  kind: AgentReferenceKind;
+  /** agent_assets.id / 项目库 assetId / sceneId / conversationId */
+  id: string;
+  /** 正文里的标记原文（含 `@`），必须与正文逐字一致 */
+  token: string;
+  /** 展示名（token 去掉 `@`） */
+  name: string;
+  assetId?: string;
+  mediaId?: string;
+  url?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  sceneNumber?: number;
+  conversationTitle?: string;
+  messageCount?: number;
+  /** 会话摘要状态：P2 的会话引用用，P1 分镜引用不涉及 */
+  summaryStatus?: 'ready' | 'generating' | 'stale' | 'unavailable';
+}
+
 export interface AgentActiveTurn {
   turnId: string;
   status: 'running' | 'waiting_user';
@@ -68,6 +102,12 @@ export interface CompactContextResult {
   messagesAfter: number;
   tokensBefore: number;
   tokensAfter: number;
+}
+
+/** 清空上下文结果（POST /conversations/{id}/context/clear）：真删行数汇总 + 重置后的标题。 */
+export interface ClearContextResult {
+  deletedRows: number;
+  title: string;
 }
 
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
@@ -216,6 +256,11 @@ export interface ConfirmResultInfo {
 
 export interface AgentMessageMetadata {
   kind?: 'hitl' | 'assistant-reply' | 'video-plan' | 'storyboard-review' | 'canvas-run';
+  /**
+   * 这条助手回复是被用户打断/停止的：正文以「…」收尾，服务端也按同一文案落库。
+   * 命中的气泡不再被后续 delta 续写。
+   */
+  interrupted?: boolean;
   canvasRunId?: string;
   canvasId?: string;
   turnId?: string;
@@ -225,6 +270,13 @@ export interface AgentMessageMetadata {
   nodeCount?: number;
   edgeCount?: number;
   revision?: number;
+  /**
+   * 画布增量补丁：服务端把每个画布命令的返回值合并累积到这条消息上，
+   * 画布 iframe 据此本地增量应用，取代"每次 revision 变化就整图重载"。
+   */
+  canvasPatch?: Record<string, unknown>;
+  /** 补丁超过服务端累积上限被截断：此时画布应回退到整图重载。 */
+  canvasPatchOverflow?: boolean;
   error?: string;
   projectId?: string;
   conversationId?: string;
@@ -233,6 +285,8 @@ export interface AgentMessageMetadata {
     referenceVideos?: string[];
     referenceAudios?: string[];
     attachments?: AgentAttachment[];
+    /** 本轮 `@` 引用资料（后端落库后刷新仍可还原气泡里的蓝色标记） */
+    references?: AgentReference[];
     assetIds?: string[];
     routingHint?: string;
   };
@@ -934,6 +988,14 @@ export const agentApi = {
   clearMessages: (id: string) =>
     client.delete(`/agent/conversations/${id}/messages`),
 
+  /**
+   * 「/清空上下文」：后端真删除该会话的全部上下文（消息、轮次与直播事件、待确认卡片、
+   * 画布会话与运行、文档索引等），并把标题重置为「新对话」——执行后等同于一个全新对话。
+   * 产出素材（agent_assets）保留。
+   */
+  clearContext: (id: string) =>
+    client.post<{ data: ClearContextResult }>(`/agent/conversations/${id}/context/clear`),
+
   listMessages: (id: string) =>
     client.get<{ data: AgentMessage[] }>(`/agent/conversations/${id}/messages`),
 
@@ -1115,6 +1177,10 @@ export const agentApi = {
     client.post<{ data: boolean }>(
       `/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/interrupt`,
     ),
+
+  /** 会话级打断：turnId 还没下发（turn_started 未到）时的兜底入口。 */
+  interruptConversation: (conversationId: string) =>
+    client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/interrupt`),
 };
 
 /**
@@ -1205,6 +1271,8 @@ export async function streamChat(
     clientRequestId?: string;
     canvasContext?: CanvasEditContext;
     attachments?: AgentAttachment[];
+    /** 本轮 `@` 引用资料（正文保留 `@名称`，这里给机器可读的 id 清单） */
+    references?: AgentReference[];
     /** 生成偏好载荷（自动且不忽略方案时不带）；形状见 lib/generationPreferences */
     generationPreferences?: Record<string, unknown>;
   },
@@ -1222,6 +1290,7 @@ export async function streamChat(
       referenceVideos: opts?.referenceVideos ?? [],
       referenceAudios: opts?.referenceAudios ?? [],
       attachments: opts?.attachments ?? [],
+      references: opts?.references ?? [],
       routingHint: opts?.routingHint,
       cancelActiveTasks: opts?.cancelActiveTasks,
       editMessageId: opts?.editMessageId,
@@ -1282,6 +1351,34 @@ export async function streamCanvasSessionReady(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ canvasId: selectedCanvasId ?? '', createNew }),
+      signal,
+    },
+  );
+  await consumeSse(res, onEvent, signal);
+}
+
+/**
+ * 续传某个正在运行的 turn：先补 `afterSeq` 之后的持久化事件，再持续接收直播事件直到终态。
+ *
+ * <p>用于页面刷新 / 新开标签页接上**正在运行**的 turn，替代"全量重放 + 1s 轮询"。
+ * 与 `POST /turns/stream` 共用同一套 SSE 解析（`consumeSse`），因此事件形状、
+ * 去重与缺口等待行为完全一致。
+ *
+ * <p>老后端没有该端点时会抛错（404），调用方据此回退到 `listTurnEvents` 轮询回放。
+ */
+export async function streamTurnResume(
+  conversationId: string,
+  turnId: string,
+  afterSeq: number,
+  onEvent: (e: AgentTurnEventEnvelope) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const cursor = Number.isFinite(afterSeq) ? Math.max(0, Math.floor(afterSeq)) : 0;
+  const res = await authorizedFetch(
+    `${BACKEND_URL}/api/agent/conversations/${encodeURIComponent(conversationId)}`
+    + `/turns/${encodeURIComponent(turnId)}/stream?afterSeq=${cursor}`,
+    {
+      headers: { Accept: 'text/event-stream' },
       signal,
     },
   );

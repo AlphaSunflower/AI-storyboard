@@ -13,6 +13,7 @@ import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ModelCatalogCache;
 import com.llmgateway.service.ModelParamsSpecNormalizer;
 import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.UpstreamClient;
@@ -21,10 +22,8 @@ import com.llmgateway.vendor.route.RouteVendorRegistry;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -47,14 +46,6 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayRoutingServiceImpl.class);
 
-    /** 模型列表缓存 key 前缀：gateway:models:{type|all} → /v1/models JSON 响应 */
-    private static final String MODELS_CACHE_PREFIX = "gateway:models:";
-
-    /** 运行时默认模型 key（与 ModelRouteServiceImpl 一致）：gateway:default_model:{type} */
-    private static final String DEFAULT_MODEL_PREFIX = "gateway:default_model:";
-    /** 模型列表缓存 TTL：配置变更走 DB 真源，此处只缓解 /v1/models 高频三表全扫，短 TTL 自愈 */
-    private static final Duration MODELS_CACHE_TTL = Duration.ofSeconds(60);
-
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
     private final ModelParamsMapper modelParamsMapper;
@@ -62,7 +53,8 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     private final UpstreamClient upstreamClient;
     private final RouteVendorRegistry routeRegistry;
     private final CallLogService callLogService;
-    private final StringRedisTemplate redisTemplate;
+    /** 模型列表缓存 / 默认模型 / 版本号的唯一持有者（key 命名与失效逻辑都收敛在它里面） */
+    private final ModelCatalogCache catalogCache;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -252,13 +244,8 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     @Override
     public String fetchModels(String type) {
         // 读缓存（miss/Redis 异常一律降级查库）；避免前端每个参数卡片渲染都触发 model_route+channel+model_params 三表全扫
-        String cacheKey = MODELS_CACHE_PREFIX + (type == null || type.isBlank() ? "all" : type);
-        try {
-            String cached = redisTemplate.opsForValue().get(cacheKey);
-            if (cached != null) return cached;
-        } catch (Exception e) {
-            log.warn("Redis 读模型列表失败，降级查库: key={}, error={}", cacheKey, e.getMessage());
-        }
+        String cached = catalogCache.readModels(type);
+        if (cached != null) return cached;
         List<ModelRoute> routes = routeMapper.selectList(null);
         Set<String> enabledChannels = channelMapper.selectList(null).stream()
                 .filter(c -> c.getEnabled() == null || c.getEnabled())
@@ -294,14 +281,14 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         });
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("object", "list");
+        // 目录版本号随响应下发：消费端（主后端/MoonAgent/画布的 GatewayModelServiceImpl）
+        // 据此判断本地缓存是否过期，前端也能靠它跳过无变化的重渲染
+        String version = catalogCache.currentVersion();
+        if (version != null) result.put("version", version);
         result.put("data", data);
         try {
             String json = objectMapper.writeValueAsString(result);
-            try {
-                redisTemplate.opsForValue().set(cacheKey, json, MODELS_CACHE_TTL);
-            } catch (Exception e) {
-                log.warn("Redis 写模型列表缓存失败（忽略，靠 TTL 自愈）: key={}, error={}", cacheKey, e.getMessage());
-            }
+            catalogCache.writeModels(type, json);
             return json;
         } catch (Exception e) {
             throw new RuntimeException("模型列表序列化失败", e);
@@ -335,13 +322,7 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     }
 
     private String readDefaultModelFromRedis(String type) {
-        try {
-            String value = redisTemplate.opsForValue().get(DEFAULT_MODEL_PREFIX + type);
-            return value == null || value.isBlank() ? null : value;
-        } catch (Exception e) {
-            log.warn("Redis 读默认模型失败，回落路由表标记: type={}, error={}", type, e.getMessage());
-            return null;
-        }
+        return catalogCache.readDefault(type);
     }
 
     /**

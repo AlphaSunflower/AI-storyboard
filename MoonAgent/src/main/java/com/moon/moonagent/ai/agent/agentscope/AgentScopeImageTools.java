@@ -1,9 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.AgentGenerationService;
-import com.moon.moonagent.ai.agent.creative.ConstraintExtractionService;
-import com.moon.moonagent.ai.agent.creative.CreativeCritiqueService;
-import com.moon.moonagent.ai.agent.creative.MediaCritique;
 import com.moon.moonagent.entity.AgentConversation;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -24,8 +21,6 @@ public class AgentScopeImageTools {
     private final AgentScopeAssetGroupService assetGroups;
     private final AgentScopeAsyncTaskService asyncTasks;
     private final AgentScopeProperties properties;
-    private final CreativeCritiqueService critiqueService;
-    private final ConstraintExtractionService constraintExtraction;
 
     public AgentScopeTool tool() {
         return new AgentScopeTool(
@@ -197,28 +192,8 @@ public class AgentScopeImageTools {
             }
             context.turnState().markMediaStarted("image");
         }
-        if (properties.isCritiqueEnabled() && context.turnState() != null && !urls.isEmpty()) {
-            String turnId = context.request() == null ? "" : context.request().getTurnId();
-            MediaCritique critique = critiqueService.reviewImages(
-                    conversation,
-                    turnId,
-                    sceneId == null || sceneId.isBlank() ? String.valueOf(urls.getFirst()) : sceneId,
-                    prompt,
-                    urls.stream().map(String::valueOf).toList(),
-                    constraintExtraction.extract(
-                            context.request() == null ? "" : context.request().getContent()),
-                    Math.max(0, context.turnState().mediaAttempts("image") - 1));
-            out.put("critique", critiqueService.asToolResult(critique));
-            if (critique.repairRequired()
-                    && context.turnState().mediaAttempts("image") < properties.getCritiqueMaxRepairs() + 1) {
-                context.turnState().authorizeMediaRepair("image");
-                out.put("needsRepair", true);
-                out.put("repairInstruction",
-                        "Revise the prompt or reference and generate one corrected image, then review it again.");
-            } else if (critique.repairRequired()) {
-                out.put("needsUserConfirmation", true);
-            }
-        }
+        // 生成结果不做自动诊断：诊断会额外调用一次付费视觉模型，而首次结果往往已经是
+        // 用户想要的画面。是否重新生成由用户下一条消息决定，不再自动触发修复重生成。
         return out;
     }
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   agentApi, streamChat, submitForm, streamCanvasSessionReady, streamTaskEvents,
+  streamTurnResume,
   type AgentConversation, type AgentMessage, type AgentAsset,
   type AgentPage, type AgentTurnEventEnvelope,
   type AgentTurnMetrics, type VideoTaskStatus, type AssetOption,
@@ -13,14 +14,18 @@ import {
   type AgentMessagePage,
   type AgentCanvasRunStatus,
   type AgentAttachment, type AgentAttachmentKind, type AgentActiveTurn,
+  type AgentReference,
   type AgentToolDraft,
   type CanvasSessionInfo,
   type ConfirmResultInfo,
+  type ClearContextResult,
   DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { notify } from './toastStore';
+import { useChatAnnotationStore } from './chatAnnotationStore';
 import { rememberDocumentSource } from '../lib/documentPreview';
+import { activeReferences } from '../lib/mentionReferences';
 import { useDocumentPreviewStore } from './documentPreviewStore';
 import { useSideChatSelectionStore } from './sideChatSelectionStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
@@ -112,6 +117,17 @@ function asStringArray(value: unknown): string[] {
 
 const PENDING_ATTACHMENTS_KEY = 'moon.agent.pendingAttachments';
 
+/**
+ * 一次「把这段文字放进输入框」的请求。
+ *
+ * `seq` 单调递增，输入框只在 seq 变大时消费一次：否则每次重渲染都会把同一段提示词
+ * 再贴一遍，用户改过的内容会被冲掉。
+ */
+export interface ComposerInjection {
+  seq: number;
+  text: string;
+}
+
 function pendingAttachmentsKey(conversationId?: string | null) {
   return `${PENDING_ATTACHMENTS_KEY}.${conversationId || 'draft'}`;
 }
@@ -146,20 +162,59 @@ function persistPendingAttachments(conversationId: string | null | undefined, at
   }
 }
 
-function attachmentsFromMessages(messages: AgentMessage[]): AgentAttachment[] {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const attachments = messages[index].metadata?.messageInput?.attachments;
-    if (attachments?.length) return attachments.filter(isAgentAttachment);
-  }
-  return [];
-}
-
 function pendingMediaFromAttachments(attachments: AgentAttachment[]) {
   return {
     refImageUrls: attachments.filter((item) => item.kind === 'image').map((item) => item.url),
     pickedReferenceVideos: attachments.filter((item) => item.kind === 'video').map((item) => item.url),
     pickedReferenceAudios: attachments.filter((item) => item.kind === 'audio').map((item) => item.url),
   };
+}
+
+const PENDING_REFERENCES_KEY = 'moon.agent.pendingReferences';
+
+function pendingReferencesKey(conversationId?: string | null) {
+  return `${PENDING_REFERENCES_KEY}.${conversationId || 'draft'}`;
+}
+
+const AGENT_REFERENCE_KINDS: AgentReference['kind'][] = [
+  'library_file', 'local_file', 'scene', 'conversation',
+];
+
+function isAgentReference(value: unknown): value is AgentReference {
+  const item = asRecord(value);
+  return !!item
+    && typeof item.id === 'string'
+    && typeof item.token === 'string'
+    && AGENT_REFERENCE_KINDS.includes(String(item.kind) as AgentReference['kind']);
+}
+
+function readPendingReferences(conversationId?: string | null): AgentReference[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(pendingReferencesKey(conversationId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(isAgentReference) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPendingReferences(conversationId: string | null | undefined, references: AgentReference[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = pendingReferencesKey(conversationId);
+    if (references.length === 0) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, JSON.stringify(references));
+  } catch {
+    // Storage can be unavailable in private mode; the in-memory state still works.
+  }
+}
+
+/** 同一份资料只保留一条（键 = `kind:id`），后写入的覆盖前者（名称/token 以最新一次为准）。 */
+function dedupeReferences(references: AgentReference[]): AgentReference[] {
+  const map = new Map<string, AgentReference>();
+  references.forEach((item) => map.set(`${item.kind}:${item.id}`, item));
+  return [...map.values()];
 }
 
 function attachmentKind(file: File): AgentAttachmentKind {
@@ -383,6 +438,143 @@ const streamSettlements = new Map<string, StreamSettlement>();
 const titleRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 const TITLE_REFRESH_DELAYS_MS = [1_200, 3_000, 7_000, 15_000, 30_000];
+
+/**
+ * 用户打断/停止过的 turn：其后到达的正文 delta 不再写入气泡。
+ *
+ * 打断是协作式的，服务端停下来的这几十到几百毫秒里还会飘来几个 delta；
+ * 不挡住的话气泡会在「…」之后继续长出新字，看起来像没停住。
+ */
+const interruptedTurns = new Set<string>();
+
+/** 打断后等待旧回合真正收尾的上限；超时则不发新消息，把输入内容还给用户。 */
+const INTERRUPT_SETTLE_TIMEOUT_MS = 20_000;
+const INTERRUPT_SETTLE_POLL_MS = 120;
+/** 终态事件早于服务端 finally 释放会话锁，发新回合前留一点余量。 */
+const INTERRUPT_RELEASE_GRACE_MS = 150;
+/** 正在「先打断、后发送」的会话：期间再次点发送不会提交第二条。 */
+const pendingInterruptSends = new Set<string>();
+
+/**
+ * 被打断的回复以「…」收尾；已经以省略号结尾时不重复追加。
+ * 与后端 `AgentChatServiceImpl.interruptedReplyContent` 同一口径，刷新前后文案一致。
+ */
+export function interruptedReplyText(text: string | null | undefined): string {
+  const trimmed = (text ?? '').replace(/\s+$/, '');
+  if (!trimmed) return '';
+  return /(…|\.\.\.)$/.test(trimmed) ? trimmed : `${trimmed}…`;
+}
+
+/**
+ * 打断/停止当前生成：把已经流出的正文定格在气泡上（末尾「…」），**不删除消息**。
+ *
+ * <p>旧实现直接 `messages.filter(id !== pendingAssistantId)`，用户已经看到的那段生成文字
+ * 会整段消失，刷新后也找不回来。现在文字留在气泡里并标记 `metadata.interrupted`，
+ * 服务端也会把同一段截断正文落库（刷新对账时由 {@link mergeInterruptedReplies} 兜底）。</p>
+ *
+ * @return 定格后的正文；本轮还没有任何可见正文时返回空串
+ */
+function freezeInterruptedReply(conversationId: string, assistantId?: string | null): string {
+  const state = useAgentStore.getState();
+  const generation = state.generating[conversationId];
+  const targetId = assistantId ?? generation?.assistantId ?? state.pendingAssistantId ?? undefined;
+  const target = targetId
+    ? state.messages.find((message) => message.id === targetId)
+    : undefined;
+  const frozen = interruptedReplyText(
+    generation?.assistantContent ?? target?.content ?? '');
+  const frozenMessage: AgentMessage | null = frozen && target
+    ? {
+        ...target,
+        content: frozen,
+        metadata: { ...(target.metadata ?? {}), interrupted: true },
+      }
+    : null;
+  useAgentStore.setState((s) => {
+    const generating = { ...s.generating };
+    const current = generating[conversationId];
+    if (current) {
+      generating[conversationId] = {
+        ...current,
+        hint: '',
+        assistantContent: frozen ? frozen : current.assistantContent,
+      };
+    }
+    return {
+      generating,
+      messages: frozenMessage
+        ? s.messages.map((message) => (message.id === frozenMessage.id ? frozenMessage : message))
+        : s.messages,
+    };
+  });
+  return frozen;
+}
+
+/**
+ * 本会话里已经定格的截断回复（`metadata.interrupted`）。
+ *
+ * <p>切换会话会把本地消息整体清空，所以要在清空**之前**取出来，再合并回服务端列表。</p>
+ */
+function interruptedRepliesOf(conversationId: string): AgentMessage[] {
+  const state = useAgentStore.getState();
+  if (state.activeConversationId !== conversationId) return [];
+  return state.messages.filter((message) => message.metadata?.interrupted);
+}
+
+/**
+ * 服务端消息列表落地前的兜底：本地已经定格的截断回复不能被对账冲掉。
+ *
+ * <p>打断后落库有一小段窗口，若此时刷新/对账（列表整体替换），用户刚保住的那段文字会再次
+ * "被清空"。这里把本地 `metadata.interrupted` 且服务端还没有同内容消息的回复按时间插回去；
+ * 服务端落库后内容一致，自然不会再重复插入。</p>
+ */
+function mergeInterruptedReplies(
+  messages: AgentMessage[],
+  interrupted: AgentMessage[],
+): AgentMessage[] {
+  if (interrupted.length === 0) return messages;
+  const merged = [...messages];
+  for (const message of interrupted) {
+    const served = merged.some((candidate) =>
+      candidate.id === message.id
+      || (candidate.role === 'assistant' && candidate.content === message.content));
+    if (served) continue;
+    const at = Date.parse(message.createdAt);
+    const index = Number.isFinite(at)
+      ? merged.findIndex((candidate) => {
+          const parsed = Date.parse(candidate.createdAt);
+          return Number.isFinite(parsed) && parsed > at;
+        })
+      : -1;
+    if (index < 0) merged.push(message);
+    else merged.splice(index, 0, message);
+  }
+  return merged;
+}
+
+/**
+ * 等服务端真的把这一轮停掉（终态事件或流结束都会清掉 generating）。
+ * 只有等到它落定，后续新回合才不会撞会话锁、也不会把打断标志一并清掉。
+ */
+function waitForInterruptSettled(conversationId: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const check = () => {
+      const generation = useAgentStore.getState().generating[conversationId];
+      if (!generation || generation.finished) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve(false);
+        return;
+      }
+      window.setTimeout(check, INTERRUPT_SETTLE_POLL_MS);
+    };
+    check();
+  });
+}
+
 
 function cancelConversationTitleRefresh(conversationId: string) {
   const timer = titleRefreshTimers.get(conversationId);
@@ -670,6 +862,11 @@ interface AgentState {
   deleteConversation: (id: string, options?: { silent?: boolean }) => Promise<void>;
   // 清空当前会话聊天记录（删消息 + 重置 AI 上下文；会话与资产保留，其他会话不受影响）
   clearMessages: () => Promise<void>;
+  /**
+   * 「/清空上下文」：后端真删除该会话的全部上下文，前端把会话态整体退回新对话。
+   * @returns 真删行数与重置后的标题（供提示文案用）
+   */
+  clearContext: () => Promise<ClearContextResult | null>;
   selectConversation: (id: string) => Promise<void>;
 
   // 消息
@@ -718,18 +915,44 @@ interface AgentState {
   // I2：当前流式轮次的 assistant 占位 id（HITL 续流时复用同一气泡追加）
   pendingAssistantId: string | null;
   editAndResend: (content: string, messageId?: string) => Promise<void>;
-  interruptAndSend: (content: string) => Promise<void>;
+  /**
+   * 打断当前生成并发送这句话。
+   *
+   * <p>顺序是「先让智能体停下来 → 已说出的文字以「…」定格 → 再把我们的话发出去」；
+   * 返回 false 表示打断没能及时生效（消息没发出去，调用方应把输入内容还给用户）。</p>
+   */
+  interruptAndSend: (content: string) => Promise<boolean>;
 
   // 输入
   refImageUrls: string[];
   setRefImageUrls: (v: string[]) => void;
   addRefImageUrls: (urls: string[]) => void;
   removeRefImageUrl: (index: number) => void;
+  /**
+   * 把一段文本塞进输入框（素材详情的「使用提示词」）。
+   *
+   * 输入框正文留在 `ChatComposer` 的局部 state 里，外部组件够不着它；这里只发一张
+   * 「请求单」：seq 每次递增，输入框按 seq 消费一次就不再重复应用。刷新页面不会重放，
+   * 因为 seq 只活在内存里。
+   */
+  composerInjection: ComposerInjection | null;
+  injectComposerText: (text: string) => void;
   pendingAttachments: AgentAttachment[];
   setPendingAttachments: (attachments: AgentAttachment[]) => void;
   addPendingAttachments: (attachments: AgentAttachment[]) => void;
   removePendingAttachment: (url: string) => void;
   clearPendingAttachments: () => void;
+  /**
+   * 本轮 `@` 引用资料（分镜 / 对话 / 项目库文件 / 本地文件的结构化清单）。
+   *
+   * <p>与 `pendingAttachments` 分开：附件的去重键是 url，而引用资料的键是 `kind:id`
+   * （分镜和对话根本没有 url）。正文里的 `@名称` 标记由输入框自己维护，这里只留机器可读部分。
+   */
+  pendingReferences: AgentReference[];
+  setPendingReferences: (references: AgentReference[]) => void;
+  addPendingReferences: (references: AgentReference[]) => void;
+  removePendingReference: (kind: AgentReference['kind'], id: string) => void;
+  clearPendingReferences: () => void;
   uploadRefImage: (file: File, purpose?: string, kind?: 'reference' | 'asset') => Promise<void>;
   uploadRefImages: (files: File[], purposes?: string[], kinds?: Array<'reference' | 'asset'>) => Promise<void>;
   addLocalUserMessage: (content: string) => void;
@@ -772,8 +995,8 @@ interface AgentState {
     cancelActiveTasks?: boolean;
     editMessageId?: string;
     clientRequestId?: string;
-    interruptCurrent?: boolean;
     attachments?: AgentAttachment[];
+    references?: AgentReference[];
   }) => Promise<void>;
   submitHumanInput: (
     actionId: string,
@@ -965,7 +1188,7 @@ async function refreshConversationMessages(conversationId: string) {
     (mediaId) => resolveLibraryMedia(conversationId, mediaId),
   );
   useAgentStore.setState({
-    messages,
+    messages: mergeInterruptedReplies(messages, interruptedRepliesOf(conversationId)),
     messageNextCursor: page.nextCursor,
     messageHasMore: page.hasMore,
   });
@@ -1432,10 +1655,22 @@ function hasSubmittedHitlCard(
   });
 }
 
+// WS4：turn 事件续传的客户端支撑（续传游标、直播通道、分批让出主线程）在 stores/turnResume。
+import {
+  RESTORE_REPLAY_BATCH,
+  createTurnResumeStream,
+  forgetTurnLastSeq,
+  rememberTurnLastSeq,
+  yieldToEventLoop,
+} from './turnResume';
+
 /**
  * A page refresh drops the browser SSE connection, but the backend turn keeps
  * running and records every sequenced event. Rebuild the generating bubble from
- * the persisted turn and poll event replay until a terminal envelope arrives.
+ * the persisted turn, then **attach to the running turn's live stream**
+ * (`GET /turns/{turnId}/stream?afterSeq=N`): history first, then live events,
+ * until a terminal envelope arrives. Older backends without that endpoint fall
+ * back to the previous polling replay.
  */
 async function restorePersistedTurn(conversationId: string) {
   let active: AgentActiveTurn | undefined;
@@ -1477,7 +1712,11 @@ async function restorePersistedTurn(conversationId: string) {
     };
   });
 
+  // 冷启动/刷新一律从 0 补齐历史：正在跑的助回复只存在于事件日志里（产品消息表里没有），
+  // 少补一段就会渲染出"缺头"的回复，所以这里不按本地游标裁剪。补齐按批 + yield 防止卡 UI。
   let initialEvents: AgentTurnEventEnvelope[] = [];
+  let afterSeq = 0;
+  let bufferedEvents: AgentTurnEventEnvelope[] = [];
   try {
     const response = await agentApi.listTurnEvents(conversationId, active.turnId, 0);
     initialEvents = response.data.data ?? [];
@@ -1491,10 +1730,10 @@ async function restorePersistedTurn(conversationId: string) {
   const lastInitialEvent = initialEvents.at(-1);
   const waitingForResumeStart = resumeStartSeq === 0
     && lastInitialEvent?.type === 'turn_paused';
-  let afterSeq = resumeStartSeq > 0
+  afterSeq = resumeStartSeq > 0
     ? resumeStartSeq - 1
     : waitingForResumeStart ? lastInitialEvent!.seq : 0;
-  let bufferedEvents = waitingForResumeStart
+  bufferedEvents = waitingForResumeStart
     ? []
     : initialEvents.filter((event) => event.seq > afterSeq);
   turnEventSequencer.reset(active.turnId);
@@ -1504,23 +1743,70 @@ async function restorePersistedTurn(conversationId: string) {
   let terminal: AgentTurnEventEnvelope['type'] | null = null;
   let waitingUser = false;
   let pollCount = 0;
+
+  // ── 直播续传通道 ─────────────────────────────────────────────
+  // 先补历史（bufferedEvents），再持续接收直播事件直到终态；通道内部把连接失败暴露成
+  // state()==='failed'，循环据此回退到既有轮询回放。订阅者断开不会中断 turn。
+  // 直播起点 = 已经补过的历史末序号，不能直接用 afterSeq：后者是"要跳过多少历史"的游标
+  // （例如 HITL 续跑时指向暂停点），从它开始会把已经补过的历史再发一遍，文本 delta 会重复。
+  const liveCursor = bufferedEvents.length > 0
+    ? bufferedEvents[bufferedEvents.length - 1].seq
+    : afterSeq;
+  const liveStream = createTurnResumeStream({
+    conversationId,
+    turnId: active.turnId,
+    afterSeq: liveCursor,
+    subscribe: streamTurnResume,
+  });
+
   while (useAgentStore.getState().activeConversationId === conversationId) {
     let events: AgentTurnEventEnvelope[] = [];
+    const liveState = liveStream.state();
     if (bufferedEvents.length > 0) {
-      events = bufferedEvents;
-      bufferedEvents = [];
+      // 一次性重放按批进行：批间在循环末尾 yield，避免刷新后一个长任务卡住主线程。
+      events = bufferedEvents.splice(0, RESTORE_REPLAY_BATCH);
     } else {
-      try {
-        const response = await agentApi.listTurnEvents(conversationId, active.turnId, afterSeq);
-        events = response.data.data ?? [];
-      } catch {
-        await reconnectDelay(1500);
+      // 先取队列，再看状态：直播可能在两次循环之间就把事件收完并结束（尤其恢复流程本身较慢时），
+      // 若只在 streaming 时才 take，这批事件会被丢掉，恢复就永远停在这里。
+      const batch = liveStream.take();
+      if (batch.length > 0) {
+        events = batch;
+      } else if (liveState === 'streaming') {
+        // 直播进行中且暂无新事件：等待推送，不再 1s 轮询。
+        await liveStream.waitForEvents();
+        continue;
+      } else if (liveState === 'failed') {
+        // 续传端点不可用：回退到既有轮询回放（行为与改造前一致）。
+        try {
+          const response = await agentApi.listTurnEvents(conversationId, active.turnId, afterSeq);
+          events = response.data.data ?? [];
+        } catch {
+          await reconnectDelay(1500);
+          continue;
+        }
+      } else {
+        // 直播已正常结束、队列也空了但没拿到终态事件：用一次状态检查收口。
+        let status: string | undefined;
+        try {
+          const latest = await agentApi.getRuntimeStatus(conversationId);
+          status = latest.data.data.activeTurn?.status;
+        } catch {
+          // 状态查询失败：按已结束处理，避免在这里空转。
+        }
+        if (!status || status === 'waiting_user') {
+          waitingUser = true;
+          break;
+        }
+        // 服务端仍在跑但连接提前关闭：退回轮询继续追。
+        liveStream.markFailed();
         continue;
       }
     }
     for (const envelope of events) {
       const effects = applyAgentTurnEnvelope(envelope, { conversationId, assistantId });
       afterSeq = Math.max(afterSeq, envelope.seq);
+      // 记录已渲染到的序号：终态前若本页再次进入同一个 turn，可据此定位续传起点（不重复拉历史）。
+      rememberTurnLastSeq(conversationId, active.turnId, afterSeq);
       if (effects.taskAccepted) {
         const accepted = effects.taskAccepted;
         if (accepted.taskKind === 'long-tool' || accepted.taskKind === 'image-batch') {
@@ -1610,7 +1896,19 @@ async function restorePersistedTurn(conversationId: string) {
         // Keep replaying; a transient status failure should not abort recovery.
       }
     }
-    await reconnectDelay(1000);
+    if (bufferedEvents.length > 0 || liveStream.state() === 'streaming') {
+      // 还有待补的历史或直播仍在进行：先让出主线程，避免一次重放变成超长任务。
+      await yieldToEventLoop();
+    } else {
+      // 直播不可用（回退轮询）时才退避；直播进行中由 waitForEvents 唤醒，不做定时轮询。
+      await reconnectDelay(1000);
+    }
+  }
+
+  liveStream.stop();
+  if (terminal || waitingUser) {
+    // 终态/暂停：该 turn 不会再续传，清掉续传游标。
+    forgetTurnLastSeq(conversationId, active.turnId);
   }
 
   if (terminal === 'turn_completed') finishAssistantReply(conversationId, assistantId);
@@ -1870,6 +2168,12 @@ function canvasRunMetadata(
       : eventType === 'canvas_run_started'
         ? 'queued'
         : previous?.status ?? 'writing';
+  // 画布增量补丁：只在 payload 确实带对象/布尔时透传（不解析内部结构），
+  // 未携带时保留 previous 上的值，避免后续事件把已累积的补丁抹掉。
+  const canvasPatch = asRecord(payload.canvasPatch) ?? previous?.canvasPatch;
+  const canvasPatchOverflow = typeof payload.canvasPatchOverflow === 'boolean'
+    ? payload.canvasPatchOverflow
+    : previous?.canvasPatchOverflow;
   return {
     ...previous,
     kind: 'canvas-run',
@@ -1882,6 +2186,8 @@ function canvasRunMetadata(
     nodeCount: optionalNumber(payload.nodeCount) ?? previous?.nodeCount,
     edgeCount: optionalNumber(payload.edgeCount) ?? previous?.edgeCount,
     revision: optionalNumber(payload.revision) ?? previous?.revision,
+    ...(canvasPatch ? { canvasPatch } : {}),
+    ...(canvasPatchOverflow === undefined ? {} : { canvasPatchOverflow }),
     error: optionalString(payload.error) ?? (eventType === 'canvas_run_failed' ? previous?.error : undefined),
     projectId: optionalString(payload.projectId) ?? previous?.projectId,
     conversationId: optionalString(payload.conversationId) ?? previous?.conversationId,
@@ -2161,7 +2467,20 @@ function applyOneEnvelope(
 
   if (envelope.type === 'turn_failed') {
     effects.failed = true;
+    const code = asString(payload.code);
     const message = asString(payload.message, 'MoonAgent 执行失败');
+    /**
+     * 用户主动停止（40904「生成已停止」）不是错误：
+     * - 不能弹错误条（那是用户自己要停的）；
+     * - 已流出的正文要就地定格成「…」，而不是被清空或被终态覆盖。
+     * 其它失败路径行为不变（照旧报错）。
+     */
+    const userStopped = code === '40904' || interruptedTurns.has(envelope.turnId);
+    if (userStopped) {
+      interruptedTurns.delete(envelope.turnId);
+      freezeInterruptedReply(context.conversationId, context.assistantId);
+      return;
+    }
     useAgentStore.setState((state) => ({
       ...(state.activeConversationId === context.conversationId ? { streamError: message } : {}),
     }));
@@ -2176,6 +2495,8 @@ function applyOneEnvelope(
   if (eventType === 'TEXT_BLOCK_DELTA') {
     const delta = asString(data.delta);
     if (!delta) return;
+    // 已被用户打断的 turn：气泡已经以「…」定格，后续在途 delta 不再续写
+    if (interruptedTurns.has(envelope.turnId)) return;
     useAgentStore.setState((state) => {
       const generation = state.generating[context.conversationId] ?? { hint: '' };
       const content = `${generation.assistantContent ?? ''}${delta}`;
@@ -2795,6 +3116,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       pendingPicUrls: [],
       refImageUrls: [],
       pendingAttachments: [],
+      pendingReferences: [],
       pickedReferenceVideos: [],
       pickedReferenceAudios: [],
       workflowHint: '',
@@ -2925,8 +3247,74 @@ export const useAgentStore = create<AgentState>((set, get) => ({
        waitingVideoPlan: null, hitlVideoPlan: h, streamError: null, pendingAssistantId: null, pendingPicUrl: null }; });
   },
 
+  /**
+   * 「/清空上下文」：后端真删除该会话的全部上下文（消息、轮次与直播事件、待确认卡片、
+   * 画布会话与运行、文档索引…），前端同步把会话态退回「刚建出来的新对话」。
+   *
+   * <p>与 {@link clearMessages} 的区别是「真删 + 彻底」：后端删的是数据库行而不是标记，
+   * 标题也回到「新对话」；因此前端要把所有只存活在内存里的会话态一起清掉
+   * （进行中的生成快照、HITL 卡片、待发注释、附件、画布上下文），否则界面上仍会
+   * 残留上一次对话的影子。
+   *
+   * @returns 真删行数与重置后的标题；无会话或在生成中时返回 null（调用方给提示）
+   */
+  clearContext: async () => {
+    const id = get().activeConversationId;
+    if (!id) return null;
+    // 生成中禁止清空：后端会因会话锁返回 40901，前端直接前置拦截并保留输入内容
+    if (get().streaming || get().waitingHumanInput || get().waitingVideoPlan) return null;
+
+    const res = await agentApi.clearContext(id);
+    const result = res.data.data ?? null;
+
+    cancelConversationTitleRefresh(id);
+    useChatAnnotationStore.getState().consumeConversation(id);
+    // 画布编辑模式是会话级上下文：清空后退回普通对话
+    clearCanvasEditContext();
+
+    const generating = { ...get().generating };
+    delete generating[id];
+
+    set((s) => {
+      const hitlVideoPlan = { ...s.hitlVideoPlan };
+      delete hitlVideoPlan[id];
+      return {
+        messages: [],
+        messageNextCursor: null,
+        messageHasMore: false,
+        generating,
+        streaming: false,
+        workflowHint: '',
+        waitingHumanInput: null,
+        waitingVideoPlan: null,
+        hitlVideoPlan,
+        streamError: null,
+        pendingAssistantId: null,
+        pendingPicUrls: [],
+        refImageUrls: [],
+        pendingAttachments: [],
+        pendingReferences: [],
+        pickedReferenceVideos: [],
+        pickedReferenceAudios: [],
+        pickedAssetIds: [],
+        taskFocusId: null,
+        canvasEditContext: null,
+        canvasBinding: null,
+        canvasBindingStatus: '',
+        canvasExitPending: false,
+        // 标题在后端已重置，列表与当前会话同步显示「新对话」
+        conversations: result?.title
+          ? s.conversations.map((c) => (c.id === id ? { ...c, title: result.title } : c))
+          : s.conversations,
+      };
+    });
+    return result;
+  },
+
   selectConversation: async (id) => {
     const loadEpoch = ++conversationLoadEpoch;
+    // 切会话会清空本地消息：先把已定格的截断回复取出来，等服务端列表回来再合并回去
+    const localInterrupted = id === get().activeConversationId ? interruptedRepliesOf(id) : [];
     // HITL 按会话隔离（getPendingCheckpoint/hitlVideoPlan 各自恢复），允许切换会话
     set((s) => {
       const g = s.generating[id];
@@ -2942,7 +3330,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
         pendingAssistantId: null,
-        pendingPicUrls: [], refImageUrls: [], pendingAttachments: [],
+        pendingPicUrls: [], refImageUrls: [], pendingAttachments: [], pendingReferences: [],
         pickedReferenceVideos: [], pickedReferenceAudios: [], pickedAssetIds: [],
         taskUnread: { ...s.taskUnread, [id]: 0 },
         replyUnread: { ...s.replyUnread, [id]: false },
@@ -2960,18 +3348,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       (mediaId) => resolveLibraryMedia(id, mediaId),
     );
     const savedAttachments = readPendingAttachments(id);
-    const restoredAttachments = await refreshLibraryMediaAttachments(savedAttachments.length
-      ? savedAttachments
-      : attachmentsFromMessages(base), (mediaId) => resolveLibraryMedia(id, mediaId));
+    // 只恢复「用户加了但还没发出去」的附件：已发送的素材不再回到输入框
+    // （否则用户会以为本轮又带了一遍旧素材），它们留在会话消息里可见。
+    const restoredAttachments = savedAttachments.length
+      ? await refreshLibraryMediaAttachments(
+          savedAttachments, (mediaId) => resolveLibraryMedia(id, mediaId))
+      : [];
     if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
     set({
       messages: g?.assistantId
-        ? [...base, { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
-        : base,
+        ? [...mergeInterruptedReplies(base, localInterrupted), { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
+        : mergeInterruptedReplies(base, localInterrupted),
       messageNextCursor: page.nextCursor,
       messageHasMore: page.hasMore,
       pendingAttachments: restoredAttachments,
       ...pendingMediaFromAttachments(restoredAttachments),
+      pendingReferences: readPendingReferences(id),
     });
     void restorePersistedTurn(id);
     void restorePendingCanvasSession(id);
@@ -3069,11 +3461,87 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
       targetMessageId = persistedUser.id;
     }
-    await get().sendMessage(content, { editMessageId: targetMessageId });
+    // 编辑重发：引用以「编辑后的正文 + 这条消息原有的引用目录」为准。
+    // 不取 store 快照（那是给人写新消息用的），也不留空（空 = 明确告诉后端「改后不再引用」，
+    // 否则后端会从 previousInput 恢复旧引用，用户删掉的标记会复活）。
+    const edited = get().messages.find((message) => message.id === targetMessageId);
+    const previousReferences = edited?.metadata?.messageInput?.references ?? [];
+    await get().sendMessage(content, {
+      editMessageId: targetMessageId,
+      references: activeReferences(content, previousReferences),
+    });
   },
+  /**
+   * 打断当前生成并发送这句话。
+   *
+   * <p>顺序刻意做成「先停、再定格、最后才发」：</p>
+   * <ol>
+   *   <li>立刻把已经流出的正文定格成「…」（用户马上看到"停住了"，且这段字不会被丢掉）；</li>
+   *   <li>请求后端协作式取消，并**等这一轮真正走到终态**——
+   *       抢跑提交新回合会撞上会话锁（40901「当前对话正在处理中」），
+   *       而新回合的 clearInterrupt 也可能在旧回合观察到打断之前把信号清掉；</li>
+   *   <li>旧轮落定后再把用户这句话作为新一轮发出去。</li>
+   * </ol>
+   *
+   * @return true=新消息已发出；false=打断没能在超时内生效（消息未发出，调用方应回填输入框）
+   */
   interruptAndSend: async (content) => {
-    if (!content.trim()) return;
-    await get().sendMessage(content, { interruptCurrent: true });
+    if (!content.trim()) return false;
+    const conversationId = get().activeConversationId;
+    const running = !!conversationId && get().streaming
+      && !get().agentVideoTask && !get().waitingHumanInput && !get().waitingVideoPlan;
+    if (!conversationId || !running) {
+      // 没有在跑的回合：按普通发送处理（消息是否真的发出由 store 自身的错误态兜底）
+      void get().sendMessage(content);
+      return true;
+    }
+    // 同一条"先停后发"的链路只允许一个在跑：重复点击不再排第二条
+    if (pendingInterruptSends.has(conversationId)) return false;
+    pendingInterruptSends.add(conversationId);
+    try {
+      const generation = get().generating[conversationId];
+      const turnId = generation?.turnId;
+      const assistantId = generation?.assistantId ?? get().pendingAssistantId;
+      // 旧流被我们主动打断：不要弹「回复失败」这类错误条
+      manualStop = true;
+      if (turnId) interruptedTurns.add(turnId);
+      // ① 定格：文字留在气泡里，末尾「…」
+      freezeInterruptedReply(conversationId, assistantId);
+      set((s) => {
+        const current = s.generating[conversationId];
+        if (!current) return {};
+        return {
+          generating: {
+            ...s.generating,
+            [conversationId]: { ...current, hint: '正在停止当前生成…' },
+          },
+          ...(s.activeConversationId === conversationId
+            ? { workflowHint: '正在停止当前生成…' }
+            : {}),
+        };
+      });
+      // ② 让后端把这一轮停掉（turnId 还没下发时退回会话级打断入口）
+      if (turnId) {
+        await agentApi.interruptTurn(conversationId, turnId).catch(() => undefined);
+      } else {
+        await agentApi.interruptConversation(conversationId).catch(() => undefined);
+      }
+      const settled = await waitForInterruptSettled(conversationId, INTERRUPT_SETTLE_TIMEOUT_MS);
+      if (!settled) {
+        // 打断没能在超时内生效：不发新消息（否则必然撞会话锁），把内容还给用户。
+        // 这里不断流：流还在就让它继续，用户可以用「停止生成」强制收尾。
+        set({ streamError: '停止当前生成超时，请等它结束后再发送' });
+        return false;
+      }
+      // 终态事件可能早于服务端 finally 释放会话锁，留一点余量再提交新回合
+      await new Promise((resolve) => window.setTimeout(resolve, INTERRUPT_RELEASE_GRACE_MS));
+      manualStop = false;
+      // ③ 现在发送我们的话：不 await 整轮，否则这一轮期间再点「停止并发送」会被上面的互斥挡掉
+      void get().sendMessage(content);
+      return true;
+    } finally {
+      pendingInterruptSends.delete(conversationId);
+    }
   },
   generating: {},
   waitingHumanInput: null,
@@ -3264,6 +3732,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   refImageUrls: [],
   setRefImageUrls: (v) => set({ refImageUrls: v }),
   addRefImageUrls: (urls) => set((s) => ({ refImageUrls: [...new Set([...s.refImageUrls, ...urls])] })),
+  composerInjection: null,
+  injectComposerText: (text) => {
+    const clean = text.trim();
+    if (!clean) return;
+    set((s) => ({
+      composerInjection: { seq: (s.composerInjection?.seq ?? 0) + 1, text: clean },
+    }));
+  },
   removeRefImageUrl: (index) => set((s) => {
     const removed = s.refImageUrls[index];
     return {
@@ -3301,6 +3777,30 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     };
   }),
 
+  pendingReferences: readPendingReferences(null),
+  setPendingReferences: (references) => set((s) => {
+    const next = dedupeReferences(references.filter(isAgentReference));
+    persistPendingReferences(s.activeConversationId, next);
+    return { pendingReferences: next };
+  }),
+  addPendingReferences: (references) => set((s) => {
+    const next = dedupeReferences([
+      ...s.pendingReferences,
+      ...references.filter(isAgentReference),
+    ]);
+    persistPendingReferences(s.activeConversationId, next);
+    return { pendingReferences: next };
+  }),
+  removePendingReference: (kind, id) => set((s) => {
+    const next = s.pendingReferences.filter((item) => !(item.kind === kind && item.id === id));
+    persistPendingReferences(s.activeConversationId, next);
+    return { pendingReferences: next };
+  }),
+  clearPendingReferences: () => set((s) => {
+    persistPendingReferences(s.activeConversationId, []);
+    return { pendingReferences: [] };
+  }),
+
   pickedAssetIds: [],
   addPickedAssetId: (id) => set((s) => ({ pickedAssetIds: [...new Set([...s.pickedAssetIds, id])] })),
   removePickedAssetId: (id) => set((s) => ({ pickedAssetIds: s.pickedAssetIds.filter((a) => a !== id) })),
@@ -3325,12 +3825,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const mediaKind = attachmentKind(file);
     if (mediaKind === 'file') rememberDocumentSource(url, file);
     const canvasKind: AgentMediaRef['kind'] = mediaKind;
-    const absoluteUrl = (() => {
-      try { return new URL(url, window.location.origin).toString(); } catch { return url; }
-    })();
+    // 画布媒体引用必须是服务端可解析的相对路径：绝对化后 origin 会是浏览器地址
+    // （开发端口/网关/站点域名），MoonAgent 校验会拒绝并报「媒体地址不在允许的服务范围内」。
+    // 渲染侧相对路径已由聊天页自身的 /api 代理兜住，无需绝对化。
     get().addCanvasMediaRefs([{
       kind: canvasKind,
-      url: absoluteUrl,
+      url,
       name: file.name,
       mimeType: payload.mimeType || file.type || undefined,
       source: 'upload',
@@ -3404,8 +3904,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     cancelActiveTasks?: boolean;
     editMessageId?: string;
     clientRequestId?: string;
-    interruptCurrent?: boolean;
     attachments?: AgentAttachment[];
+    references?: AgentReference[];
   }) => {
     const activeId = get().activeConversationId;
     const activeConversation = get().conversations.find((conversation) => conversation.id === activeId);
@@ -3415,7 +3915,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return;
     }
     const editMessageId = opts?.editMessageId;
-    const interruptCurrent = !!opts?.interruptCurrent && get().streaming;
     const editTargetIndex = editMessageId
       ? get().messages.findIndex((message) => message.id === editMessageId && message.role === 'user')
       : -1;
@@ -3425,34 +3924,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     // 输入禁用条件：(streaming && !agentVideoTask) || waitingHumanInput || waitingVideoPlan
     // 视频异步任务轮询期间（agentVideoTask 存在）允许继续发送新消息
-    if ((!interruptCurrent && get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan
+    // 生成中要发新消息统一走 interruptAndSend（先停旧轮、再发新轮），这里不再有"边生成边发"的分支。
+    if ((get().streaming && !get().agentVideoTask) || get().waitingHumanInput || get().waitingVideoPlan
       || get().canvasBinding || get().canvasExitPending || !content.trim()) return;
-    if (interruptCurrent) {
-      const runningConversationId = get().activeConversationId;
-      const runningAssistantId = get().pendingAssistantId;
-      const runningTurnId = runningConversationId
-        ? get().generating[runningConversationId]?.turnId
-        : undefined;
-      manualStop = true;
-      streamAbort?.abort();
-      streamAbort = null;
-      if (runningConversationId && runningTurnId) {
-        void agentApi.interruptTurn(runningConversationId, runningTurnId).catch(() => undefined);
-      }
-      set((s) => {
-        const generating = { ...s.generating };
-        if (runningConversationId) delete generating[runningConversationId];
-        return {
-          generating,
-          streaming: false,
-          workflowHint: '',
-          pendingAssistantId: null,
-          messages: runningAssistantId
-            ? s.messages.filter((message) => message.id !== runningAssistantId)
-            : s.messages,
-        };
-      });
-    }
     // 新一轮发送：清除上次手动停止标志并新建 AbortController（供「停止生成」中断本流）。
     // 若视频异步任务仍轮询，先停止旧轮询并告知后端取消在途任务（cancelActiveTasks: true）。
     if (get().agentVideoTask) {
@@ -3461,7 +3935,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       set({ agentVideoTask: null });
       opts = { ...opts, cancelActiveTasks: true };
     }
-    if (!interruptCurrent) manualStop = false;
+    manualStop = false;
     streamAbort = new AbortController();
     const signal = streamAbort.signal;
     // 快照参考图——createConversation → selectConversation 会把 refImageUrls/messages 清空，
@@ -3470,6 +3944,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const referenceVideosBefore = get().pickedReferenceVideos.map((u) => u);
     const referenceAudiosBefore = get().pickedReferenceAudios.map((u) => u);
     const attachmentsBefore = get().pendingAttachments.map((item) => ({ ...item }));
+    // 同一类快照：createConversation → selectConversation 会清空 pendingReferences
+    const referencesBefore = get().pendingReferences.map((item) => ({ ...item }));
     // 同样的坑：createConversation → selectConversation 会清空 pickedAssetIds，必须先快照
     const assetIdsBefore = get().pickedAssetIds.map((id) => id);
     const requestPicUrls = (opts?.picUrls && opts.picUrls.length > 0) ? opts.picUrls
@@ -3481,6 +3957,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const requestAttachments = opts?.attachments && opts.attachments.length > 0
       ? opts.attachments
       : attachmentsBefore;
+    // 引用资料与附件同源同命：优先用调用方显式传入的，否则用本轮快照。
+    // 注意「停止并发送」路径（interruptAndSend → sendMessage）不传 opts，
+    // 正是靠这条快照兜底才不丢引用。
+    // `references: []` 与「没传」含义不同：编辑重发时会显式传空数组表示「改后的正文不再引用任何东西」，
+    // 那是权威值，不能回落到快照（否则用户删掉标记重发，旧引用会被复活）。
+    // 最后再按正文过滤一次：`@名称` 被删掉/改写了就不带走这条引用（防幽灵引用）。
+    const requestReferences = activeReferences(content, dedupeReferences(
+      opts?.references !== undefined ? opts.references : referencesBefore,
+    ));
     const requestReferenceVideos = opts?.referenceVideos ?? referenceVideosBefore;
     const requestReferenceAudios = opts?.referenceAudios ?? referenceAudiosBefore;
     const canvasContext = buildCanvasRequestContext(get().canvasEditContext, {
@@ -3504,6 +3989,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     if (!id) return;
     persistPendingAttachments(id, attachmentsBefore);
+    persistPendingReferences(id, referencesBefore);
     // 继续完善参考图：点"继续完善"后暂存的 PicUrls，随本条用户消息发送并消费（只带一次，
     // 避免后续普通消息也误带图片导致误判 pic-refine 意图）
     const pendingPic = get().pendingPicUrls;
@@ -3522,6 +4008,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           ...(requestReferenceAudios.length > 0 ? { referenceAudios: requestReferenceAudios } : {}),
           ...(requestAssetIds.length > 0 ? { assetIds: requestAssetIds } : {}),
           ...(requestAttachments.length > 0 ? { attachments: requestAttachments } : {}),
+          ...(requestReferences.length > 0 ? { references: requestReferences } : {}),
           ...(opts?.routingHint ? { routingHint: opts.routingHint } : {}),
         },
       },
@@ -3541,6 +4028,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       waitingHumanInput: null,
     }));
     initialSceneCount = useProjectStore.getState().scenes.length;
+
+    // 本轮素材已随消息送达（也写进消息 metadata 与会话历史）：从输入框上方彻底撤掉，
+    // 并清掉本地快照，刷新后不再作为「待发素材」复活——否则用户会以为旧素材又被发了一遍。
+    // 历史素材在会话消息里仍然可见；要再带素材时重新「加文件 / 加资产」。
+    if (get().canvasEditContext) {
+      const context = get().canvasEditContext!;
+      const consumedContext = { ...context, mediaRefs: [], excludedMediaUrls: [] };
+      persistCanvasEditContext(consumedContext);
+      set({ canvasEditContext: consumedContext });
+    }
+    get().clearPendingAttachments();
+    get().clearPendingReferences();
 
     // 追加空 assistant 消息（流式填充）
     const assistantId = `tmp-assistant-${Date.now()}`;
@@ -3692,6 +4191,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         referenceVideos: requestReferenceVideos,
         referenceAudios: requestReferenceAudios,
         attachments: requestAttachments,
+        references: requestReferences,
         // 生成偏好：自动且不忽略方案时返回 undefined → 请求体不带该字段（零回归）
         generationPreferences: toGenerationPreferencesPayload(get().generationPreferences),
       });
@@ -4435,6 +4935,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
     } finally {
       releaseStream();
+      // 本轮流已结束：清除打断标记（后续不会再收到这一轮的 delta）
+      const settledTurnId = get().generating[snapshotId]?.turnId;
+      if (settledTurnId) interruptedTurns.delete(settledTurnId);
+      if (interruptedTurns.size > 64) interruptedTurns.clear();
       const stillSameConversation = get().activeConversationId === snapshotId;
       // 异步视频任务已受理：保持 streaming（轮询 completed 时关闭），占位气泡不补写
       if (acceptedTaskId) {
@@ -4464,11 +4968,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  /** 停止当前会话生成（「停止生成」按钮）：中断 SSE 流（打字机停）+ 后端协作式取消 + 复位视图 */
+  /**
+   * 停止当前会话生成（「停止生成」按钮）：定格已流出的文字 + 中断 SSE 流 + 后端协作式取消。
+   *
+   * <p>用户要求「停止后智能体已经发出来的文字不能被清空」：这里不再删除占位消息，
+   * 而是把正文补上「…」后留在气泡里（后端同时会把这段截断正文落库）。</p>
+   */
   stopGeneration: () => {
     const id = get().activeConversationId;
     const pendingAssistantId = get().pendingAssistantId;
     manualStop = true;
+    const turnId = id ? get().generating[id]?.turnId : undefined;
+    // 断流后不会再有任何 delta；无需登记 interruptedTurns（那是「保持连接等终态」路径才需要的）
+    const frozen = id ? freezeInterruptedReply(id, pendingAssistantId) : '';
     // 中断当前 SSE fetch（若有）：consumeSse 循环检测 signal.aborted 会立即跳出 → 触发 sendMessage 等的 finally 清理
     streamAbort?.abort();
     streamAbort = null;
@@ -4476,7 +4988,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (videoPollTimer) { clearInterval(videoPollTimer); videoPollTimer = null; }
     videoPollToken += 1;
     // Turn-scoped cancellation; no active turn means there is nothing to interrupt.
-    const turnId = id ? get().generating[id]?.turnId : undefined;
     if (id && turnId) void agentApi.interruptTurn(id, turnId).catch(() => { /* 静默 */ });
     // 视频异步任务轮询期 / 无活跃 SSE 流：直接复位当前会话视图（后端视频任务仍会后台跑完）
     set((s) => {
@@ -4489,7 +5000,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         workflowHint: generationHint(gview),
         ...(pendingAssistantId ? {
           pendingAssistantId: null,
-          messages: s.messages.filter((message) => message.id !== pendingAssistantId),
+          // 已定格的正文连气泡一起保留；一个字都没流出来时才收起空占位
+          messages: frozen
+            ? s.messages
+            : s.messages.filter((message) => message.id !== pendingAssistantId),
         } : {}),
       };
     });
@@ -4687,7 +5201,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
        pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
        waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
-       pendingAttachments: [], pickedReferenceVideos: [], pickedReferenceAudios: [],
+       pendingAttachments: [], pendingReferences: [], pickedReferenceVideos: [], pickedReferenceAudios: [],
        pendingAssistantId: null,
        pendingPicUrls: [], storyboardImageQueue: [],
        canvasEditContext: null, canvasBinding: null, canvasBindingStatus: '', canvasExitPending: false,

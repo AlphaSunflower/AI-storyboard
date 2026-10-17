@@ -23,7 +23,13 @@ class OllamaModelSyncServiceTest {
     private final UpstreamClient upstream = mock(UpstreamClient.class);
     private final StringRedisTemplate redis = mock(StringRedisTemplate.class);
     private final OllamaModelSyncService service =
-            new OllamaModelSyncService(channelMapper, keyService, upstream, redis);
+            new OllamaModelSyncService(channelMapper, keyService, upstream, new ModelCatalogCache(redis));
+
+    @SuppressWarnings("unchecked")
+    private void stubRedis() {
+        when(redis.opsForValue())
+                .thenReturn(mock(org.springframework.data.redis.core.ValueOperations.class));
+    }
 
     @Test
     void sync_refreshesChannelModelsOnly() throws Exception {
@@ -38,7 +44,7 @@ class OllamaModelSyncServiceTest {
         when(resp.statusCode()).thenReturn(200);
         when(resp.body()).thenReturn("{\"models\":[{\"name\":\"gemma4\"},{\"name\":\"llava\"}]}");
         when(upstream.get("http://x/api/tags", "")).thenReturn(resp);
-        when(redis.keys(anyString())).thenReturn(null);
+        stubRedis();
 
         OllamaSyncResult result = service.sync("c1");
 

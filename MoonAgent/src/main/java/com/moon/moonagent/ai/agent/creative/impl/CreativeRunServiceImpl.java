@@ -87,8 +87,8 @@ public class CreativeRunServiceImpl implements CreativeRunService {
                 %s
                 Reasons:
                 %s
-                Keep all HARD project constraints unchanged. Generate one corrected result,
-                then call review_generated_media before reporting success.
+                Keep all HARD project constraints unchanged. Generate one corrected result and
+                report it directly to the user.
                 %s
                 """.formatted(target.violations(), target.reasons(), extra);
         return new RepairTarget(

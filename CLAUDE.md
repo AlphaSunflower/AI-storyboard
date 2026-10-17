@@ -41,6 +41,8 @@ AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScr
 - `reject` 是终止取消，不是可回灌给模型的工具结果。用户拒绝后：checkpoint 原子转为 `used`，turn 以取消/完成结束，不再调用模型、不重新发确认卡片。
 - HITL pending/claimed 状态必须限定在当前会话和当前 turn。完成、取消、失败或清理后不得从陈旧 checkpoint 恢复出可再次点击的卡片。
 - 前端不得因重放、刷新、补偿事件或重复点击再次提交同一个 `formToken`；后端必须保持一次性消费和幂等终止。
+- **打断不丢字（2026-10-16）**：用户「停止生成」或「停止并发送」后，智能体已经流出的正文必须留在气泡里，末尾补「…」（`interruptedReplyText` / `interruptedReplyContent` 同一口径），并显式落库为一条 assistant 消息（`metadata.interrupted=true`）。禁止再用 `messages.filter(id !== pendingAssistantId)` 把气泡删掉：那会让刚生成的文字整段消失，刷新后也读不到。`turn_failed` 的 `code=40904` 是用户主动停止，不得弹错误条。
+- **打断与重发的时序（2026-10-16）**：`interruptAndSend` 必须是「先打断并等旧 turn 走到终态 → 再提交新 turn」，抢跑会撞会话锁（40901）；后端 `clearInterrupt` 只能在**拿到会话锁之后**调用（此时上一轮已终态），否则旧回合观察不到打断会一直跑到自然结束，用户看到「停止没反应」。
 
 ### 5. 沙箱与产物发布链路不可混用宿主机路径
 
@@ -56,7 +58,11 @@ AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScr
 任何修改下列任一路径的提交，至少运行对应聚焦测试，并在完成说明中写出证据：
 
 ```powershell
-mvn -pl MoonAgent -am "-Dtest=AgentTurnEventStoreTest,MoonSandboxClientTest,SandboxOutputReconcilerTest,CheckpointResumeServiceTest" test
+# 注意：`-am` 会连同依赖模块一起进 reactor，而 `-Dtest` 过滤器在 common-core / asset-client /
+# agent-core 上匹配不到任何测试；缺 `-Dsurefire.failIfNoSpecifiedTests=false` 时 surefire 会
+# 直接在这些模块上报 "No tests matching pattern ... were executed" 并中止，命令根本走不到
+# MoonAgent（2026-10-16 实测）。下面的写法是能真正跑通的版本。
+mvn -pl MoonAgent -am "-Dtest=AgentTurnEventStoreTest,MoonSandboxClientTest,SandboxOutputReconcilerTest,CheckpointResumeServiceTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
 cd AIStoryboardClient
 npm test -- --run src/stores/agentStore.test.ts
 npm run build
@@ -143,7 +149,7 @@ cp .env.example .env
 
 ### 统一业务栈（deploy/stack/）
 
-`deploy/stack/` 用一个 compose 项目把基础设施与业务一起拉起（6 个 Java 服务 + 主前端/画布前端 + Postgres/Redis/MinIO/MoonSandbox，共 12 个容器；不含 Nacos 与画布 Bridge——服务发现默认关闭、网关直连，浏览器画布命令由 canvas 服务的信箱转发），
+`deploy/stack/` 用一个 compose 项目把基础设施与业务一起拉起（6 个 Java 服务 + 主前端/画布前端 + Postgres/Redis/MinIO/MoonSandbox，共 11 个容器；不含 Nacos 与画布 Bridge——服务发现默认关闭、网关直连，浏览器画布命令由 canvas 服务的信箱转发），
 入口 `http://localhost/`，默认账号 `admin@qq.com`。首启由 `db/` 下的 `docker-entrypoint-initdb.d` 脚本建库、还原
 `ai_storyboard` / `llm_gateway` 转储并把账号收敛为 `admin@qq.com`；MinIO 直接挂载 `deploy/docker/minio/data`。
 构建/启停/验收/离线打包脚本在 `deploy/stack/scripts/`，细节与排障要点见 `deploy/stack/README.md`。
@@ -250,6 +256,39 @@ HttpRequest request = HttpRequest.newBuilder()
 
 `GlobalExceptionHandler.handleUnknown` returns `e.getMessage()` (not fixed "server internal error") so frontend sees Laozhang API errors (e.g. content moderation rejections).
 `extractReadableError()` recursively unwraps multi-layer nested/escaped JSON errors (Laozhang → Vertex AI) down to the innermost readable `message`, then truncates to 200 chars. Plain business errors pass through untouched.
+
+### 9. 媒体引用地址必须是相对路径（画布/聊天 turn 入口）
+
+服务端只信任「相对 `/api/files/**`、`/api/library/media/**`，或白名单 origin」的媒体地址（`OutboundUrlGuard.canonicalizeMediaUrl`）：
+
+- 前端**禁止**对上传结果做 `new URL(url, window.location.origin).toString()` 之类的绝对化。浏览器 origin（`http://localhost`、前端 dev 端口、网关端口）与服务端内部 origin（`http://backend:8082` / `http://asset-service:8085` / `http://minio:9000`）天然不同，绝对化会让 turn 直接被 `40001 媒体地址不在允许的服务范围内` 拒绝（画布编辑模式的 `canvasContext.mediaRefs` 尤其容易踩：引用会被 sessionStorage 持久化，每轮重发都失败）。
+- 需要额外公网端点（CDN/OSS）时用 `MOON_MEDIA_ALLOWED_ORIGINS` 登记，不要放开前端 origin。
+- 浏览器 origin 的绝对 `/api/files/**` 地址由 `TurnMediaCanonicalizer` 归一化成相对路径（顺带修正下游 `fetchRemoteImage` 会拒绝 loopback 的问题）；HITL 续流同样走这一步。
+
+### 10. 画布 MCP 工具契约（服务端 ↔ 画布前端）
+
+- **注入型参数绝不能是必填**：`canvas_graph_*` 的 `userId/projectId/canvasId/runId/operationKey` 由 MoonAgent `CanvasRunToolAdapter` 在模型调用之后注入。`@McpToolParam.required` 默认 `true`，一旦漏写 `required = false`，AgentScope 会先拿模型自己的入参做 schema 校验并失败（`Parameter validation failed ... 未找到所需属性"projectId"`），随后模型会自己编 userId（曾提交 `"default"`）和 operationKey。业务入参（`mediaItems`/`node`/`edge`/`args`）保持必填。回归测试：`CanvasGraphMcpToolsSchemaTest`。
+- **节点目录必须镜像画布前端契约**：前端生成节点只有 `imageGeneration` / `videoGeneration`（端口 `prompt`/`reference`(ordered)/`video`，差异在 `data.mode`）。服务端 `CanvasNodeRegistry` 的旧 kind（textToImage/imageToImage/textToVideo/…）只保留校验能力、不再出现在 `listMaps()` 目录里，否则模型会建出前端已合并的旧节点，连线报 `NODE_TYPE_UNKNOWN: videoGeneration`，旧端口（first/last/source）被前端归并成 `reference` 后边挂不上手。回归测试：`CanvasNodeRegistryTest`。
+- **画布编辑模式自动接管当前画布**：`AgentCanvasRunService.adoptCurrentCanvas` 复用本轮 run，没有就为当前画布建一条（`createExisting` 不新建画布）；turnId 为空时不接管（run 以 turnId 去重，否则每次调用都会建一条）。
+- **结果槽命名画布内递增**：`createResultSlots` 的「结果 N」按整张画布取下一个可用编号，逐生产节点调用不再各产出一个「结果 1」。
+- **画布实时刷新**：`GET /canvases/{id}/revision` 只读 revision；画布前端每 4s 轮询，服务端图命令造成的 revision 前进就重载。本地 550ms 存盘防抖窗口或 `saving` 时跳过，避免覆盖用户未落库的编辑。
+
+### 11. 模型目录缓存与「默认模型」切换的生效范围（2026-10-16）
+
+网关 `ModelCatalogCache` 是模型目录三类 Redis key 的**唯一持有者**；任何目录变更都必须经它失效，**禁止在别处裸写 `redisTemplate.delete("gateway:models:*")`**：
+
+| key | 内容 | 失效方式 |
+|-----|------|----------|
+| `gateway:models:{type\|all}` | `/v1/models` JSON 响应 | 60s TTL，只作兜底 max-age |
+| `gateway:default_model:{type}` | 运行时默认模型名（`getDefaultXxxModel()` 直接读它） | 由路由表收敛写入；**不得裸删**——关掉某个非默认模型的开关要用 `reconcileDefault` 重算 |
+| `gateway:models:version` | 目录版本号（随机 UUID，每次变更换值） | 消费端（agent-core `GatewayModelServiceImpl`）据此毫秒级失效各自 JVM 缓存，不必等 60s |
+
+- **已接上失效的写入口**：路由 CRUD 与默认切换、`model_params` upsert（参数能力也随列表下发）、渠道 CRUD（`enabled/priority` 直接决定列表成员与顺序）、Ollama 同步。**新增写 `model_route`/`channel`/`model_params` 的路径必须一并接上**，否则最长 60s 内列表与实际可用渠道不一致——禁用渠道的模型仍在列表里，前端选中即 `50301 no available channel`。
+- 网关每 5 分钟（`gateway.model-catalog.reconcile-interval-ms`）按路由表收敛默认模型：手工 SQL 改了 `model_route.is_default` 却没清 Redis 时 ≤1 个周期自愈，**不再需要重启网关或手工 `redis-cli DEL`**（V19 那类迁移注释里的手工 DEL 只是「立刻生效」的可选加速）。
+- 生效范围：服务端「调用方不传模型 → 用默认」的链路（文本 / 生图 / 生视频 / 视觉）每次现读 Redis，**实时生效**；前端编辑器在挂载 / 回到前台 / 60s 轮询时刷新（版本号未变则整轮跳过 setState），且**用户手选的模型不会被网关默认覆盖**（`localStorage.editorModelChoice`，所选下架才回落默认）。
+- **MoonAgent 主智能体模型不需要重启即可跟随默认模型**（`ai.agent.agentscope.dynamic-default-model`，默认开）：AgentScope 的 `ReActAgent.model` 是 `private final`、`HarnessAgent.modelResolver` 只用于子智能体的模型覆盖，所以「不重建 agent 就换模型」的唯一做法是让 agent 持有的 `GatewayDefaultModel` 包装器在每次模型调用时解析真实模型名（`Model` 只有 3 个抽象方法，且请求用的模型名取自 `OpenAIChatModel.stream` 内部的 `effectiveOptions.getModelName()`，`Model.getModelName()` 只服务日志/遥测）。生效时机由 `TurnModelPin` 收敛成业务语义：**在途 turn 内钉住不变，只在智能体闲置（无在途 turn）时于下一轮开始时捡起新默认**；多会话并发时以「全部 turn 结束」为闲置判定，绝不打断在途回合。显式配 `AGENTSCOPE_MODEL`（或 `AGENTSCOPE_MODEL_PLAN|PROMPT`）会钉死为配置值；`AGENTSCOPE_DYNAMIC_DEFAULT_MODEL=false` 回退旧行为（启动时解析一次并固化，**那种配置下切 text 默认模型才需要重启**）。image/video/vision 的默认本就每次现读 Redis，与网关默认无关。
+- 已知残留：同一个模型名的 `model_params.context_window` 变更不会热更新（delegate 按模型名缓存，窗口在 delegate 构建时固定），改窗口仍需重启 MoonAgent。
+- 回归测试：`TurnModelPinTest`（在途不换 / 闲置才换 / 并发保守 / 关开关不计入）、`GatewayDefaultModelTest`（切默认后 stream 打到新 delegate、同名复用同一实例、窗口跟随）、`ModelCatalogCacheTest`（失效 + 版本号，不依赖 Mockito）、`DefaultModelConsistencyTest`（默认唯一权威 + 写 Redis + 清缓存）、`GatewayModelServiceImplCatalogVersionTest`（版本变即重拉 / 无 Redis 退回 TTL）、`projectStore.models.test.ts`（跟随默认 / 保留手选 / 版本门控）。
 
 ## Spring AI 2.0 (LLM 调用层，2026-08-11 迁移)
 
@@ -380,6 +419,14 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
 | POST | `/api/agent/conversations/{id}/turns/{turnId}/interrupt` | 中断指定 turn 所属会话 |
 | GET | `/api/agent/conversations/{id}/runtime` | 运行时、Skill、Prompt、MCP 元数据状态 |
 | GET | `/api/agent/conversations/{id}/turns/{turnId}/events?afterSeq=N` | 按序号补偿重放 turn 事件 |
+| POST | `/api/agent/conversations/{id}/context/clear` | **清空上下文（真删除）**：删该会话全部上下文行（消息、`agent_turns`/`agent_turn_events`、checkpoint、画布会话与运行、文档索引、异步任务、时间线、评审、工作流、资产组绑定）+ 清 AgentScope 运行时上下文与沙箱、标题重置「新对话」、`agentscope_session_initialized_at` 置空；产出素材保留。前端斜杠命令「/清空上下文」= `/clear`（`/compact` = 压缩上下文） |
+| DELETE | `/api/agent/conversations/{id}/messages` | 兼容壳：与上一个端点同一实现（同样真删除），旧语义「只删消息」已退役 |
+
+`/清空上下文` 的删除执行器是 `ConversationContextCleanupService`（`@Transactional`，
+逐层按 ID 删子表再删父表，返回每张表的删除行数）；编排在 `AgentChatServiceImpl.clearContext`
+里先取会话锁（生成中会打断 + 拿不到锁返回 40901），再 `MoonAgentRuntime.resetSession`
+（`clearContext` 清会话消息与压缩摘要 + 删 state store + 清本地 `stateCache`——
+只删 store 会让缓存里的旧上下文继续生效）。
 
 ### 通用创作智能层
 
@@ -387,11 +434,14 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
   不保存跨项目记忆，也不引入建筑等垂直领域字段。
 - 明确出现“必须/严格/保留/不能改”等词时进入 `STRICT`，命中约束通过
   `constraint_flagged` 事件下发；未识别到可验证硬约束时要求先澄清。
-- AgentScope 已启用 Plan Mode、任务列表、工具结果驱逐、五类创作子智能体、PostgreSQL
+- AgentScope 已启用 Plan Mode、任务列表、工具结果驱逐、四类创作子智能体、PostgreSQL
   `DistributedStore` 和 OpenTelemetry；模型角色通过
   `AGENTSCOPE_MODEL_PLAN/PROMPT/CRITIC/VISION/IMAGE/VIDEO` 覆盖。
-- 图片生成后会调用视觉批评器。批评结果为 `REPAIR` 时允许一轮提示词/参考修复；
-  第二轮仍失败则必须转 HITL。视频和图片评测记录保存在 `agent_media_critiques`。
+- 生成结果不做自动诊断（`visual-critic` 子智能体已下线）：自动视觉评审会对每次生图/生视频
+  结果追加一次付费模型调用，且首图往往已经是用户想要的结果。生成后直接把结果交给用户，
+  是否重做由用户决定；`agentscope.critique-enabled` 默认 `false`，开启后才重新注册
+  `review_generated_media` 工具。历史评测记录仍保存在 `agent_media_critiques`，
+  `/api/agent/runs/{runId}/critique` 与 `/items/{itemId}/repair` 保持可读。
 - 长视频先保存 `agent_timeline_manifests`，再由合并工具按顺序组装；缺片不得静默跳过。
 - 新接口：`/api/agent/projects/{projectId}/creative-context`、
   `/api/agent/runs/{runId}/plan`、`/api/agent/runs/{runId}/critique`、
@@ -550,6 +600,17 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - **分镜素材选择**：审查卡“上传素材”包含项目 AI 资产、当前项目产出素材（按对话分组，当前对话优先）和当前分镜多图；只有 AI 资产进入 `scene_assets`，产出素材/分镜图片进入 `scene_reference_images` 并分别标记 `source_type=output|scene_image`
 - **素材覆盖与生命周期**：再次保存按最终勾选完整覆盖 AI 资产和产出/分镜图片引用，用户直接上传图片不受影响；“查看参考物”按用户上传图片、上传资产、上传的产出素材分组；移除产出素材只解除引用，不删除原生成文件
 - **LLM 配置**：复用 `LLM_GATEWAY_BASE_URL` / `LLM_GATEWAY_API_KEY`（.env，Spring AI 网关）
+
+### @ 引用资料（2026-10-16）
+
+设计见 `docs/superpowers/specs/2026-10-16-mention-reference-materials-design.md`。已落地 P0 + P1（分镜、项目库文件），会话引用（P2）只落 UI（菜单置灰）。
+
+- **契约两份**：正文保留 `@名称`（`global-system-prompt.txt` §二.12 + `TurnContextMiddleware` 每轮兜底声明「`@` = 在你的可读范围内、必须先去读」），请求体另带 `references: [{kind,id,token,name,…}]`（`AgentReferenceRequest`，上限 10）。**必须有 id**：标题可重名，只靠名字会让模型读到错的东西。
+- **前端唯一真源是正文**：store 的 `pendingReferences` 只是目录，发送时用 `activeReferences(content,…)` 过滤「token 是否还在正文里」，插入时同口径清理。因此 `interruptAndSend` 不传 opts 也不丢引用；删掉标记=撤销引用。
+- **蓝色标记靠镜像层**：`ComposerMentionHighlight` 在 textarea 底下渲染同一段文本，两层共用 `COMPOSER_TEXT_METRICS`（字体/行高/换行/padding 一致），输入框外层因此有 `.chat-composer-input` 包裹层。
+- **项目库文档必须转存才能读**：`AgentDocumentService` 只认同会话 + `url` 前缀 `/api/files/files/` 的 reference 资产，`/api/library/media/**` 判「文档不存在」。`library_file` 引用由后端按 `mediaId` 归属校验 + 取字节 + 转存会话资产（`LibraryReferenceAssetService`），之后才走摘要与 `read_document`。**新通路必须保留这道转存。**
+- **`<turn-references>` 不可信**：token/name 来自用户输入或标题，注入前折叠换行、去尖括号；`＋ → 上传分镜` 已统一为插入 `@分镜N`（不再勾完即发）。
+- 回归点：`ChatComposer.test.tsx`、`mentionReferences.test.ts`、`ComposerMentionHighlight.test.tsx`、`MessageBubbleMention.test.tsx`、`agentStore.test.ts`（`@ 引用资料`）、后端 `AgentReferencePassThroughTest`。
 
 ## Verification Commands
 

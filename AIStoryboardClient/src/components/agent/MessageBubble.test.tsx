@@ -6,6 +6,7 @@ import { useChatAnnotationStore } from '../../stores/chatAnnotationStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
 import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import { useAgentStore } from '../../stores/agentStore';
+import { useAssetDetailStore } from '../../stores/assetDetailStore';
 import { CHAT_MEDIA_DRAG_MIME } from '../../lib/projectLibraryDrag';
 import { rememberDocumentSource } from '../../lib/documentPreview';
 import { assetUrl } from '../../config';
@@ -27,6 +28,8 @@ describe('MessageBubble project library import', () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    // 点媒体会把详情目标写进全局 store，用例之间要清掉。
+    useAssetDetailStore.getState().closeAssetDetail();
   });
 
   it('keeps 导入素材库 out of the message meta row', () => {
@@ -426,8 +429,11 @@ describe('MessageBubble project library import', () => {
     expect(screen.getByRole('button', { name: '预览 reference.png' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '预览 clip.mp4' }));
 
-    const dialog = screen.getByRole('dialog', { name: '图片预览' });
-    expect(dialog.querySelector('video')).toBeTruthy();
+    // 会话里的视频/图片统一走素材详情弹窗（由页面上的 AssetDetailHost 渲染）。
+    expect(useAssetDetailStore.getState().target).toEqual({
+      url: '/api/files/videos/clip.mp4',
+      kind: 'video',
+    });
   });
 
   it('opens a Markdown attachment in the chat document child window', async () => {

@@ -93,7 +93,7 @@ class GlobalSystemPromptStaticTest {
 
         assertThat(registered).containsExactlyInAnyOrder(
                 "creative-planner", "prompt-director", "reference-curator",
-                "visual-critic", "continuity-editor");
+                "continuity-editor");
     }
 
     @Test

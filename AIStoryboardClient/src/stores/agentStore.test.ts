@@ -21,6 +21,7 @@ import {
 import { dedupeAttachments, attachmentKey } from '../lib/attachmentDedupe';
 import { collectRenderIntents, parseRenderIntent } from '../lib/renderIntent';
 import { useProjectStore } from './projectStore';
+import { readTurnLastSeq } from './turnResume';
 import { setAccessToken } from '../lib/authSession';
 import { defaultGenerationPreferences } from '../lib/generationPreferences';
 
@@ -608,6 +609,7 @@ describe('agentStore message metrics', () => {
       refImageUrls: [],
       pickedReferenceVideos: [],
       pickedReferenceAudios: [],
+      canvasEditContext: null,
     });
     useProjectStore.setState({ currentProject: null });
   });
@@ -790,6 +792,95 @@ describe('agentStore message metrics', () => {
         kind: 'file',
       }),
     ]);
+  });
+
+  it('keeps uploaded canvas media refs relative for MoonAgent validation', async () => {
+    vi.spyOn(agentApi, 'uploadImage').mockResolvedValue({
+      data: {
+        data: {
+          assetId: 'asset-img-1',
+          url: '/api/files/images/ref.png?token=1.abc',
+          name: 'ref.png',
+          mimeType: 'image/png',
+          sizeBytes: 10,
+        },
+      },
+    } as never);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      pendingAttachments: [],
+      refImageUrls: [],
+      canvasEditContext: {
+        mode: 'canvas-edit',
+        projectId: 'project-1',
+        canvasId: 'canvas-1',
+        mediaRefs: [],
+      },
+    });
+
+    await useAgentStore.getState().uploadRefImage(
+      new File(['x'], 'ref.png', { type: 'image/png' }),
+    );
+
+    // 绝对化会让 origin 变成浏览器地址，被 MoonAgent 判成「媒体地址不在允许的服务范围内」
+    expect(useAgentStore.getState().canvasEditContext?.mediaRefs).toEqual([
+      expect.objectContaining({
+        kind: 'image',
+        url: '/api/files/images/ref.png?token=1.abc',
+        source: 'upload',
+      }),
+    ]);
+  });
+
+  it('clears consumed canvas media from the composer right after sending', async () => {
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '好的' }),
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      streaming: false,
+      generating: {},
+      pendingAttachments: [{
+        assetId: 'asset-white-1',
+        url: '/api/files/images/white.png',
+        name: 'white.png',
+        mimeType: 'image/png',
+        kind: 'image' as const,
+        source: 'upload' as const,
+      }],
+      refImageUrls: ['/api/files/images/white.png'],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+      canvasEditContext: {
+        mode: 'canvas-edit',
+        projectId: 'project-1',
+        canvasId: 'canvas-1',
+        mediaRefs: [{
+          kind: 'image' as const,
+          url: '/api/files/images/white.png',
+          name: 'white.png',
+          source: 'upload' as const,
+        }],
+      },
+    });
+
+    await useAgentStore.getState().sendMessage('把这些白膜变成真实场景');
+
+    // 本轮请求仍带上了画布媒体
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody.canvasContext.mediaRefs).toHaveLength(1);
+    // 但输入框上方立刻清空：不再每轮重复挂载、也不遮挡智能体输出
+    const after = useAgentStore.getState();
+    expect(after.canvasEditContext?.mediaRefs).toEqual([]);
+    expect(after.pendingAttachments).toEqual([]);
+    expect(after.refImageUrls).toEqual([]);
   });
 });
 
@@ -1071,6 +1162,125 @@ describe('agentStore turn replay', () => {
   });
 });
 
+describe('agentStore 输入框上方只保留还没发出去的素材', () => {
+  const pendingKey = 'moon.agent.pendingAttachments.conversation-1';
+
+  const mockConversationLoad = (records: unknown[] = []) => {
+    vi.spyOn(agentApi, 'getConversation').mockResolvedValue({
+      data: { data: { conversation: { canvasContext: null } } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: { data: { records, nextCursor: null, hasMore: false } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({ data: { data: [] } } as never);
+    vi.spyOn(agentApi, 'listTasks').mockResolvedValue({
+      data: { data: { records: [], total: 0, page: 1, size: 100 } },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({
+      data: { data: null },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({
+      data: { data: null },
+    } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({
+      data: { data: { activeTurn: null } },
+    } as never);
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+    useAgentStore.setState({
+      activeConversationId: null,
+      refImageUrls: [],
+      pendingAttachments: [],
+    });
+  });
+
+  it('发送后清空输入框上方素材，并清掉本地快照（刷新不会复活）', async () => {
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '好的' }),
+    ]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    })));
+    const attachment = {
+      url: '/api/files/images/a.png',
+      name: 'a.png',
+      mimeType: 'image/png',
+      kind: 'image' as const,
+      source: 'upload' as const,
+    };
+    window.localStorage.setItem(pendingKey, JSON.stringify([attachment]));
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [],
+      streaming: false,
+      generating: {},
+      refImageUrls: ['/api/files/images/a.png'],
+      pendingAttachments: [attachment],
+      pickedReferenceVideos: [],
+      pickedReferenceAudios: [],
+      canvasEditContext: null,
+    });
+
+    await useAgentStore.getState().sendMessage('按这张图生成');
+
+    const after = useAgentStore.getState();
+    // 已发出的素材不再挂在输入框上方（历史仍在会话消息里），也不会在刷新后作为「待发」复活
+    expect(after.refImageUrls).toEqual([]);
+    expect(after.pendingAttachments).toEqual([]);
+    expect(window.localStorage.getItem(pendingKey)).toBeNull();
+  });
+
+  it('刷新只恢复还没发出去的附件，不把历史消息里的已发送图片带回来', async () => {
+    // 历史消息带有附件（已发送），localStorage 里没有未发送快照
+    mockConversationLoad([{
+      id: 'm1',
+      conversationId: 'conversation-1',
+      role: 'user',
+      content: '按这张图生成',
+      createdAt: new Date().toISOString(),
+      metadata: {
+        messageInput: {
+          attachments: [{
+            url: '/api/files/images/a.png',
+            name: 'a.png',
+            mimeType: 'image/png',
+            kind: 'image',
+          }],
+        },
+      },
+    }]);
+
+    await useAgentStore.getState().selectConversation('conversation-1');
+
+    const state = useAgentStore.getState();
+    expect(state.messages.some((message) => message.id === 'm1')).toBe(true);
+    expect(state.refImageUrls).toEqual([]);
+    expect(state.pendingAttachments).toEqual([]);
+  });
+
+  it('加了但还没发出去的素材，刷新后仍会回到输入框', async () => {
+    window.localStorage.setItem(pendingKey, JSON.stringify([{
+      url: '/api/files/images/unsent.png',
+      name: 'unsent.png',
+      mimeType: 'image/png',
+      kind: 'image',
+    }]));
+    mockConversationLoad();
+
+    await useAgentStore.getState().selectConversation('conversation-1');
+
+    const state = useAgentStore.getState();
+    expect(state.refImageUrls).toEqual(['/api/files/images/unsent.png']);
+    expect(state.pendingAttachments).toHaveLength(1);
+  });
+});
+
 describe('agentStore detached async tasks', () => {
   const task = (overrides: Partial<AgentTaskView> = {}): AgentTaskView => ({
     taskId: 'task-1',
@@ -1267,7 +1477,7 @@ describe('agentStore detached async tasks', () => {
     expect(assistant?.content).not.toBe('（未收到回复）');
   });
 
-  it('removes the unfinished assistant bubble when the user stops generation', () => {
+  it('keeps the streamed reply and appends an ellipsis when the user stops generation', () => {
     const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
     resetStore();
     useAgentStore.setState({
@@ -1285,7 +1495,7 @@ describe('agentStore detached async tasks', () => {
           id: 'assistant-pending',
           conversationId: 'conversation-1',
           role: 'assistant',
-          content: '这半截回复不应留在对话中',
+          content: '这半截回复要留在对话中',
           createdAt: new Date().toISOString(),
         },
       ],
@@ -1294,7 +1504,7 @@ describe('agentStore detached async tasks', () => {
           hint: '',
           turnId: 'turn-running',
           assistantId: 'assistant-pending',
-          assistantContent: '这半截回复不应留在对话中',
+          assistantContent: '这半截回复要留在对话中',
           finished: false,
         },
       },
@@ -1305,7 +1515,10 @@ describe('agentStore detached async tasks', () => {
     const state = useAgentStore.getState();
     expect(state.pendingAssistantId).toBeNull();
     expect(state.streaming).toBe(false);
-    expect(state.messages.map((message) => message.id)).toEqual(['user-1']);
+    // 停止不再清空智能体已经发出来的文字：气泡保留，正文以「…」收尾
+    expect(state.messages.map((message) => message.id)).toEqual(['user-1', 'assistant-pending']);
+    expect(state.messages[1].content).toBe('这半截回复要留在对话中…');
+    expect(state.messages[1].metadata?.interrupted).toBe(true);
     expect(interruptTurn).toHaveBeenCalledWith('conversation-1', 'turn-running');
   });
 
@@ -1407,9 +1620,29 @@ describe('agentStore detached async tasks', () => {
     expect(requestBody.editMessageId).toBe('user-db');
   });
 
-  it('interrupts the active run and sends the queued message as a new turn', async () => {
-    const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
-    const body = sseBody([
+  it('interrupts the active run, keeps the partial reply and then sends the queued message', async () => {
+    const encoder = new TextEncoder();
+    const frame = (event: {
+      turnId: string; seq: number; type: string; payload: Record<string, unknown>;
+    }) => encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    let runningController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    // 正在生成的那一轮：turn_started + 一段正文，然后停在流里等打断
+    const runningStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        runningController = controller;
+        controller.enqueue(encoder.encode([
+          'event: turn_started',
+          `data: ${JSON.stringify({ turnId: 'turn-running', seq: 1, type: 'turn_started', payload: { conversationId: 'conversation-1' } })}`,
+          '', '',
+        ].join('\n')));
+        controller.enqueue(encoder.encode([
+          'event: agent_event',
+          `data: ${JSON.stringify({ turnId: 'turn-running', seq: 2, type: 'agent_event', payload: { eventType: 'TEXT_BLOCK_DELTA', data: { delta: '正在生成' } } })}`,
+          '', '',
+        ].join('\n')));
+      },
+    });
+    const queuedBody = sseBody([
       sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
       sseEnvelope(2, 'agent_event', {
         eventType: 'TEXT_BLOCK_DELTA',
@@ -1417,53 +1650,169 @@ describe('agentStore detached async tasks', () => {
       }),
       sseEnvelope(3, 'turn_completed', { content: '新回复' }),
     ]);
-    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+    let runningStreamServed = false;
+    // 每次调用都新建 Response：同一个 Response 实例被第二次读取会因 body 已锁定而报错
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/conversations/conversation-1/turns/stream')) {
+        if (!runningStreamServed) {
+          runningStreamServed = true;
+          return new Response(runningStream, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          });
+        }
+        return new Response(queuedBody, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        });
+      }
+      // 对账/标题补齐等旁路请求：直接失败，测试只关心 turn 流
+      return new Response('{}', { status: 500, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    // 打断成功：后端把这一轮收成终态（40904）并结束流
+    const interruptTurn = vi.spyOn(agentApi, 'interruptTurn').mockImplementation(async () => {
+      runningController?.enqueue(frame({
+        turnId: 'turn-running',
+        seq: 3,
+        type: 'turn_failed',
+        payload: { code: '40904', message: '生成已停止', interrupted: true, content: '正在生成…' },
+      }));
+      runningController?.close();
+      return {} as never;
+    });
+    resetStore();
+
+    const running = useAgentStore.getState().sendMessage('原问题');
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().generating['conversation-1']?.turnId).toBe('turn-running');
+    });
+
+    const delivered = await useAgentStore.getState().interruptAndSend('改成新的问题');
+    await running;
+
+    expect(delivered).toBe(true);
+    expect(interruptTurn).toHaveBeenCalledWith('conversation-1', 'turn-running');
+    // 打断后才把新消息作为下一轮发出去（而不是抢跑撞会话锁）：turns/stream 恰好两次
+    const streamCalls = () => fetchMock.mock.calls
+      .filter(([url]) => String(url).includes('/conversations/conversation-1/turns/stream'));
+    await vi.waitFor(() => { expect(streamCalls()).toHaveLength(2); });
+    expect(JSON.parse(String(streamCalls()[0]?.[1]?.body)).content).toBe('原问题');
+    expect(JSON.parse(String(streamCalls()[1]?.[1]?.body)).content).toBe('改成新的问题');
+    expect(streamCalls()[1]?.[1]).toEqual(expect.objectContaining({ method: 'POST' }));
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().messages.at(-1)?.content).toBe('新回复');
+    });
+    const state = useAgentStore.getState();
+    // 被打断的正文留在对话里，以「…」收尾
+    const interrupted = state.messages.find((message) => message.metadata?.interrupted);
+    expect(interrupted?.content).toBe('正在生成…');
+    expect(state.streamError).toBeNull();
+    expect(state.messages.find((message) => message.role === 'user' && message.content === '改成新的问题')).toBeTruthy();
+  });
+
+  it('keeps the input text when the interrupt never settles', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(agentApi, 'interruptTurn').mockResolvedValue({} as never);
+    resetStore();
+    // generating 里有活跃 turn 但没有真正的流：打断永远等不到终态
+    useAgentStore.setState({
+      streaming: true,
+      pendingAssistantId: 'assistant-running',
+      messages: [
+        { id: 'user-1', conversationId: 'conversation-1', role: 'user', content: '原问题', createdAt: new Date().toISOString() },
+        { id: 'assistant-running', conversationId: 'conversation-1', role: 'assistant', content: '半截', createdAt: new Date().toISOString() },
+      ],
+      generating: {
+        'conversation-1': {
+          hint: '', turnId: 'turn-running', assistantId: 'assistant-running', assistantContent: '半截', finished: false,
+        },
+      },
+    });
+
+    const pending = useAgentStore.getState().interruptAndSend('打断超时的消息');
+    await vi.advanceTimersByTimeAsync(21_000);
+    const delivered = await pending;
+
+    // 没发出去时调用方要能把内容还给用户；被截断的正文仍然保留
+    expect(delivered).toBe(false);
+    expect(useAgentStore.getState().messages.find((m) => m.metadata?.interrupted)?.content).toBe('半截…');
+    vi.useRealTimers();
+  });
+
+  it('treats a server-side stop (40904) as a stop, not an error, and freezes the text', async () => {
+    const body = sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: '被别处停掉的一半' },
+      }),
+      sseEnvelope(3, 'turn_failed', { code: '40904', message: '生成已停止', interrupted: true }),
+    ]);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+    })));
+    resetStore();
+
+    await useAgentStore.getState().sendMessage('开始生成');
+
+    const state = useAgentStore.getState();
+    const assistant = state.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.content).toBe('被别处停掉的一半…');
+    expect(assistant?.metadata?.interrupted).toBe(true);
+    // 用户自己要停的操作不能弹错误条
+    expect(state.streamError).toBeNull();
+  });
+
+  it('keeps the interrupted reply when the message list is refreshed before the server persisted it', async () => {
     resetStore();
     useAgentStore.setState({
       streaming: true,
       pendingAssistantId: 'assistant-running',
       messages: [
         {
-          id: 'user-old',
-          conversationId: 'conversation-1',
-          role: 'user',
-          content: '原问题',
-          createdAt: new Date().toISOString(),
+          id: 'user-1', conversationId: 'conversation-1', role: 'user',
+          content: '原问题', createdAt: new Date(Date.now() - 60_000).toISOString(),
         },
         {
-          id: 'assistant-running',
-          conversationId: 'conversation-1',
-          role: 'assistant',
-          content: '正在生成',
-          createdAt: new Date().toISOString(),
+          id: 'assistant-running', conversationId: 'conversation-1', role: 'assistant',
+          content: '这半截回复', createdAt: new Date().toISOString(),
         },
       ],
       generating: {
         'conversation-1': {
-          hint: '',
-          turnId: 'turn-running',
-          assistantId: 'assistant-running',
-          assistantContent: '正在生成',
-          finished: false,
+          hint: '', turnId: 'turn-running', assistantId: 'assistant-running',
+          assistantContent: '这半截回复', finished: false,
         },
       },
     });
+    useAgentStore.getState().stopGeneration();
 
-    await useAgentStore.getState().interruptAndSend('改成新的问题');
+    // 服务端消息列表里还没有这条被截断的回复（打断落库还没完成）
+    const serverRecords = [{
+      id: 'user-db', conversationId: 'conversation-1', role: 'user',
+      content: '原问题', createdAt: new Date(Date.now() - 60_000).toISOString(),
+    }];
+    vi.spyOn(agentApi, 'getConversation').mockResolvedValue({
+      data: { data: { conversation: { canvasContext: null } } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: { data: { records: serverRecords, nextCursor: null, hasMore: false } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({ data: { data: serverRecords } } as never);
+    vi.spyOn(agentApi, 'listTasks').mockResolvedValue({
+      data: { data: { records: [], total: 0, page: 1, size: 100 } },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({ data: { data: {} } } as never);
 
-    expect(interruptTurn).toHaveBeenCalledWith('conversation-1', 'turn-running');
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/conversations/conversation-1/turns/stream'),
-      expect.objectContaining({ method: 'POST' }),
-    );
-    const state = useAgentStore.getState();
-    expect(state.messages.some((message) => message.id === 'assistant-running')).toBe(false);
-    expect(state.messages.find((message) => message.role === 'user' && message.content === '改成新的问题')).toBeTruthy();
-    expect(state.messages.at(-1)?.content).toBe('新回复');
+    await useAgentStore.getState().selectConversation('conversation-1');
+
+    const kept = useAgentStore.getState().messages.find((message) => message.metadata?.interrupted);
+    expect(kept?.content).toBe('这半截回复…');
   });
 });
 
@@ -3233,4 +3582,389 @@ describe('render 意图分派', () => {
     expect(metadata?.toolDrafts?.['call-1']?.status).toBe('node_completed');
   });
 });
+
+/**
+ * WS4：刷新后不再"全量重放 + 1s 轮询"，而是补完历史后接到 turn 的直播续传端点上
+ * （`GET /turns/{turnId}/stream?afterSeq=N`）；端点不可用时回退到既有轮询回放。
+ */
+describe('agentStore turn 事件续传（刷新恢复）', () => {
+  const conversationId = 'conversation-live-resume';
+
+  const resetStore = () => {
+    useAgentStore.setState({
+      activeConversationId: null,
+      conversations: [],
+      messages: [],
+      generating: {},
+      streaming: false,
+      pendingAssistantId: null,
+      tasks: {},
+      waitingHumanInput: null,
+    });
+    window.sessionStorage.clear();
+  };
+
+  const stubConversationShell = (turnId: string) => {
+    vi.spyOn(agentApi, 'getConversation').mockResolvedValue({
+      data: { data: { conversation: { canvasContext: null } } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessagesPage').mockResolvedValue({
+      data: { data: { records: [], nextCursor: null, hasMore: false } },
+    } as never);
+    vi.spyOn(agentApi, 'listMessages').mockResolvedValue({ data: { data: [] } } as never);
+    vi.spyOn(agentApi, 'listTasks').mockResolvedValue({
+      data: { data: { records: [], total: 0, page: 1, size: 100 } },
+    } as never);
+    vi.spyOn(agentApi, 'getPendingCanvasSession').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getPendingCheckpoint').mockResolvedValue({ data: { data: null } } as never);
+    vi.spyOn(agentApi, 'getRuntimeStatus').mockResolvedValue({
+      data: { data: { activeTurn: { turnId, status: 'running' } } },
+    } as never);
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetStore();
+  });
+
+  it('冷启动补齐历史后，从历史末序号接上直播且不重复应用', async () => {
+    const turnId = 'turn-live-attach';
+    stubConversationShell(turnId);
+    const listTurnEvents = vi.spyOn(agentApi, 'listTurnEvents').mockResolvedValue({
+      data: {
+        data: [
+          sseEnvelope(1, 'turn_started', { conversationId }, turnId),
+          sseEnvelope(2, 'agent_event', {
+            eventType: 'TEXT_BLOCK_DELTA',
+            data: { delta: '头' },
+          }, turnId),
+        ],
+      },
+    } as never);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sseBody([
+      sseEnvelope(3, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: '尾' },
+      }, turnId),
+    ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    resetStore();
+
+    await useAgentStore.getState().selectConversation(conversationId);
+
+    await vi.waitFor(() => {
+      const assistant = useAgentStore.getState().messages.find((message) => message.role === 'assistant');
+      expect(assistant?.content ?? '').toBe('头尾');
+    });
+    expect(listTurnEvents).toHaveBeenCalledWith(conversationId, turnId, 0);
+    // 直播起点 = 已经补过的历史末序号（2），不是"要跳过多少历史"的游标（0）。
+    expect(String(fetchMock.mock.calls[0]?.[0]))
+      .toContain(`/turns/${turnId}/stream?afterSeq=2`);
+    // 历史只补一次：文本不会因为直播重放历史而重复。
+    const assistant = useAgentStore.getState().messages.find((message) => message.role === 'assistant');
+    expect(assistant?.content ?? '').not.toContain('头头');
+    // 本用例故意不给终态：直播事件到手即止，断开后由 afterSeq 补偿接续。
+    useAgentStore.setState({ activeConversationId: null });
+  });
+
+  it('续传端点不可用时回退到轮询回放（并从历史末序号继续）', async () => {
+    const turnId = 'turn-live-fallback';
+    stubConversationShell(turnId);
+    const listTurnEvents = vi.spyOn(agentApi, 'listTurnEvents').mockImplementation(
+      async (_id, _turn, afterSeq = 0) => ({
+        data: {
+          data: afterSeq >= 2
+            ? [sseEnvelope(3, 'turn_completed', { content: '完成' }, turnId)]
+            : [
+              sseEnvelope(1, 'turn_started', { conversationId }, turnId),
+              sseEnvelope(2, 'agent_event', {
+                eventType: 'TEXT_BLOCK_DELTA',
+                data: { delta: '历史' },
+              }, turnId),
+            ],
+        },
+      } as never),
+    );
+    const fetchMock = vi.fn().mockResolvedValue(new Response('not found', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    resetStore();
+
+    await useAgentStore.getState().selectConversation(conversationId);
+
+    await vi.waitFor(() => {
+      expect(listTurnEvents).toHaveBeenCalledWith(conversationId, turnId, 2);
+    });
+    expect(listTurnEvents).toHaveBeenCalledWith(conversationId, turnId, 0);
+    expect(String(fetchMock.mock.calls[0]?.[0]))
+      .toContain(`/turns/${turnId}/stream?afterSeq=2`);
+    // 终态收尾：续传游标被清理，该 turn 不会再被续传。
+    await vi.waitFor(() => {
+      expect(readTurnLastSeq(conversationId, turnId)).toBe(0);
+    });
+    useAgentStore.setState({ activeConversationId: null });
+  });
+
+  it('直播事件乱序到达时按 seq 等待缺口，补齐后按序应用', async () => {
+    const turnId = 'turn-live-gap';
+    stubConversationShell(turnId);
+    vi.spyOn(agentApi, 'listTurnEvents').mockImplementation(
+      async (_id, _turn, afterSeq = 0) => ({
+        data: {
+          data: [
+            sseEnvelope(1, 'turn_started', { conversationId }, turnId),
+            sseEnvelope(2, 'agent_event', {
+              eventType: 'TEXT_BLOCK_DELTA',
+              data: { delta: 'a' },
+            }, turnId),
+          ].filter((event) => event.seq > afterSeq),
+        },
+      } as never),
+    );
+    // 故意先发 seq 4 再发 seq 3：缺口必须被等待，不能把 4 提前应用。
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(sseBody([
+      sseEnvelope(4, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: 'd' },
+      }, turnId),
+      sseEnvelope(3, 'agent_event', {
+        eventType: 'TEXT_BLOCK_DELTA',
+        data: { delta: 'c' },
+      }, turnId),
+    ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })));
+    resetStore();
+
+    await useAgentStore.getState().selectConversation(conversationId);
+
+    await vi.waitFor(() => {
+      const assistant = useAgentStore.getState().messages.find((message) => message.role === 'assistant');
+      // 4 先到但被缺口挡住，3 补齐后才按 3→4 应用（否则会得到 'adc'）。
+      expect(assistant?.content ?? '').toBe('acd');
+    });
+    useAgentStore.setState({ activeConversationId: null });
+  });
+
+  it('canvas_run_* 透传 canvasPatch / canvasPatchOverflow，且不被后续事件抹掉', () => {
+    const conversationIdForPatch = 'conversation-canvas-patch';
+    const turnId = 'turn-canvas-patch';
+    const assistantId = 'assistant-canvas-patch';
+    const patch = {
+      nodes: [{ id: 'node-1', type: 'imageGeneration' }],
+      edges: [{ id: 'edge-1', source: 'node-1', target: 'node-2' }],
+    };
+    useAgentStore.setState({
+      activeConversationId: conversationIdForPatch,
+      messages: [{
+        id: assistantId,
+        conversationId: conversationIdForPatch,
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }],
+    });
+    const context = { conversationId: conversationIdForPatch, assistantId };
+
+    applyAgentTurnEnvelope(
+      sseEnvelope(1, 'canvas_run_started', { canvasRunId: 'run-1', canvasId: 'canvas-1' }, turnId),
+      context,
+    );
+    applyAgentTurnEnvelope(
+      sseEnvelope(2, 'canvas_run_updated', {
+        canvasRunId: 'run-1',
+        canvasId: 'canvas-1',
+        canvasPatch: patch,
+        canvasPatchOverflow: false,
+      }, turnId),
+      context,
+    );
+
+    let metadata = useAgentStore.getState().messages
+      .find((message) => message.id === assistantId)?.metadata;
+    expect(metadata?.canvasPatch).toEqual(patch);
+    expect(metadata?.canvasPatchOverflow).toBe(false);
+
+    // 后续事件不带补丁字段：已有值保留（与 nodeCount / revision 等字段同一风格）。
+    applyAgentTurnEnvelope(
+      sseEnvelope(3, 'canvas_run_started', { canvasRunId: 'run-1', canvasId: 'canvas-1' }, turnId),
+      context,
+    );
+    metadata = useAgentStore.getState().messages
+      .find((message) => message.id === assistantId)?.metadata;
+    expect(metadata?.canvasPatch).toEqual(patch);
+    expect(metadata?.canvasPatchOverflow).toBe(false);
+
+    // 类型不对（字符串）不写入，也不覆盖已有值。
+    applyAgentTurnEnvelope(
+      sseEnvelope(4, 'canvas_run_updated', {
+        canvasRunId: 'run-1',
+        canvasId: 'canvas-1',
+        canvasPatch: 'oops',
+        canvasPatchOverflow: 'yes',
+      }, turnId),
+      context,
+    );
+    metadata = useAgentStore.getState().messages
+      .find((message) => message.id === assistantId)?.metadata;
+    expect(metadata?.canvasPatch).toEqual(patch);
+    expect(metadata?.canvasPatchOverflow).toBe(false);
+  });
+});
+
+describe('agentStore @ 引用资料', () => {
+  const sceneReference = {
+    kind: 'scene' as const,
+    id: 'scene-3',
+    token: '@分镜3',
+    name: '分镜3',
+    sceneNumber: 3,
+  };
+  const conversationReference = {
+    kind: 'conversation' as const,
+    id: 'conversation-9',
+    token: '@对话《分镜重做》',
+    name: '对话《分镜重做》',
+  };
+
+  const prepare = () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sseBody([
+      sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),
+      sseEnvelope(2, 'turn_completed', { content: '收到' }),
+    ]), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      conversations: [],
+      messages: [],
+      streaming: false,
+      generating: {},
+      pendingAssistantId: null,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      agentVideoTask: null,
+      canvasBinding: null,
+      canvasExitPending: false,
+      streamError: null,
+      pendingReferences: [],
+      pendingAttachments: [],
+    });
+    return fetchMock;
+  };
+
+  const requestBody = (fetchMock: ReturnType<typeof vi.fn>) =>
+    JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  it('按 kind:id 去重，同名不同类互不影响', () => {
+    const store = useAgentStore.getState();
+    store.addPendingReferences([sceneReference]);
+    store.addPendingReferences([sceneReference, conversationReference]);
+
+    expect(useAgentStore.getState().pendingReferences).toEqual([
+      sceneReference,
+      conversationReference,
+    ]);
+  });
+
+  it('引用目录按会话持久化，切换会话时按会话恢复', () => {
+    useAgentStore.setState({ activeConversationId: 'conversation-1', pendingReferences: [] });
+    useAgentStore.getState().addPendingReferences([sceneReference]);
+
+    const persisted = window.localStorage.getItem('moon.agent.pendingReferences.conversation-1');
+    expect(persisted).toContain('@分镜3');
+  });
+
+  it('移除与清空都同步更新本地存储', () => {
+    useAgentStore.setState({ activeConversationId: 'conversation-1', pendingReferences: [] });
+    const store = useAgentStore.getState();
+    store.addPendingReferences([sceneReference, conversationReference]);
+    store.removePendingReference('scene', 'scene-3');
+    expect(useAgentStore.getState().pendingReferences).toEqual([conversationReference]);
+
+    useAgentStore.getState().clearPendingReferences();
+    expect(useAgentStore.getState().pendingReferences).toEqual([]);
+    expect(window.localStorage.getItem('moon.agent.pendingReferences.conversation-1')).toBeNull();
+  });
+
+  it('发送时把正文里还存在的引用随请求下发（不依赖调用方显式传参，停止并发送同一条路径）', async () => {
+    const fetchMock = prepare();
+    useAgentStore.getState().addPendingReferences([sceneReference]);
+
+    // 只传正文、不传 opts.references：模拟 interruptAndSend 的发送路径
+    await useAgentStore.getState().sendMessage('把 @分镜3 的镜头拉近一点');
+
+    expect(requestBody(fetchMock).references).toEqual([
+      { ...sceneReference },
+    ]);
+  });
+
+  it('正文里没有标记的引用不下发（用户删掉标记=撤销引用）', async () => {
+    const fetchMock = prepare();
+    useAgentStore.getState().addPendingReferences([sceneReference, conversationReference]);
+
+    await useAgentStore.getState().sendMessage('什么都不引用了');
+
+    expect(requestBody(fetchMock).references).toEqual([]);
+  });
+
+  it('用户消息 metadata 落库引用清单，刷新后气泡仍能渲染标记', async () => {
+    prepare();
+    useAgentStore.getState().addPendingReferences([sceneReference]);
+
+    await useAgentStore.getState().sendMessage('看看 @分镜3');
+
+    const userMessage = useAgentStore.getState().messages
+      .find((message) => message.role === 'user');
+    expect(userMessage?.metadata?.messageInput?.references).toEqual([{ ...sceneReference }]);
+  });
+
+  it('编辑重发：引用以编辑后的正文为准——删掉标记的引用不复活', async () => {
+    const fetchMock = prepare();
+    useAgentStore.setState({
+      messages: [{
+        id: 'user-1',
+        conversationId: 'conversation-1',
+        role: 'user',
+        content: '看看 @分镜3',
+        createdAt: new Date().toISOString(),
+        metadata: { messageInput: { references: [sceneReference, conversationReference] } },
+      }],
+    });
+
+    await useAgentStore.getState().editAndResend('什么都不引用了', 'user-1');
+
+    // 显式空数组 = 明确告诉后端「改后不再引用」，后端据此不再从 previousInput 恢复
+    expect(requestBody(fetchMock).references).toEqual([]);
+  });
+
+  it('编辑重发：正文里仍在的标记继续带走引用', async () => {
+    const fetchMock = prepare();
+    useAgentStore.setState({
+      messages: [{
+        id: 'user-1',
+        conversationId: 'conversation-1',
+        role: 'user',
+        content: '看看 @分镜3',
+        createdAt: new Date().toISOString(),
+        metadata: { messageInput: { references: [sceneReference, conversationReference] } },
+      }],
+    });
+
+    await useAgentStore.getState().editAndResend('还是只看 @分镜3', 'user-1');
+
+    expect(requestBody(fetchMock).references).toEqual([{ ...sceneReference }]);
+  });
+});
+
 

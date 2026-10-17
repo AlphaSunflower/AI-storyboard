@@ -7,6 +7,8 @@ final class AgentScopeToolLabels {
 
     static String displayName(String toolName) {
         if (toolName == null || toolName.isBlank()) return "未知操作";
+        String canvasLabel = canvasGraphDisplayName(toolName);
+        if (canvasLabel != null) return canvasLabel;
         return switch (toolName) {
             case AgentScopeImageTools.GENERATE_IMAGE -> "生成图片";
             case AgentScopeImageTools.GENERATE_IMAGE_BATCH -> "批量生成图片";
@@ -60,6 +62,35 @@ final class AgentScopeToolLabels {
             case "load_skill_through_path" -> "读取技能";
             case "reset_equipped_tools" -> "调整可用工具";
             default -> toolName;
+        };
+    }
+
+    /**
+     * 画布图命令（服务端 MCP 工具）的中文名。
+     *
+     * <p>这些工具名过去没有映射，工具草稿与轨迹里显示的是原始英文名
+     * （{@code canvas_graph_create_nodes}），用户在智能体建图时看不懂它在做什么。
+     * 新增的整图提交与批量连线尤其需要能一眼分辨，因此这里补齐。
+     *
+     * <p>返回 {@code null} 表示不是画布图命令，交给主 switch 处理。
+     */
+    private static String canvasGraphDisplayName(String toolName) {
+        return switch (toolName) {
+            case "canvas_graph_apply_plan" -> "构建画布（一次提交整图）";
+            case "canvas_graph_create_nodes" -> "批量创建画布节点";
+            case "canvas_graph_create_node" -> "创建画布节点";
+            case "canvas_graph_create_edges" -> "批量连接画布节点";
+            case "canvas_graph_create_edge" -> "连接画布节点";
+            case "canvas_graph_update_node" -> "更新画布节点";
+            case "canvas_graph_import_media_batch" -> "批量导入画布素材";
+            case "canvas_graph_import_media" -> "导入画布素材";
+            case "canvas_graph_create_result_slots" -> "创建结果槽";
+            case "canvas_graph_mark_result_slots" -> "标记结果槽";
+            case "canvas_graph_layout_graph" -> "整理画布布局";
+            case "canvas_graph_get_context", "canvas_graph_get_state", "canvas_graph_list_nodes",
+                    "canvas_graph_get_node", "canvas_graph_list_edges",
+                    "canvas_graph_list_node_types" -> "读取画布状态";
+            default -> null;
         };
     }
 }
