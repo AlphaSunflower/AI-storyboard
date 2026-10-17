@@ -10,7 +10,8 @@ metadata:
     evaluation_mode: hybrid
     default_hitl_policy: none
     version: "3.0"
-allowed-tools: generate_image generate_image_batch refineImage resolve_reference_assets request_human_input
+allowed-tools: generate_image generate_image_batch refineImage resolve_reference_assets request_human_input update_creative_context
+ update_creative_context
 ---
 
 # 图片生成

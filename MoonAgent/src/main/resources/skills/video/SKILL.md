@@ -11,7 +11,8 @@ metadata:
     default_hitl_policy: none
     version: "3.0"
     priority: 40
-allowed-tools: generate_video resolve_reference_assets request_human_input
+allowed-tools: generate_video resolve_reference_assets request_human_input update_creative_context save_timeline_manifest get_timeline_manifest
+ update_creative_context save_timeline_manifest get_timeline_manifest
 ---
 
 # 视频生成（video）

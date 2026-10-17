@@ -81,6 +81,64 @@ class AgentScopeToolkitFactoryTest {
                 .contains(AgentScopeToolkitFactory.STORYBOARD_TOOLS);
     }
 
+    /**
+     * 创作记忆分两类：读取类常驻，写入/时间线类按技能门控。
+     *
+     * <p>依据：{@code TurnContextMiddleware:191-200} 每轮已把
+     * {@code <project-creative-context>} 与约束账本注入 prompt，所以
+     * {@code get_creative_context} / {@code extract_creative_constraints} 属于
+     * 「技能激活前就该能调」的读取面，必须常驻；而
+     * {@code update_creative_context} / {@code save|get_timeline_manifest}
+     * 只在具体创作任务里才有意义，按技能可见。
+     */
+    @Test
+    void creativeReadToolsStayAlwaysOnWhileWriteToolsAreGated() {
+        AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
+        when(interaction.tool()).thenReturn(tool("request_human_input"));
+        AgentScopeToolkitFactory factory = factory(interaction);
+
+        factory.create();
+        io.agentscope.core.tool.Toolkit toolkit = factory.activeToolkit();
+
+        // 读取类：常驻，且不在任何技能组里
+        assertThat(toolkit.getToolNames())
+                .as("读取类创作工具必须常驻（技能激活前就要能读）")
+                .contains(AgentScopeCreativeTools.GET_CONTEXT,
+                        AgentScopeCreativeTools.EXTRACT_CONSTRAINTS);
+        for (String group : List.of(AgentScopeToolkitFactory.STORYBOARD_TOOLS,
+                AgentScopeToolkitFactory.IMAGE_TOOLS,
+                AgentScopeToolkitFactory.VIDEO_TOOLS)) {
+            io.agentscope.core.tool.ToolGroup g = toolkit.getToolGroup(group);
+            assertThat(g.getTools())
+                    .as("读取类创作工具不应被塞进 %s（那会让它们失去常驻语义）", group)
+                    .doesNotContain(AgentScopeCreativeTools.GET_CONTEXT);
+        }
+
+        // 写入/时间线类：按技能可见，不能常驻在 ungrouped
+        io.agentscope.core.tool.ToolGroup storyboard =
+                toolkit.getToolGroup(AgentScopeToolkitFactory.STORYBOARD_TOOLS);
+        assertThat(storyboard.getTools())
+                .contains(AgentScopeCreativeTools.UPDATE_CONTEXT,
+                        AgentScopeCreativeTools.SAVE_TIMELINE,
+                        AgentScopeCreativeTools.GET_TIMELINE);
+
+        io.agentscope.core.tool.ToolGroup image =
+                toolkit.getToolGroup(AgentScopeToolkitFactory.IMAGE_TOOLS);
+        assertThat(image.getTools())
+                .as("生图会更新项目创作事实，所以需要 update_creative_context")
+                .contains(AgentScopeCreativeTools.UPDATE_CONTEXT);
+        assertThat(image.getTools())
+                .as("时间线清单只服务多镜头合并，生图不该看到")
+                .doesNotContain(AgentScopeCreativeTools.SAVE_TIMELINE);
+
+        io.agentscope.core.tool.ToolGroup video =
+                toolkit.getToolGroup(AgentScopeToolkitFactory.VIDEO_TOOLS);
+        assertThat(video.getTools())
+                .as("时间线清单是多镜头视频装配的前提，视频技能必须可见")
+                .contains(AgentScopeCreativeTools.SAVE_TIMELINE,
+                        AgentScopeCreativeTools.GET_TIMELINE);
+    }
+
     @Test
     void everyRegisteredReadOnlyToolIsAutoAllowed() {
         AgentScopeInteractionTools interaction = mock(AgentScopeInteractionTools.class);
@@ -300,7 +358,12 @@ class AgentScopeToolkitFactoryTest {
                 tool("start_storyboard_production"), tool("list_project_storyboard")));
         when(workflows.tool()).thenReturn(tool("resolve_agent_workflow"));
         when(videoMerge.tool()).thenReturn(tool("merge_storyboard_videos"));
-        when(creative.tools()).thenReturn(List.of());
+        when(creative.tools()).thenReturn(List.of(
+                tool(AgentScopeCreativeTools.GET_CONTEXT),
+                tool(AgentScopeCreativeTools.UPDATE_CONTEXT),
+                tool(AgentScopeCreativeTools.EXTRACT_CONSTRAINTS),
+                tool(AgentScopeCreativeTools.SAVE_TIMELINE),
+                tool(AgentScopeCreativeTools.GET_TIMELINE)));
         AgentScopeDocumentTools documentTools = mock(AgentScopeDocumentTools.class);
         when(documentTools.tools()).thenReturn(List.of(
                 tool("list_conversation_documents", true), tool("read_document", true)));

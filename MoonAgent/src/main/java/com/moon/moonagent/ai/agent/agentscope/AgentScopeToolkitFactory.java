@@ -10,8 +10,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -119,7 +122,24 @@ public class AgentScopeToolkitFactory {
         if (webTools != null) {
             webTools.tools().forEach(tool -> register(toolkit, tool));
         }
-        creativeTools.tools().forEach(tool -> register(toolkit, tool));
+        // 创作记忆：**读取**类常驻（技能激活前就要能读），**写入/时间线**类按技能门控。
+        //
+        // 依据 TurnContextMiddleware:191-200——每轮已自动注入 <project-creative-context>
+        // （目标/方向/风格/硬软约束/参考/被拒方向/反馈/本轮模式）与约束账本，
+        // 所以 get_creative_context / extract_creative_constraints 属于"可在激活前调用"的读取面；
+        // 而 update_creative_context / save|get_timeline_manifest 只在具体创作任务里才有意义。
+        Set<String> gatedCreativeNames = Set.of(
+                AgentScopeCreativeTools.UPDATE_CONTEXT,
+                AgentScopeCreativeTools.SAVE_TIMELINE,
+                AgentScopeCreativeTools.GET_TIMELINE);
+        List<AgentScopeTool> gatedCreativeTools = new ArrayList<>();
+        creativeTools.tools().forEach(tool -> {
+            if (gatedCreativeNames.contains(tool.getName())) {
+                gatedCreativeTools.add(tool);
+            } else {
+                register(toolkit, tool);
+            }
+        });
         // 分镜 16 个工具改为技能门控（2026-10-17）：它们此前无条件注册，
         // 使每一轮（哪怕只是闲聊）都带着 16 个分镜 schema，占常驻工具面 40%。
         // storyboard 技能的 allowed-tools 已声明这些工具，激活技能即可见。
@@ -167,6 +187,24 @@ public class AgentScopeToolkitFactory {
         toolkit.registration()
                 .agentTool(toolPipeline.wrap(journeyTools.tool()))
                 .group(VIDEO_TOOLS).apply();
+
+        // 门控的创作写入/时间线工具：必须在 image/video 组创建之后再注册。
+        // 一个工具可同时属于多个技能组（画布工具就是 design+run 双组），
+        // 所以按「哪些技能真的需要它」逐个挂，而不是塞进单一组。
+        Map<String, List<String>> creativeGroupByTool = new LinkedHashMap<>();
+        creativeGroupByTool.put(AgentScopeCreativeTools.UPDATE_CONTEXT,
+                List.of(STORYBOARD_TOOLS, IMAGE_TOOLS, VIDEO_TOOLS, CANVAS_DESIGN_TOOLS));
+        creativeGroupByTool.put(AgentScopeCreativeTools.SAVE_TIMELINE,
+                List.of(STORYBOARD_TOOLS, VIDEO_TOOLS));
+        creativeGroupByTool.put(AgentScopeCreativeTools.GET_TIMELINE,
+                List.of(STORYBOARD_TOOLS, VIDEO_TOOLS));
+        for (AgentScopeTool tool : gatedCreativeTools) {
+            for (String group : creativeGroupByTool.getOrDefault(tool.getName(), List.of())) {
+                toolkit.registration()
+                        .agentTool(toolPipeline.wrap(tool))
+                        .group(group).apply();
+            }
+        }
         return toolkit;
     }
 
