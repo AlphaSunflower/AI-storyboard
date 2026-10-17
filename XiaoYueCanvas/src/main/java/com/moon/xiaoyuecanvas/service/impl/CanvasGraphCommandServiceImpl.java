@@ -319,25 +319,7 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
             }
             CanvasGraphResponse loaded = load(context);
             Map<String, Object> graph = mutableGraph(loaded.graph());
-            // 必须用「就地」查找：findNode 经 listOfMaps 返回副本，改副本不会落库
-            Map<String, Object> node = findLiveNode(graph, nodeId);
-            if (node == null) {
-                throw new CanvasGraphCommandException("NODE_NOT_FOUND", "节点不存在: " + nodeId);
-            }
-            Map<String, Object> data = mutableMap(node.get("data"));
-            patch.forEach((key, value) -> {
-                if (Set.of("id", "type", "kind").contains(key)) return;
-                // 扁平 {label:"x"} 与嵌套 {data:{label:"x"}} 等价，都 merge 进同一层 data。
-                // 旧实现把 data 键原样塞进 data，模型传 {data:{...}} 会写成 data.data.label。
-                if ("data".equals(key)) {
-                    mutableMap(value).forEach((nestedKey, nestedValue) -> {
-                        if (!Set.of("id", "type", "kind").contains(nestedKey)) data.put(nestedKey, nestedValue);
-                    });
-                    return;
-                }
-                data.put(key, value);
-            });
-            node.put("data", data);
+            Map<String, Object> node = applyNodePatch(graph, nodeId, patch);
             int revision = saveGraph(context, graph, loaded.revision());
             Map<String, Object> out = writeResult("update_node", context, revision, graph);
             out.put("nodeId", nodeId);
@@ -545,60 +527,14 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
             requireCanvas(context);
             String producerNodeId = string(args.get("producerNodeId"));
             List<String> nodeIds = strings(args.get("nodeIds"));
-            int startOrder = integer(args.get("startOrder"), 0);
             if (blank(producerNodeId) || nodeIds.isEmpty()) {
                 throw new CanvasGraphCommandException("INVALID_ARGUMENTS", "producerNodeId 和 nodeIds 不能为空");
             }
 
             CanvasGraphResponse loaded = load(context);
             Map<String, Object> graph = mutableGraph(loaded.graph());
-            Map<String, Object> producer = findNode(graph, producerNodeId);
-            if (producer == null) {
-                throw new CanvasGraphCommandException("NODE_NOT_FOUND", "生产节点不存在: " + producerNodeId);
-            }
-            CanvasNodeRegistry.NodeType producerType = CanvasNodeRegistry.require(kindOf(producer));
-            List<String> edgeIds = new ArrayList<>();
-            List<Map<String, Object>> markedEdges = new ArrayList<>();
-            for (int index = 0; index < nodeIds.size(); index++) {
-                String nodeId = nodeIds.get(index);
-                Map<String, Object> target = findNode(graph, nodeId);
-                if (target == null) {
-                    throw new CanvasGraphCommandException("NODE_NOT_FOUND", "结果槽节点不存在: " + nodeId);
-                }
-                String targetKind = kindOf(target);
-                if (!"image".equals(targetKind) && !"video".equals(targetKind)) {
-                    throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
-                            "节点 " + nodeId + " 不是图片或视频占位节点");
-                }
-                if (!blank(string(mutableMap(target.get("data")).get("assetId")))) {
-                    throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
-                            "节点 " + nodeId + " 已有素材，不能作为空结果槽");
-                }
-                CanvasNodeRegistry.Port output = producerType.outputs().stream()
-                        .filter(port -> targetKind.equals(port.media()))
-                        .findFirst()
-                        .orElseThrow(() -> new CanvasGraphCommandException(
-                                "PORT_NOT_FOUND", "生产节点没有 " + targetKind + " 输出"));
-                Map<String, Object> existing = findLiveEdge(graph, producerNodeId, nodeId);
-                int order = startOrder + index;
-                if (existing != null) {
-                    Map<String, Object> data = mutableMap(existing.get("data"));
-                    data.put("resultSlot", true);
-                    data.put("resultSlotOrder", order);
-                    existing.put("data", data);
-                    edgeIds.add(string(existing.get("id")));
-                    markedEdges.add(existing);
-                } else {
-                    Map<String, Object> edge = createEdgeInternal(graph, Map.of(
-                            "source", producerNodeId,
-                            "sourceHandle", output.id(),
-                            "target", nodeId,
-                            "targetHandle", "origin",
-                            "data", Map.of("resultSlot", true, "resultSlotOrder", order)));
-                    edgeIds.add(string(edge.get("id")));
-                    markedEdges.add(edge);
-                }
-            }
+            List<Map<String, Object>> markedEdges = applyMarkResultSlots(graph, args);
+            List<String> edgeIds = markedEdges.stream().map(edge -> string(edge.get("id"))).toList();
             int revision = saveGraph(context, graph, loaded.revision());
             Map<String, Object> out = writeResult("mark_result_slots", context, revision, graph);
             out.put("nodeIds", nodeIds);
@@ -711,8 +647,12 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
                 throw new CanvasGraphCommandException("INVALID_ARGUMENTS", "plan 不能为空");
             }
             List<Map<String, Object>> nodeSpecs = listOfMaps(payload.get("nodes"));
-            if (nodeSpecs.isEmpty()) {
-                throw new CanvasGraphCommandException("INVALID_ARGUMENTS", "plan.nodes 不能为空");
+            List<Map<String, Object>> updateSpecs = listOfMaps(payload.get("updates"));
+            List<Map<String, Object>> markSlotSpecs = listOfMaps(payload.get("markResultSlots"));
+            // 纯改图（只改已有节点 / 只标记结果槽）允许 nodes 为空；三种意图全空才是非法调用。
+            if (nodeSpecs.isEmpty() && updateSpecs.isEmpty() && markSlotSpecs.isEmpty()) {
+                throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
+                        "plan 至少要给 nodes、updates 或 markResultSlots 之一");
             }
             if (nodeSpecs.size() > MAX_BATCH_NODES) {
                 throw new CanvasGraphCommandException("LIMIT_EXCEEDED",
@@ -854,6 +794,31 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
                 }
             }
 
+            // 阶段 4c：改已有节点的 data 字段（一次命令内与建节点/连线共用同一个 revision）
+            List<Map<String, Object>> updatedNodes = new ArrayList<>();
+            for (int index = 0; index < updateSpecs.size(); index++) {
+                Map<String, Object> spec = updateSpecs.get(index);
+                String targetId = string(spec.get("nodeId"));
+                Map<String, Object> patch = map(spec.get("patch"));
+                if (patch == null) patch = map(spec.get("data"));
+                try {
+                    updatedNodes.add(applyNodePatch(graph, targetId, patch));
+                } catch (CanvasGraphCommandException error) {
+                    errors.add(batchError(index, targetId, error));
+                }
+            }
+
+            // 阶段 4d：把已有空媒体节点标记为结果槽（在边之后，便于复用已建的边）
+            List<Map<String, Object>> markedEdges = new ArrayList<>();
+            for (int index = 0; index < markSlotSpecs.size(); index++) {
+                Map<String, Object> spec = markSlotSpecs.get(index);
+                try {
+                    markedEdges.addAll(applyMarkResultSlots(graph, spec));
+                } catch (CanvasGraphCommandException error) {
+                    errors.add(batchError(index, string(spec.get("producerNodeId")), error));
+                }
+            }
+
             // 汇总：false = 一条都不落库；true = 落库成功项并在返回里报 errors/skipped
             if (!errors.isEmpty() && !continueOnError) {
                 throw new CanvasGraphCommandException("PLAN_INVALID",
@@ -905,6 +870,20 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
             List<Map<String, Object>> patchNodes = new ArrayList<>();
             nodeIds.stream().map(id -> findNode(graph, id)).filter(Objects::nonNull).forEach(patchNodes::add);
             slotIds.stream().map(id -> findNode(graph, id)).filter(Objects::nonNull).forEach(patchNodes::add);
+            // 改过的节点也要进增量通道，否则前端只能整图重载
+            for (Map<String, Object> updated : updatedNodes) {
+                Object updatedId = updated.get("id");
+                if (patchNodes.stream().noneMatch(node -> Objects.equals(node.get("id"), updatedId))) {
+                    patchNodes.add(updated);
+                }
+            }
+            // 标记结果槽可能改了已有边（补 resultSlot 位次），未新建的也要通知前端
+            for (Map<String, Object> marked : markedEdges) {
+                Object markedId = marked.get("id");
+                if (createdEdges.stream().noneMatch(edge -> Objects.equals(edge.get("id"), markedId))) {
+                    createdEdges.add(marked);
+                }
+            }
             if (layout != null) {
                 for (Object movedId : list(layout.get("movedNodeIds"))) {
                     Map<String, Object> moved = findNode(graph, string(movedId));
@@ -1016,6 +995,109 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
         return blank(message)
                 ? "素材导入失败：" + error.getClass().getSimpleName()
                 : "素材导入失败：" + message;
+    }
+
+    /**
+     * 就地改一个已有节点的 data 字段（{@code apply_plan.updates} 的实现）。
+     *
+     * <p>与 {@code update_node} 命令同一语义：扁平字段与嵌套 {@code data} 等价；{@code id/type/kind} 不可改；
+     * 未传的字段不会被置空。必须用 {@link #findLiveNode}（{@link #findNode} 返回副本，改副本不落库）。
+     *
+     * @return 被修改的节点对象（就地引用），供增量 patch 使用
+     */
+    private Map<String, Object> applyNodePatch(Map<String, Object> graph,
+                                               String nodeId,
+                                               Map<String, Object> patch) {
+        if (blank(nodeId)) {
+            throw new CanvasGraphCommandException("INVALID_ARGUMENTS", "updates[].nodeId 不能为空");
+        }
+        if (patch == null || patch.isEmpty()) {
+            throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
+                    "updates[" + nodeId + "].patch 不能为空");
+        }
+        Map<String, Object> node = findLiveNode(graph, nodeId);
+        if (node == null) {
+            throw new CanvasGraphCommandException("NODE_NOT_FOUND", "节点不存在: " + nodeId);
+        }
+        Map<String, Object> data = mutableMap(node.get("data"));
+        patch.forEach((key, value) -> {
+            if (Set.of("id", "type", "kind").contains(key)) return;
+            // 扁平 {label:"x"} 与嵌套 {data:{label:"x"}} 等价，都 merge 进同一层 data。
+            if ("data".equals(key)) {
+                mutableMap(value).forEach((nestedKey, nestedValue) -> {
+                    if (!Set.of("id", "type", "kind").contains(nestedKey)) {
+                        data.put(nestedKey, nestedValue);
+                    }
+                });
+                return;
+            }
+            data.put(key, value);
+        });
+        node.put("data", data);
+        return node;
+    }
+
+    /**
+     * 把已有空媒体节点标记为某生产节点的结果槽（{@code apply_plan.markResultSlots} 的实现）。
+     *
+     * <p>与 {@code mark_result_slots} 命令同一语义与校验：只接受不含 {@code assetId} 的 image/video 节点；
+     * 已存在同一对 source→target 的边时只补 {@code resultSlot} 位次，不重复建边。
+     *
+     * @return 本次涉及的连线（新建的与就地改过的）
+     */
+    private List<Map<String, Object>> applyMarkResultSlots(Map<String, Object> graph,
+                                                           Map<String, Object> args) {
+        String producerNodeId = string(args.get("producerNodeId"));
+        List<String> nodeIds = strings(args.get("nodeIds"));
+        int startOrder = integer(args.get("startOrder"), 0);
+        if (blank(producerNodeId) || nodeIds.isEmpty()) {
+            throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
+                    "markResultSlots[].producerNodeId 和 nodeIds 不能为空");
+        }
+        Map<String, Object> producer = findNode(graph, producerNodeId);
+        if (producer == null) {
+            throw new CanvasGraphCommandException("NODE_NOT_FOUND", "生产节点不存在: " + producerNodeId);
+        }
+        CanvasNodeRegistry.NodeType producerType = CanvasNodeRegistry.require(kindOf(producer));
+        List<Map<String, Object>> touched = new ArrayList<>();
+        for (int index = 0; index < nodeIds.size(); index++) {
+            String nodeId = nodeIds.get(index);
+            Map<String, Object> target = findNode(graph, nodeId);
+            if (target == null) {
+                throw new CanvasGraphCommandException("NODE_NOT_FOUND", "结果槽节点不存在: " + nodeId);
+            }
+            String targetKind = kindOf(target);
+            if (!"image".equals(targetKind) && !"video".equals(targetKind)) {
+                throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
+                        "节点 " + nodeId + " 不是图片或视频占位节点");
+            }
+            if (!blank(string(mutableMap(target.get("data")).get("assetId")))) {
+                throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
+                        "节点 " + nodeId + " 已有素材，不能作为空结果槽");
+            }
+            CanvasNodeRegistry.Port output = producerType.outputs().stream()
+                    .filter(port -> targetKind.equals(port.media()))
+                    .findFirst()
+                    .orElseThrow(() -> new CanvasGraphCommandException(
+                            "PORT_NOT_FOUND", "生产节点没有 " + targetKind + " 输出"));
+            Map<String, Object> existing = findLiveEdge(graph, producerNodeId, nodeId);
+            int order = startOrder + index;
+            if (existing != null) {
+                Map<String, Object> data = mutableMap(existing.get("data"));
+                data.put("resultSlot", true);
+                data.put("resultSlotOrder", order);
+                existing.put("data", data);
+                touched.add(existing);
+            } else {
+                touched.add(createEdgeInternal(graph, Map.of(
+                        "source", producerNodeId,
+                        "sourceHandle", output.id(),
+                        "target", nodeId,
+                        "targetHandle", "origin",
+                        "data", Map.of("resultSlot", true, "resultSlotOrder", order))));
+            }
+        }
+        return touched;
     }
 
     /**

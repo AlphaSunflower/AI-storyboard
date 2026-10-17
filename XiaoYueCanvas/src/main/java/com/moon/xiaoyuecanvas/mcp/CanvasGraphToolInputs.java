@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * canvas_graph_* 工具的类型化业务入参。
@@ -409,14 +410,47 @@ public final class CanvasGraphToolInputs {
         }
     }
 
+    /**
+     * apply_plan.updates 的单项：改一个**已有**节点的 data 字段。
+     *
+     * <p>与 update_node 同一语义（{@code id/type/kind} 不可改、没传的字段不置空），
+     * 区别只是它和建节点、建连线、标记结果槽共用同一次提交、同一个 revision。
+     */
+    public record NodeUpdateSpec(
+            @ToolParam(description = "要修改的已有节点 id（必填）", required = true)
+            @McpToolParam(description = "要修改的已有节点 id（必填）", required = true) String nodeId,
+            @ToolParam(description = "要写入的 data 字段（必填）：扁平字段与 data={...} 等价；id/type/kind 不可改", required = true)
+            @McpToolParam(description = "要写入的 data 字段（必填）：扁平字段与 data={...} 等价；id/type/kind 不可改", required = true)
+            NodePatch patch) {
+
+        public Map<String, Object> toMap() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            put(out, "nodeId", nodeId);
+            put(out, "patch", patch == null ? null : patch.toMap());
+            return out;
+        }
+    }
+
     /** apply_plan 的计划体。 */
     public record PlanSpec(
-            @ToolParam(description = "要创建的节点列表（必填，1~100）；每个节点可用 ref 声明临时引用名，供其他节点的 refs 引用；节点可带 media 内联素材，把「导入素材 + 建图」压成一次调用", required = true)
-            @McpToolParam(description = "要创建的节点列表（必填，1~100）；每个节点可用 ref 声明临时引用名，供其他节点的 refs 引用；节点可带 media 内联素材，把「导入素材 + 建图」压成一次调用", required = true)
+            @ToolParam(description = "要创建的节点列表（可选，1~100）；每个节点可用 ref 声明临时引用名，供其他节点的 refs 引用；"
+                    + "节点可带 media 内联素材，把「导入素材 + 建图」压成一次调用。纯改图时可以不传（与 updates / markResultSlots 至少给一个）",
+                    required = false)
+            @McpToolParam(description = "要创建的节点列表（可选，1~100）；每个节点可用 ref 声明临时引用名，供其他节点的 refs 引用；"
+                    + "节点可带 media 内联素材，把「导入素材 + 建图」压成一次调用。纯改图时可以不传（与 updates / markResultSlots 至少给一个）",
+                    required = false)
             List<NodeSpec> nodes,
             @ToolParam(description = "显式连线（可选）：与 refs 可并存；完全相同的已有连线会被幂等忽略、不报错", required = false)
             @McpToolParam(description = "显式连线（可选）：与 refs 可并存；完全相同的已有连线会被幂等忽略、不报错", required = false)
             List<EdgeSpec> edges,
+            @ToolParam(description = "改已有节点的 data 字段（可选）：每项 {nodeId, patch}；与建节点/连线/标记槽共用同一个 revision", required = false)
+            @McpToolParam(description = "改已有节点的 data 字段（可选）：每项 {nodeId, patch}；与建节点/连线/标记槽共用同一个 revision", required = false)
+            List<NodeUpdateSpec> updates,
+            @ToolParam(description = "把已有空图片/视频节点标记为某生产节点的结果槽（可选）：每项 {producerNodeId, nodeIds, startOrder?}；"
+                    + "不新建节点，只补连线与槽位顺序", required = false)
+            @McpToolParam(description = "把已有空图片/视频节点标记为某生产节点的结果槽（可选）：每项 {producerNodeId, nodeIds, startOrder?}；"
+                    + "不新建节点，只补连线与槽位顺序", required = false)
+            List<MarkResultSlotArgs> markResultSlots,
             @ToolParam(description = "收尾布局（可选）：在本批次变更之后、同一次保存内执行，不会额外产生 revision；不传布局参数时默认排布本批次节点", required = false)
             @McpToolParam(description = "收尾布局（可选）：在本批次变更之后、同一次保存内执行，不会额外产生 revision；不传布局参数时默认排布本批次节点", required = false)
             LayoutSpec layout,
@@ -428,10 +462,22 @@ public final class CanvasGraphToolInputs {
             Map<String, Object> out = new LinkedHashMap<>();
             put(out, "nodes", toNodeMaps(nodes));
             put(out, "edges", toEdgeMaps(edges));
+            put(out, "updates", toUpdateMaps(updates));
+            put(out, "markResultSlots", toMarkSlotMaps(markResultSlots));
             put(out, "layout", layout == null ? null : layout.toMap());
             put(out, "pruneUnreferencedResultSlots", pruneUnreferencedResultSlots);
             return out;
         }
+    }
+
+    static List<Map<String, Object>> toUpdateMaps(List<NodeUpdateSpec> updates) {
+        if (updates == null) return null;
+        return updates.stream().filter(Objects::nonNull).map(NodeUpdateSpec::toMap).toList();
+    }
+
+    static List<Map<String, Object>> toMarkSlotMaps(List<MarkResultSlotArgs> items) {
+        if (items == null) return null;
+        return items.stream().filter(Objects::nonNull).map(MarkResultSlotArgs::toMap).toList();
     }
 
     static List<Map<String, Object>> toNodeMaps(List<NodeSpec> nodes) {

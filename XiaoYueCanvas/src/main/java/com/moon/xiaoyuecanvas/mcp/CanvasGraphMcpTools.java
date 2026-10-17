@@ -460,9 +460,12 @@ public class CanvasGraphMcpTools {
 
     @Tool(description = "Submit a whole canvas build plan in one CAS transaction.")
     @McpTool(name = "canvas_graph_apply_plan",
-            description = "**建图首选**：一次提交整张图的构建意图（节点 + 内联素材 + refs 自动连线 + 结果槽 + 布局），"
-                    + "只产生 1 个 revision、只重载一次画布。用法：给每个节点一个 ref（如 \"g1\"），"
-                    + "再用 refs 声明它的上游来源——\"m1\" 表示引用该节点输出，\"g1.result.0\" 表示引用 g1 的第 1 个结果槽输出；"
+            description = "**建图与改图的首选，也是唯一入口**：一次提交整张图的意图，只产生 1 个 revision、只重载一次画布。"
+                    + "可同时包含：新建节点（nodes）、显式连线（edges）、**改已有节点**（updates:[{nodeId,patch}]）、"
+                    + "**把已有空节点标记为结果槽**（markResultSlots:[{producerNodeId,nodeIds,startOrder?}]）、收尾布局（layout）。"
+                    + "三种意图（nodes / updates / markResultSlots）至少给一个；纯改图可以不传 nodes。"
+                    + "建图用法：给每个节点一个 ref（如 \"g1\"），再用 refs 声明它的上游来源——\"m1\" 表示引用该节点输出，"
+                    + "\"g1.result.0\" 表示引用 g1 的第 1 个结果槽输出；"
                     + "端口与有序位次（reference/first/last/clips 的 portOrder）由服务端按端口表自动选择，按 refs 数组顺序占用。"
                     + "**本轮要给素材时不要再单独调 canvas_graph_import_media_batch**：直接在节点上写 "
                     + "media:{mediaId 或 url, name?, mimeType?, label?}（mediaId 与 url 二选一），服务端会在同一次提交里把素材落成"
@@ -483,10 +486,14 @@ public class CanvasGraphMcpTools {
             @McpToolParam(description = INJECTED_RUN, required = false) String runId,
             @ToolParam(description = INJECTED_OPERATION, required = false)
             @McpToolParam(description = INJECTED_OPERATION, required = false) String operationKey,
-            @ToolParam(description = "计划对象（必填）：nodes（1~100 个，必填，每个节点可选 media 内联素材与 refs/resultSlots）、"
-                    + "edges（可选显式边）、layout（可选收尾布局）、pruneUnreferencedResultSlots（可选，默认 false）", required = true)
-            @McpToolParam(description = "计划对象（必填）：nodes（1~100 个，必填，每个节点可选 media 内联素材与 refs/resultSlots）、"
-                    + "edges（可选显式边）、layout（可选收尾布局）、pruneUnreferencedResultSlots（可选，默认 false）", required = true)
+            @ToolParam(description = "计划对象（必填）：nodes（可选，1~100 个新建节点，每个可选 media 内联素材与 refs/resultSlots）、"
+                    + "edges（可选显式边）、updates（可选，改已有节点的 data）、markResultSlots（可选，把已有空节点标记为结果槽）、"
+                    + "layout（可选收尾布局）、pruneUnreferencedResultSlots（可选，默认 false）。"
+                    + "nodes / updates / markResultSlots 至少给一个", required = true)
+            @McpToolParam(description = "计划对象（必填）：nodes（可选，1~100 个新建节点，每个可选 media 内联素材与 refs/resultSlots）、"
+                    + "edges（可选显式边）、updates（可选，改已有节点的 data）、markResultSlots（可选，把已有空节点标记为结果槽）、"
+                    + "layout（可选收尾布局）、pruneUnreferencedResultSlots（可选，默认 false）。"
+                    + "nodes / updates / markResultSlots 至少给一个", required = true)
             PlanSpec plan,
             @ToolParam(description = "校验失败是否继续（可选，默认 false=整批不落库并返回全部错误；true=跳过失败项、落库成功项）",
                     required = false)
