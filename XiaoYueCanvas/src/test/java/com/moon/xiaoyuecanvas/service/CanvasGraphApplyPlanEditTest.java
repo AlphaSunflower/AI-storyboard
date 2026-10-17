@@ -217,6 +217,65 @@ class CanvasGraphApplyPlanEditTest {
                 "错误信息应指明至少给一种意图：" + error.getMessage());
     }
 
+    // ── 连边失败的错误消息必须可操作（2026-10-16 真实事故）────────────────
+
+    /**
+     * 真实事故：模型把 ref 名 / label 当节点 id 传给 create_edge，同一会话连续 5 次
+     * 拿到「source/target 不能为空」，无从自修，白费 5 个轮次。
+     *
+     * <p>修法：错误消息自带「当前画布有哪些节点 id」，并点名 apply_plan 的 refs 机制
+     * （refs 正是让模型可以只写 g1、由服务端换 id 的通道）。
+     */
+    @Test
+    void createEdgeWithBlankIdsTellsTheModelWhichNodesExist() {
+        CanvasGraphCommandContext context = context("op-edge-blank");
+        stubGraph(graphWithStandardNodes(), 3, 4);
+
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source", "");
+        edge.put("target", "");
+        Exception error = assertThrows(RuntimeException.class,
+                () -> service.createEdge(context, edge, false));
+
+        String message = String.valueOf(error.getMessage());
+        assertTrue(message.contains("必须是节点 id"), "错误应说明要填 id：" + message);
+        assertTrue(message.contains("producer"), "错误应列出当前节点 id：" + message);
+        assertTrue(message.contains("apply_plan"), "错误应指向 apply_plan 的 refs：" + message);
+        assertTrue(message.contains("refs"), "错误应点名 refs 机制：" + message);
+    }
+
+    @Test
+    void createEdgeWithUnknownIdSaysWhichEndIsMissing() {
+        CanvasGraphCommandContext context = context("op-edge-missing");
+        stubGraph(graphWithStandardNodes(), 3, 4);
+
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source", "producer");
+        edge.put("target", "不存在的节点");
+        Exception error = assertThrows(RuntimeException.class,
+                () -> service.createEdge(context, edge, false));
+
+        String message = String.valueOf(error.getMessage());
+        assertTrue(message.contains("target=不存在的节点"), "应点明是哪一端缺失：" + message);
+        assertTrue(message.contains("producer"), "应列出可用节点：" + message);
+    }
+
+    @Test
+    void createEdgeOnEmptyCanvasSuggestsCreatingNodesFirst() {
+        CanvasGraphCommandContext context = context("op-edge-empty-canvas");
+        stubGraph(emptyGraphMap(), 1, 2);
+
+        Map<String, Object> edge = new LinkedHashMap<>();
+        edge.put("source", "a");
+        edge.put("target", "b");
+        Exception error = assertThrows(RuntimeException.class,
+                () -> service.createEdge(context, edge, false));
+
+        String message = String.valueOf(error.getMessage());
+        assertTrue(message.contains("还没有任何节点"), "空画布应直接说没有节点：" + message);
+        assertTrue(message.contains("canvas_graph_create_nodes"), "应给出下一步建节点的工具名：" + message);
+    }
+
     // ── 缺口补齐：给已有生产节点补建新槽 ────────────────────────────────────
 
     @Test

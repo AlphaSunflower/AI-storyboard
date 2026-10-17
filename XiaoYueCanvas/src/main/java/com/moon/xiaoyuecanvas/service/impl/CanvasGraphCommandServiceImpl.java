@@ -54,6 +54,13 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
     private static final int MAX_RESULT_SLOTS = 12;
     /** 读工具默认分页大小（list_nodes / list_edges / get_state）。 */
     private static final int DEFAULT_PAGE_SIZE = 100;
+    /**
+     * 错误消息里最多列出多少个节点 id。
+     *
+     * <p>连边失败时模型需要「当前有哪些节点」才能改对，但把上百个 id 全塞进错误消息
+     * 会把一次失败变成几千 token。8 个足够覆盖典型画布的前半段，其余只报总数。
+     */
+    private static final int ERROR_NODE_LIST_LIMIT = 8;
     /** 结果槽默认命名「结果 N」；编号在整张画布内递增，避免每个生产节点都从「结果 1」重来。 */
     private static final Pattern RESULT_SLOT_LABEL = Pattern.compile("^结果\\s*(\\d+)$");
     /** refs 表达式里「第 n 个结果槽」的写法：{@code <ref>.result.<n>}。 */
@@ -1029,6 +1036,41 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
      *
      * @return 被修改的节点对象（就地引用），供增量 patch 使用
      */
+    /**
+     * 连边失败时给出「当前画布有哪些节点」，让模型能一轮改完。
+     *
+     * <p>真实事故：模型把 ref 名（{@code g1}）或 label 当成节点 id 传给 {@code create_edge}，
+     * 连续 5 次拿到「source/target 不能为空」却无从自修。错误消息必须自带可选项。
+     *
+     * <p>紧凑渲染：最多 {@value #ERROR_NODE_LIST_LIMIT} 个，形如
+     * {@code id(label)}，label 超长截断；超出部分只报总数，避免把一次错误变成几千 token。
+     */
+    private static String describeNodesForError(Map<String, Object> graph) {
+        List<Map<String, Object>> nodes = listOfMaps(graph.get("nodes"));
+        if (nodes.isEmpty()) {
+            return " 当前画布还没有任何节点，请先用 canvas_graph_apply_plan 或 canvas_graph_create_nodes 建节点。";
+        }
+        StringBuilder out = new StringBuilder(" 当前画布节点（");
+        out.append(nodes.size()).append(" 个）：");
+        int shown = 0;
+        for (Map<String, Object> node : nodes) {
+            if (shown >= ERROR_NODE_LIST_LIMIT) break;
+            if (shown > 0) out.append("、");
+            String id = string(node.get("id"));
+            String label = string(mapOrEmpty(node.get("data")).get("label"));
+            out.append(id);
+            if (!blank(label)) {
+                out.append('(').append(label.length() > 12 ? label.substring(0, 12) : label).append(')');
+            }
+            shown++;
+        }
+        if (nodes.size() > shown) {
+            out.append(" 等共 ").append(nodes.size()).append(" 个");
+        }
+        out.append("。");
+        return out.toString();
+    }
+
     private Map<String, Object> applyNodePatch(Map<String, Object> graph,
                                                String nodeId,
                                                Map<String, Object> patch) {
@@ -1676,7 +1718,13 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
         String sourceId = string(spec.get("source"));
         String targetId = string(spec.get("target"));
         if (blank(sourceId) || blank(targetId)) {
-            throw new CanvasGraphCommandException("INVALID_ARGUMENTS", "source/target 不能为空");
+            // 真实事故（2026-10-16 09:28，同一会话连续 5 次）：模型把 ref 名 / label 当成节点 id，
+            // 传了空值。原错误只说「不能为空」，模型无从自修，白费 5 个轮次。
+            // 现在直接给出「当前画布有哪些节点 id」并点名 refs 机制——那正是 apply_plan 提供的。
+            throw new CanvasGraphCommandException("INVALID_ARGUMENTS",
+                    "source/target 必须是节点 id，不能为空。" + describeNodesForError(graph)
+                            + " 若你手上是 ref 名（如 g1）或节点 label，"
+                            + "请改用 canvas_graph_apply_plan 的 refs 字段，服务端会自动换成 id。");
         }
         if (sourceId.equals(targetId)) {
             throw new CanvasGraphCommandException("SELF_LOOP", "节点不能连接自身");
@@ -1684,7 +1732,12 @@ public class CanvasGraphCommandServiceImpl implements CanvasGraphCommandService 
         Map<String, Object> sourceNode = findNode(graph, sourceId);
         Map<String, Object> targetNode = findNode(graph, targetId);
         if (sourceNode == null || targetNode == null) {
-            throw new CanvasGraphCommandException("NODE_NOT_FOUND", "源节点或目标节点不存在");
+            String missing = sourceNode == null
+                    ? "source=" + sourceId
+                    : "target=" + targetId;
+            throw new CanvasGraphCommandException("NODE_NOT_FOUND",
+                    "节点 id 不存在（" + missing + "）。" + describeNodesForError(graph)
+                            + " 注意 source/target 要填节点 id，不是 ref 名或 label。");
         }
         String sourceKind = kindOf(sourceNode);
         String targetKind = kindOf(targetNode);
