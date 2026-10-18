@@ -78,6 +78,14 @@ export const DS: AgentChatTokens = agentChatTokens;
 const REFERENCE_PREVIEW_LIMIT = 5;
 
 /**
+ * `@` 菜单**每组**内联条数上限（设计 §2.2：分镜 / 会话各内联 8 条）。
+ *
+ * <p>不按数据量铺开：项目有 80 个会话时逐条内联会把菜单撑成整屏高的列表。
+ * 超出部分只留一行说明，菜单高度另有硬上限（`MENTION_MENU_MAX_HEIGHT`）。
+ */
+const MENTION_INLINE_LIMIT = 8;
+
+/**
  * 底部行（方案批准 / 生成偏好 / 上传 … 麦克风 / 发送）的窄栏阈值。
  * 低于它时：「发送」「停止生成」收成图标按钮、生成偏好文字缩成「自定」，
  * 保证每一行的文字都不会被挤成两行（画布 /canvas 的「执行服务」小窗就卡在这个宽度）。
@@ -123,7 +131,7 @@ export function ChatComposer({
 } = {}) {
   const {
     streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
-    refImageUrls, uploadRefImages, sendMessage, interruptAndSend, stopGeneration,
+    refImageUrls, uploadRefImages, sendMessage, steerMessage, interruptAndSend, stopGeneration,
     pendingPicUrls, cancelRefine,
     removeRefImageUrl,
     addRefImageUrls, setRefImageUrls,
@@ -374,8 +382,21 @@ export function ChatComposer({
 
   const busy = (streaming && !agentVideoTask) || !!waitingHumanInput || !!waitingVideoPlan
     || !!canvasBinding || canvasExitPending;
-  const canInterruptSend = streaming && !agentVideoTask && !waitingHumanInput && !waitingVideoPlan
+  const canSteer = streaming && !agentVideoTask && !waitingHumanInput && !waitingVideoPlan
     && !canvasBinding && !canvasExitPending;
+  /**
+   * steer 只携带正文：附件、参考图、`@` 引用需要走原来的「停止并发送」，
+   * 否则这些上下文会被静默丢掉（模型只看到一段没有来源的 @名称）。
+   */
+  const steerBlocked = canSteer && (
+    pendingAttachments.length > 0
+    || refImageUrls.length > 0
+    || pendingPicUrls.length > 0
+    || pickedAssetIds.length > 0
+    || !!pendingGroup
+    || mentionRanges(text, pendingReferences).length > 0
+  );
+  const canSteerNow = canSteer && !steerBlocked;
   const attachLocked = readOnly;
   const fileAttachments = pendingAttachments.filter((attachment) => attachment.kind === 'file');
   const referencePreviews = refImageUrls.map((url, index) => ({
@@ -405,7 +426,7 @@ export function ChatComposer({
   // 只有注释、没有文字时也允许发送：注释块本身就是内容
   const hasPendingAnnotations = pendingAnnotationGroups.length > 0;
   const hasSideChatSelections = sideChatSelections.length > 0;
-  const canSend = !readOnly && (!busy || canInterruptSend)
+  const canSend = !readOnly && (!busy || canSteer)
     && (!!text.trim() || hasPendingAnnotations || hasSideChatSelections);
 
   // ── 斜杠命令（/chat 输入「/」列出「压缩上下文 / 状态」） ──
@@ -649,7 +670,12 @@ export function ChatComposer({
         : `分镜引用最多 ${MENTION_LIMITS.scene} 个`,
       run: () => { dismissMention(); setSceneModalOpen(true); },
     });
-    scenes.forEach((scene) => {
+    // 用户已经在输入筛选词：不截断条目（否则「分镜12」这种第 9 条之后的目标搜不到）；
+    // 只在空查询、也就是刚敲下 `@` 的时候内联前 8 条，菜单不会被数据量撑高。
+    const querying = (mentionQuery?.query ?? '').trim().length > 0;
+    // 分镜组只内联前 8 条：项目分镜再多也不让菜单变成长列表，其余走「全部分镜…」选择器
+    const inlineScenes = querying ? scenes : scenes.slice(0, MENTION_INLINE_LIMIT);
+    inlineScenes.forEach((scene) => {
       items.push({
         id: `scene-${scene.id}`,
         group: 'scene',
@@ -662,31 +688,56 @@ export function ChatComposer({
         run: () => insertReference(sceneReference(scene, pendingReferences)),
       });
     });
-    conversations
+    if (scenes.length > inlineScenes.length) {
+      items.push({
+        id: 'scene-more',
+        group: 'scene',
+        icon: null,
+        note: true,
+        title: `还有 ${scenes.length - inlineScenes.length} 个分镜未列出，用「全部分镜…」或输入编号筛选`,
+        run: () => {},
+      });
+    }
+    // 会话组同理：按最近活跃取前 8 个；P1 全部置灰，逐条列 80 个只有噪音
+    const projectConversations = conversations
       .filter((conversation) => conversation.projectId === projectId
         && conversation.id !== activeConversationId
         && conversation.status !== 'archived'
         && conversation.status !== 'temporary')
-      .forEach((conversation) => {
-        items.push({
-          id: `conversation-${conversation.id}`,
-          group: 'conversation',
-          icon: <MessagesSquare size={15} strokeWidth={2} />,
-          title: `对话《${conversation.title || '未命名'}》`,
-          description: [
-            conversation.messageCount ? `${conversation.messageCount} 条` : '',
-            conversation.updatedAt ? new Date(conversation.updatedAt).toLocaleDateString() : '',
-            '引用对话将在下一步（会话摘要）开放',
-          ].filter(Boolean).join(' · '),
-          keywords: `对话 会话 ${conversation.title ?? ''}`,
-          // P1 范围不含会话摘要索引与 read_conversation：暂时置灰，避免"插了标记但模型读不到"
-          disabled: true,
-          disabledHint: conversationQuotaReached
-            ? `对话引用最多 ${MENTION_LIMITS.conversation} 个`
-            : '引用对话将在下一步（会话摘要）开放',
-          run: () => insertReference(conversationReference(conversation, pendingReferences)),
-        });
+      .sort((left, right) => (right.updatedAt ?? '').localeCompare(left.updatedAt ?? ''));
+    const inlineConversations = querying
+      ? projectConversations
+      : projectConversations.slice(0, MENTION_INLINE_LIMIT);
+    inlineConversations.forEach((conversation) => {
+      items.push({
+        id: `conversation-${conversation.id}`,
+        group: 'conversation',
+        icon: <MessagesSquare size={15} strokeWidth={2} />,
+        title: `对话《${conversation.title || '未命名'}》`,
+        description: [
+          conversation.messageCount ? `${conversation.messageCount} 条` : '',
+          conversation.updatedAt ? new Date(conversation.updatedAt).toLocaleDateString() : '',
+          '引用对话将在下一步（会话摘要）开放',
+        ].filter(Boolean).join(' · '),
+        keywords: `对话 会话 ${conversation.title ?? ''}`,
+        // P1 范围不含会话摘要索引与 read_conversation：暂时置灰，避免"插了标记但模型读不到"
+        disabled: true,
+        disabledHint: conversationQuotaReached
+          ? `对话引用最多 ${MENTION_LIMITS.conversation} 个`
+          : '引用对话将在下一步（会话摘要）开放',
+        run: () => insertReference(conversationReference(conversation, pendingReferences)),
       });
+    });
+    if (projectConversations.length > inlineConversations.length) {
+      items.push({
+        id: 'conversation-more',
+        group: 'conversation',
+        icon: null,
+        note: true,
+        title: `还有 ${projectConversations.length - inlineConversations.length} 个会话未列出，输入标题可筛选`,
+        run: () => {},
+      });
+    }
     return items;
   }, [readOnly, scenes, pendingReferences, conversations, activeConversationId, projectId, mentionQuery]);
 
@@ -703,7 +754,7 @@ export function ChatComposer({
     const rawText = text.trim();
     // 只有注释、没有文字时也能发：注释块本身就是内容
     if ((!rawText && !hasPendingAnnotations && !hasSideChatSelections)
-      || readOnly || (busy && !canInterruptSend)) return;
+      || readOnly || (busy && !canSteer)) return;
     // 未选项目时 sendMessage 会拒绝发送：先拦下并保留已输入文字，避免清空后丢内容
     if (!projectId) {
       useAgentStore.setState({ streamError: '请先在左上角选择一个项目' });
@@ -722,9 +773,16 @@ export function ChatComposer({
     setText('');
     // 已发出的素材由 store 在本轮发送后清空（见 sendMessage）：输入框上方只剩「还没发出去的」，
     // 避免看起来像旧素材又被带了一遍。
-    if (canInterruptSend) {
-      // 打断发送：先让智能体停下（已流出的文字以「…」留在气泡里），再把这句话发出去。
-      // 打断没能在超时内生效时消息不会发出，把输入内容还给用户，避免"点了没反应还丢了字"。
+    if (canSteerNow) {
+      // 回合中插入：不打断当前生成，消息在下一个模型步骤注入。
+      // 只有回合刚结束（not_running）时才退化成普通发送，开新一轮。
+      void steerMessage(content).then((delivered) => {
+        if (!delivered) setText((current) => (current.trim() ? current : content));
+      });
+      return;
+    }
+    if (canSteer) {
+      // 带附件/参考图/@ 引用时 steer 无法携带这些上下文，退回「停止并发送」
       void interruptAndSend(content).then((delivered) => {
         if (!delivered) setText((current) => (current.trim() ? current : content));
       });
@@ -1473,8 +1531,8 @@ export function ChatComposer({
             }
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
           }}
-          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令打断当前生成…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
-          disabled={readOnly || (busy && !canInterruptSend)}
+          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令插入当前回合…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
+          disabled={readOnly || (busy && !canSteer)}
           rows={collapsed ? 1 : 2}
           style={{
             ...COMPOSER_TEXT_METRICS,
@@ -1601,8 +1659,8 @@ export function ChatComposer({
             <button
               onClick={handleSend}
               disabled={!canSend}
-              title={canInterruptSend ? '停止并发送' : '发送'}
-              aria-label={canInterruptSend ? '停止并发送' : '发送'}
+              title={canSteerNow ? '插入当前回合' : canSteer ? '停止并发送（带附件或引用）' : '发送'}
+              aria-label={canSteerNow ? '插入并继续' : canSteer ? '停止并发送' : '发送'}
               style={{
                 height: 38, width: narrowRow ? 38 : undefined,
                 padding: narrowRow ? 0 : '0 22px', borderRadius: 12, border: 'none',
@@ -1617,7 +1675,7 @@ export function ChatComposer({
               onMouseLeave={(e) => { e.currentTarget.style.background = DS.brand; }}
             >{narrowRow
               ? <ArrowUp size={18} strokeWidth={2.2} aria-hidden="true" />
-              : (canInterruptSend ? '停止并发送' : '发送')}</button>
+              : (canSteerNow ? '插入并继续' : canSteer ? '停止并发送' : '发送')}</button>
           )}
         </div>
       </div>

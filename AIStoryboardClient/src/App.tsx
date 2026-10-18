@@ -3,6 +3,8 @@ import { LoginPage } from './pages/LoginPage';
 import { EditorPage } from './pages/EditorPage';
 import { DocsPage } from './pages/DocsPage';
 import { ChatPage } from './pages/ChatPage';
+import { AccountPage } from './pages/AccountPage';
+import { ObservabilityPage } from './pages/ObservabilityPage';
 import { StoryboardLibraryPage } from './pages/StoryboardLibraryPage';
 import NotFoundBrickBreaker from './components/ui/8bit/blocks/not-found-brick-breaker';
 import { LibraryWorkspacePage } from './pages/LibraryWorkspacePage';
@@ -17,6 +19,8 @@ function App() {
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/account" element={<AccountPage />} />
+        <Route path="/observability" element={<ObservabilityPage />} />
         <Route path="/chat/storyboards" element={<StoryboardLibraryPage />} />
         <Route path="/library" element={<LibraryWorkspacePage />} />
         <Route path="/editor" element={<EditorPage />} />

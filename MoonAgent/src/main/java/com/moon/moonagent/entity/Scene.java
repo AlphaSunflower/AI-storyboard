@@ -17,6 +17,8 @@ public class Scene {
     private String imagePrompt;
     private String videoPrompt;
     private String negativePrompt;
+    /** 本镜与前镜的衔接说明（继承项/禁改项），生成时拼进提示词 */
+    private String continuityNote;
     private String cameraMovement;
     private String shotType;
     private String soundDesign;

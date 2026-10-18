@@ -7,6 +7,7 @@ import com.moon.moonagent.ai.GatewayModelService;
 import com.moon.moonagent.ai.storyboard.StoryboardShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.AssetRef;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.OptimizationResult;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.OutlinePlan;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.RoleProfile;
@@ -29,7 +30,9 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 @Service
@@ -49,6 +52,20 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
 
     @Value("${ai.storyboard.production-v2.fast-timeout-seconds:120}")
     private int fastTimeoutSeconds = 120;
+
+    /** 批量扩写的超时：输出是 N 镜之和，必须比单镜更宽松。 */
+    @Value("${ai.storyboard.production-v2.batch-timeout-seconds:240}")
+    private int batchTimeoutSeconds = 240;
+
+    /**
+     * 分镜模型调用的输出上限（token）。
+     *
+     * <p>必须显式传：网关的 {@code model_params.max_tokens} 只是 {@code /v1/models} 的展示值，
+     * 不会注入请求，所以不写就意味着"上游默认"——批量扩写 6 镜约 2500+ token，
+     * 上游默认偏小时会被截断成半截 JSON。
+     */
+    @Value("${ai.storyboard.production-v2.max-output-tokens:8192}")
+    private int maxOutputTokens = 8192;
 
     @Value("${ai.storyboard.production-v2.repair-timeout-seconds:90}")
     private int repairTimeoutSeconds = 90;
@@ -324,6 +341,69 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
         return parsePseudoShots(root.path("shots"));
     }
 
+    /**
+     * 阶段 A：极简大纲（一次调用，薄输出）。
+     *
+     * <p>与 {@code planPseudoShots} 的关键差异是**要什么写什么**：只要梗概 + N 行
+     * 「一句画面简述 / 角色 / 地点 / 绑定资产」，不写景别、运镜、提示词、时长。
+     * 输出量从「整部剧本 + 13 字段 × N」降到「N 行 × 40 字」，这是把阶段 A 从
+     * 84~253s 压到 20~40s 的关键；补全交给审批后的阶段 B。
+     */
+    @Override
+    public OutlinePlan planOutline(StoryboardProductionRequest request, List<RoleProfile> roles,
+                                   List<AssetRef> assets, StoryboardStreamSink sink) {
+        String system = """
+                你是分镜大纲编剧。只产出一份「可审批的镜头大纲」：不写景别、不写运镜、不写提示词、不写时长。
+                只输出 JSON（不要代码块、不要解释）：
+                {"synopsis":"≤120字剧情梗概",
+                 "bible":{"logline":"","characters":[],"relationships":[],"worldRules":[],
+                          "timeline":[],"continuity":[],"visualStyle":[]},
+                 "shots":[{"shotOrdinal":1,"scriptContent":"一句画面简述，必要时带台词",
+                           "characters":[],"location":"","referenceAssetIds":[]}]}
+                规则：
+                - 镜头数：用户给定目标总数就严格遵守；未给定按叙事节拍给 4~12 个。
+                - scriptContent 必须是一句话（≤40 字），写「谁在哪里做什么」，禁止写成段落。
+                - 严格证据绑定资产：剧情明确出现、用户明确指定或专业角色指出必要时，
+                  才把该资产 id 放进 referenceAssetIds；不确定必须为空。
+                - 一次成文：不要自我检查、不要输出思考过程。
+                """ + StoryboardPromptGuides.DIRECTORS_READ;
+        JsonNode root = callJson(system, """
+                用户需求 / 剧本：
+                %s
+
+                目标总镜头数：
+                %s
+
+                专业角色：
+                %s
+
+                可用资产：
+                %s
+                """.formatted(request.originalScript(),
+                request.requestedShotCount() == null || request.requestedShotCount().isBlank()
+                        ? "未指定，按叙事节拍决定" : request.requestedShotCount(),
+                rolesText(roles), assetsText(assets)),
+                gatewayModelService.getDefaultTextModel(), fastTimeoutSeconds,
+                "outline_planning", sink,
+                field("synopsis", "剧情梗概"), field("scriptContent", "画面"));
+
+        List<PseudoShot> shots = new ArrayList<>();
+        int index = 0;
+        for (JsonNode item : root.path("shots")) {
+            index++;
+            int ordinal = item.path("shotOrdinal").asInt(index);
+            shots.add(new PseudoShot(
+                    "shot-" + ordinal, "outline", ordinal,
+                    "", strings(item.path("characters")),
+                    item.path("location").asText(""), "", "",
+                    item.path("scriptContent").asText(""), "",
+                    List.of(), List.of(),
+                    strings(item.path("referenceAssetIds"))));
+        }
+        return new OutlinePlan(root.path("synopsis").asText(""),
+                readStoryBible(root.path("bible")), shots);
+    }
+
     @Override
     public List<PseudoShot> revisePseudoShots(List<PseudoShot> shots, String instruction, String shotId,
                                               StoryBible storyBible, List<AssetRef> assets) {
@@ -378,8 +458,14 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 不得新增、删除、重排镜头，不得改变镜头编号和资产绑定。
                 只输出 JSON 对象：{"shotId":"","segmentId":"","shotOrdinal":1,
                 "sceneDescription":"","shotType":"","cameraMovement":"","durationSeconds":3,
-                "imagePrompt":"","videoPrompt":"","negativePrompt":"","referenceHints":[]}。
+                "imagePrompt":"","videoPrompt":"","negativePrompt":"","referenceHints":[],
+                "continuityNote":""}。
                 sceneDescription、提示词和运镜必须使用中文。
+                continuityNote 写「本镜从前一镜继承了什么、本镜不允许改什么」（≤60 字，
+                例：承接雨夜冷蓝侧逆光；湿发与外衣水痕不得回退；人物始终在窗的左半侧）。
+                """ + StoryboardLexicon.promptConstraint() + StoryboardPromptGuides.SHOT_TABLE + """
+
+                一次成文：不要自我检查、不要输出思考过程或解释，只输出上面这一个 JSON 对象。
                 """;
         JsonNode root = callJson(system, """
                 伪分镜：
@@ -410,8 +496,98 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
                 nonBlank(root.path("imagePrompt").asText(""), pseudo.action()),
                 nonBlank(root.path("videoPrompt").asText(""), pseudo.action()),
                 root.path("negativePrompt").asText(""),
-                strings(root.path("referenceHints"))
+                strings(root.path("referenceHints")),
+                root.path("continuityNote").asText("")
         );
+    }
+
+    /**
+     * 批量扩写：一次调用把 N 个伪分镜扩写成 N 个正式镜头。
+     *
+     * <p>为什么能快：逐镜版是「每镜一次模型调用」，30 镜 = 30 次；批量版按 6 镜一批只有 5 次，
+     * 且单次输出仍在可比范围内。代价是单镜注意力被摊薄，所以批次默认只给 6，
+     * 并对返回值逐镜后处理（字典/时长/空值兜底）——质量由代码兜，不靠模型自查。
+     *
+     * <p>解析策略：<b>以 shotId 对齐</b>，不以数组下标对齐——模型偶尔会漏一个或多写一个，
+     * 下标对齐会把整批错位。返回结果可能少于请求数，调用方按缺失记失败。
+     */
+    @Override
+    public List<StoryboardShot> generateShots(List<ShotGenerationRequest> requests,
+                                              StoryboardStreamSink sink) {
+        if (requests == null || requests.isEmpty()) return List.of();
+        if (requests.size() == 1) {
+            return List.of(generateShot(requests.getFirst(), sink));
+        }
+        StringBuilder pseudoBlock = new StringBuilder();
+        for (ShotGenerationRequest request : requests) {
+            PseudoShot pseudo = request.pseudoShot();
+            pseudoBlock.append("\n【").append(pseudo.shotId()).append("】\n")
+                    .append(objectJson(pseudo)).append('\n')
+                    .append("严格绑定的资产：\n")
+                    .append(assetsForPseudo(request.assets(), pseudo)).append('\n');
+        }
+        String system = """
+                你是专业分镜师和视频导演。把给出的每个伪分镜各扩写成一个正式镜头，
+                输出数量必须与输入伪分镜数量一致，不得新增、删除、重排镜头，
+                不得改变 shotId / segmentId / shotOrdinal，不得改变资产绑定。
+                只输出 JSON 对象：{"shots":[
+                  {"shotId":"","segmentId":"","shotOrdinal":1,"sceneDescription":"",
+                   "shotType":"","cameraMovement":"","durationSeconds":3,
+                   "imagePrompt":"","videoPrompt":"","negativePrompt":"","referenceHints":[],
+                   "continuityNote":""}]}。
+                sceneDescription、提示词和运镜必须使用中文。
+                continuityNote 每镜必填（≤60 字）：写「本镜从前一镜继承了什么、本镜不允许改什么」，
+                例：承接雨夜冷蓝侧逆光；湿发与外衣水痕不得回退；人物始终在窗的左半侧。整批必须自洽。
+                """ + StoryboardLexicon.promptConstraint() + StoryboardPromptGuides.SHOT_TABLE + """
+
+                一次成文：不要自我检查、不要输出思考过程或解释。
+                """;
+        JsonNode root = callJson(system, """
+                待扩写的伪分镜（共 %d 个）：
+                %s
+
+                StoryBible（整片共用）：
+                %s
+
+                资产引用标记必须只在 referenceHints 中使用；不得使用未绑定资产。
+                """.formatted(requests.size(), pseudoBlock,
+                objectJson(requests.getFirst().storyBible())),
+                gatewayModelService.getDefaultTextModel(), batchTimeoutSeconds,
+                "final_generation", sink,
+                field("sceneDescription", "画面"), field("cameraMovement", "运镜"));
+
+        Map<String, PseudoShot> byShotId = new java.util.LinkedHashMap<>();
+        for (ShotGenerationRequest request : requests) {
+            byShotId.put(request.pseudoShot().shotId(), request.pseudoShot());
+        }
+        List<StoryboardShot> out = new ArrayList<>();
+        for (JsonNode item : root.path("shots")) {
+            String shotId = item.path("shotId").asText("");
+            PseudoShot pseudo = byShotId.get(shotId);
+            if (pseudo == null) {
+                log.warn("storyboard batch shot ignored: unknown shotId={}", shotId);
+                continue;
+            }
+            int duration = item.path("durationSeconds").asInt(3);
+            if (duration <= 0) duration = 3;
+            out.add(new StoryboardShot(
+                    pseudo.shotId(),
+                    pseudo.segmentId(),
+                    pseudo.shotOrdinal(),
+                    nonBlank(item.path("sceneDescription").asText(""), pseudo.action()),
+                    nonBlank(item.path("shotType").asText(""), "中景"),
+                    nonBlank(item.path("cameraMovement").asText(""), "固定"),
+                    duration,
+                    nonBlank(item.path("imagePrompt").asText(""), pseudo.action()),
+                    nonBlank(item.path("videoPrompt").asText(""), pseudo.action()),
+                    item.path("negativePrompt").asText(""),
+                    strings(item.path("referenceHints")),
+                    item.path("continuityNote").asText("")));
+        }
+        if (out.size() < requests.size()) {
+            log.warn("storyboard batch returned {} of {} shots", out.size(), requests.size());
+        }
+        return List.copyOf(out);
     }
 
     private JsonNode callJson(String system, String user) {
@@ -454,14 +630,28 @@ public class SpringAiStoryboardModelClient implements StoryboardModelClient {
         }
     }
 
+    /**
+     * 分镜调用的请求选项 builder（包内可见，便于单测断言"真的设了输出上限、且没钉死采样参数"）。
+     *
+     * <p>刻意只设 model / maxRetries / maxTokens / timeout：
+     * temperature、top_p 不传，交上游默认，避免我们替用户把创作采样钉死。
+     */
+    OpenAiChatOptions.Builder chatOptionsBuilder(String model, int timeoutSeconds) {
+        return OpenAiChatOptions.builder()
+                .model(model)
+                .maxRetries(0)
+                // 显式声明输出上限：网关只在 /v1/models 的 defaults 里"展示" max_tokens，
+                // 从不注入 OpenAI 兼容请求；不写这一行就等于把批量输出交给上游默认值，
+                // 一旦上游默认偏小，6 镜一批的 JSON 会被砍在半截（表现为整批解析失败）。
+                .maxTokens(maxOutputTokens)
+                .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)));
+    }
+
     private String invokeModel(String system, String user, String model, int timeoutSeconds) {
         String raw;
         try {
             raw = client().prompt()
-                    .options(OpenAiChatOptions.builder()
-                            .model(model)
-                            .maxRetries(0)
-                            .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds))))
+                    .options(chatOptionsBuilder(model, timeoutSeconds))
                     .system(system)
                     .user(user)
                     .call()

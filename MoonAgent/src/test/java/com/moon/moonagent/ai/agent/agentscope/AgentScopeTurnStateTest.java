@@ -7,6 +7,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentScopeTurnStateTest {
 
     @Test
+    void synchronousTaskGraphSuppressesAsyncTaskClaimCorrection() {
+        AgentScopeTurnState state = new AgentScopeTurnState();
+
+        assertThat(state.hasSynchronousGraphCalled()).isFalse();
+        state.markSynchronousGraphCalled();
+
+        assertThat(state.hasSynchronousGraphCalled()).isTrue();
+    }
+
+    @Test
     void keepsMediaInPersistedContentWithoutCannedPreface() {
         AgentScopeTurnState state = new AgentScopeTurnState();
 

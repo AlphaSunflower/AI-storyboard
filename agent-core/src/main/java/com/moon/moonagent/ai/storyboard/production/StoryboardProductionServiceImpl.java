@@ -5,6 +5,7 @@ import com.moon.moonagent.ai.AgentAiConfigProperties;
 import com.moon.moonagent.ai.storyboard.StoryboardShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Approval;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.OptimizationResult;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.OutlinePlan;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Phase;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
@@ -59,6 +60,75 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
     @Value("${ai.storyboard.production-v2.long-script-threshold:6000}")
     private int longScriptThreshold = 6000;
 
+    /**
+     * 是否保留「LLM 自我诊断 + 自我重写」回路（默认 <b>关</b>）。
+     *
+     * <p>开启时：先 assessPlot 诊断剧情，判为不完整再 repairScript 重写一遍——
+     * 等于同一份剧本被读一次、写两次，实测这段占「出剧情方案」84~253s 的绝大部分，
+     * 且波动极大。关闭后一次成文，问题交给 {@link StoryboardShotNormalizer} 在代码里补齐。
+     *
+     * <p>保留开关是为了回归对比，不要在新流程里依赖它。
+     */
+    @Value("${ai.storyboard.production-v2.self-check-enabled:false}")
+    private boolean selfCheckEnabled = false;
+
+    /**
+     * 阶段 A 是否走「极简大纲」（默认开）。
+     *
+     * <p>开启时 {@link #start} 只产出剧情梗概 + N 行大纲就停，等审批后一次性补全；
+     * 关闭则退回「先写整部剧本、再规划伪分镜」的旧三段流程（保留用于回滚与对比）。
+     */
+    @Value("${ai.storyboard.production-v2.outline-first-enabled:true}")
+    private boolean outlineFirstEnabled = true;
+
+    /**
+     * 正式镜头的合法时长档位（逗号分隔），默认对齐 MiniMax-H3 的 {@code durations}。
+     * 分镜参数链落地后由网关 {@code /v1/models} 的 params 覆盖这里。
+     */
+    @Value("${ai.storyboard.production-v2.allowed-durations:4,5,6,7,8,9,10,11,12,13,14,15}")
+    private String allowedDurationsCsv = "4,5,6,7,8,9,10,11,12,13,14,15";
+
+    /**
+     * 正式镜头每批多少镜（默认 6）。设为 1 即回退逐镜调用，用于质量对比或线上回滚。
+     */
+    @Value("${ai.storyboard.production-v2.final-batch-size:6}")
+    private int finalBatchSize = 6;
+
+    /** 供单测 / 运维显式切换批量大小。 */
+    public void setFinalBatchSize(int size) {
+        this.finalBatchSize = size;
+    }
+
+    /** 供单测 / 运维显式切换「LLM 自我校验」开关。 */
+    public void setSelfCheckEnabled(boolean enabled) {
+        this.selfCheckEnabled = enabled;
+    }
+
+    /** 供单测 / 运维显式切换「极简大纲」开关。 */
+    public void setOutlineFirstEnabled(boolean enabled) {
+        this.outlineFirstEnabled = enabled;
+    }
+
+    /** 解析后的时长档位：非法项直接丢弃，全空时退回 4..15。 */
+    List<Integer> allowedDurations() {
+        String raw = allowedDurationsCsv == null ? "" : allowedDurationsCsv;
+        List<Integer> parsed = new java.util.ArrayList<>();
+        for (String part : raw.split(",")) {
+            String value = part.trim();
+            if (value.isEmpty()) continue;
+            try {
+                int seconds = Integer.parseInt(value);
+                if (seconds > 0) parsed.add(seconds);
+            } catch (NumberFormatException ignored) {
+                // 非法档位忽略，不阻断生成
+            }
+        }
+        if (parsed.isEmpty()) {
+            for (int seconds = 4; seconds <= 15; seconds++) parsed.add(seconds);
+        }
+        return List.copyOf(parsed);
+    }
+
     @Value("${ai.storyboard.production-v2.max-shots:200}")
     private int maxShots = 200;
 
@@ -80,9 +150,19 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
         }
         boolean multiSegmentCandidate = request.originalScript().length() > longScriptThreshold;
         var roles = roleRegistry.resolve(request.originalScript(), request.roleHints(), multiSegmentCandidate);
+        if (outlineFirstEnabled) {
+            return startWithOutline(request, roles, progress).snapshot();
+        }
         progress.update("script_optimization", 8);
-        var assessment = modelClient.assessPlot(request, request.assets(), sinkTo(progress));
-        appendDiagnosisThinking(progress, assessment);
+        // 一次成文（默认）：不做「先诊断再重写」的 LLM 自我校验回路，问题交给代码层后处理。
+        PlotAssessment assessment;
+        if (selfCheckEnabled) {
+            assessment = modelClient.assessPlot(request, request.assets(), sinkTo(progress));
+            appendDiagnosisThinking(progress, assessment);
+        } else {
+            assessment = skipDiagnosisAssessment();
+            progress.stream("script_optimization", "跳过剧情诊断（一次成文模式），直接产出剧情方案。\n");
+        }
         var optimization = modelClient.optimizeScript(request, assessment, roles, request.assets(), "",
                 sinkTo(progress));
         OffsetDateTime now = OffsetDateTime.now();
@@ -95,6 +175,70 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
                 List.of(), List.of(), "", now, now);
         return runStore.insert(state).snapshot();
     }
+
+    /**
+     * 阶段 A（默认路径）：一次调用产出「剧情梗概 + N 行镜头大纲」，停在 {@code PLOT_REVIEW} 等审批。
+     *
+     * <p>大纲行直接落在 {@code pseudoShots} 上（只填镜号/一句简述/绑定资产），
+     * 于是审批通过后 {@link #approveToFinal} 可以跳过分段与伪分镜规划，
+     * 直接进入逐镜补全——省掉一次 40s+ 的调用，也让用户在最早的时间点看到「这一镜要拍什么、带哪张图」。
+     */
+    private RunState startWithOutline(StoryboardProductionRequest request, List<RoleProfile> roles,
+                                      StoryboardProgressListener progress) {
+        progress.update("outline_planning", 8);
+        progress.stream("outline_planning", "正在生成镜头大纲（只出镜号、画面简述与参考资产）…\n");
+        OutlinePlan outline = modelClient.planOutline(request, roles, request.assets(), sinkTo(progress));
+        List<PseudoShot> condensed = condenseOutline(outline.shots());
+        List<PseudoShot> shots = normalizeShots(condensed, requestedShotCount(request));
+        if (shots.size() > maxShots) {
+            shots = List.copyOf(shots.subList(0, maxShots));
+        }
+        if (shots.isEmpty()) {
+            throw new BusinessException(50201, "未生成镜头大纲");
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        RunState state = new RunState(
+                UUID.randomUUID().toString(), request.userId(), request.projectId(),
+                request.conversationId(), request.canvasId(), request.originalScript(),
+                request.requestedShotCount(), outline.synopsis(), "", Stage.PLOT_REVIEW, 1,
+                skipDiagnosisAssessment(), outline.storyBible(), roles, request.assets(),
+                shots, List.of(), "", now, now);
+        state = runStore.insert(state);
+        for (PseudoShot shot : shots) {
+            upsertPseudoShotRecord(state.runId(), shot);
+        }
+        progress.plotReady(outline.synopsis());
+        progress.update("outline_ready", 20);
+        progress.stream("outline_planning", "镜头大纲已就绪：" + shots.size() + " 个镜头，等待确认。\n");
+        log.info("storyboard outline ready runId={} shots={}", state.runId(), shots.size());
+        return state;
+    }
+
+    /**
+     * 大纲行强行压成「一句 ≤40 字」：空行丢掉，超长截断，换行折成空格。
+     *
+     * <p>不靠模型自觉——提示词要 40 字，模型常写成本段；阶段 A 的输出量直接等于用户等待时间，
+     * 所以这条必须在代码里兜住。
+     */
+    private static List<PseudoShot> condenseOutline(List<PseudoShot> shots) {
+        if (shots == null || shots.isEmpty()) return List.of();
+        List<PseudoShot> condensed = new ArrayList<>();
+        for (PseudoShot shot : shots) {
+            String line = shot.action() == null ? "" : shot.action().replaceAll("\\s+", " ").trim();
+            if (line.isEmpty()) continue;
+            if (line.length() > OUTLINE_LINE_MAX_CHARS) {
+                line = line.substring(0, OUTLINE_LINE_MAX_CHARS) + "…";
+            }
+            condensed.add(new PseudoShot(
+                    shot.shotId(), shot.segmentId(), shot.shotOrdinal(),
+                    "", shot.characters(), shot.location(), "", "",
+                    line, "", List.of(), List.of(), shot.referenceAssetIds()));
+        }
+        return List.copyOf(condensed);
+    }
+
+    /** 阶段 A 大纲行正文上限（字）。 */
+    private static final int OUTLINE_LINE_MAX_CHARS = 40;
 
     @Override
     public StoryboardRunSnapshot startAutoStoryboard(
@@ -125,16 +269,23 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
         StoryboardProductionRequest generatedRequest = withOriginalScript(request, generatedScript);
 
         progress.update("plot_diagnosis", 25);
-        PlotAssessment assessment = modelClient.assessPlot(
-                generatedRequest, request.assets(), sinkTo(progress));
-
+        PlotAssessment assessment;
         ScriptRepairResult repair;
-        if (assessment.complete()) {
-            repair = new ScriptRepairResult(
-                    generatedScript, generation.storyBible(), List.of());
+        if (selfCheckEnabled) {
+            assessment = modelClient.assessPlot(
+                    generatedRequest, request.assets(), sinkTo(progress));
+            if (assessment.complete()) {
+                repair = new ScriptRepairResult(
+                        generatedScript, generation.storyBible(), List.of());
+            } else {
+                progress.update("script_repair", 40);
+                repair = repairScriptWithOneRetry(generatedRequest, assessment, roles, sinkTo(progress));
+            }
         } else {
-            progress.update("script_repair", 40);
-            repair = repairScriptWithOneRetry(generatedRequest, assessment, roles, sinkTo(progress));
+            // 一次成文：不诊断、不重写。剧本质量靠 SKILL + 大纲审批兜，而不是让模型自审自改。
+            assessment = skipDiagnosisAssessment();
+            repair = new ScriptRepairResult(generatedScript, generation.storyBible(), List.of());
+            progress.stream("plot_diagnosis", "跳过剧情诊断（一次成文模式）。\n");
         }
         String selectedScript = repair.revisedScript().isBlank()
                 ? generatedScript : repair.revisedScript();
@@ -195,7 +346,7 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
         return new StoryboardProductionRequest(
                 request.userId(), request.projectId(), request.conversationId(), request.canvasId(),
                 script, request.creationType(), request.requestedShotCount(),
-                request.assets(), request.roleHints());
+                request.assets(), request.roleHints(), request.generationParams());
     }
 
     private static String firstNonBlank(String... values) {
@@ -351,6 +502,13 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
                                                 StoryboardProgressListener listener) {
         StoryboardProgressListener progress =
                 listener == null ? StoryboardProgressListener.NOOP : listener;
+        RunState current = require(runId);
+        // 阶段 A 已经把极简大纲写进 pseudoShots：审批即等于「大纲通过」，
+        // 直接进入逐镜补全，不再 segmentStory / planPseudoShots（省掉一次模型调用）。
+        if (!current.pseudoShots().isEmpty() && current.stage() == Stage.PLOT_REVIEW) {
+            progress.stream("outline_ready", "大纲已确认，开始逐镜补全正式镜头。\n");
+            return approvePseudo(current, plotApproval, progress);
+        }
         StoryboardRunSnapshot pseudo = approve(runId, plotApproval, progress);
         return approve(pseudo.runId(),
                 new Approval(Stage.PSEUDO_REVIEW, "APPROVE", "", List.of(), List.of()), progress);
@@ -359,8 +517,9 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
     @Override
     public StoryboardRunSnapshot upsertShot(String runId, PseudoShot shot) {
         RunState state = require(runId);
-        if (state.stage() != Stage.PSEUDO_REVIEW) {
-            throw new BusinessException(40901, "只有伪分镜确认阶段可以逐镜写入");
+        // 大纲审批阶段（PLOT_REVIEW）与旧的伪分镜阶段都允许逐镜写入：两者都是「草稿行」
+        if (state.stage() != Stage.PLOT_REVIEW && state.stage() != Stage.PSEUDO_REVIEW) {
+            throw new BusinessException(40901, "只有分镜草稿阶段可以逐镜写入");
         }
         if (shot == null || shot.shotId().isBlank()) {
             throw new BusinessException(40001, "单镜写入必须提供 shotId");
@@ -370,8 +529,8 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
         nextShots.add(shot);
         nextShots = normalizeShots(nextShots);
         upsertPseudoShotRecord(runId, shot);
-        RunState next = copy(state, Stage.PSEUDO_REVIEW, state.selectedScript(), state.expansionScript(), state.assessment(),
-                state.storyBible(), state.roles(), nextShots, List.of(), "");
+        RunState next = copy(state, state.stage(), state.selectedScript(), state.expansionScript(),
+                state.assessment(), state.storyBible(), state.roles(), nextShots, state.finalShots(), "");
         return runStore.update(next).snapshot();
     }
 
@@ -525,27 +684,43 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
     }
 
     @Override
+    public List<StoryboardChangeLog.ShotChange> changes(String runId, String userId, String projectId) {
+        // 复用 owned()：归属不符直接 40401，避免改动日志变成 IDOR 探测面
+        owned(runId, userId, projectId);
+        return runStore.listChanges(runId);
+    }
+
+    @Override
     public StoryboardRunSnapshot replaceDraft(
             String runId,
             String userId,
             String projectId,
             int expectedVersion,
             List<PseudoShot> pseudoShots,
-            List<StoryboardShot> finalShots) {
+            List<StoryboardShot> finalShots,
+            String source) {
         RunState state = owned(runId, userId, projectId);
         if (state.version() != expectedVersion) {
             throw new BusinessException(40901, "分镜草稿版本已变化，请刷新后重试");
         }
-        if (state.stage() != Stage.PSEUDO_REVIEW && state.stage() != Stage.FINAL_REVIEW) {
+        if (state.stage() != Stage.PLOT_REVIEW
+                && state.stage() != Stage.PSEUDO_REVIEW
+                && state.stage() != Stage.FINAL_REVIEW) {
             throw new BusinessException(40901, "当前阶段不可编辑分镜草稿: " + state.stage());
         }
         List<PseudoShot> nextPseudo;
         List<StoryboardShot> nextFinal;
-        if (state.stage() == Stage.PSEUDO_REVIEW) {
+        // PLOT_REVIEW 就是「大纲待审批」：此时可编辑的正是大纲行（伪分镜的薄形态）。
+        // 让用户/智能体在审批前直接改一句画面，比「驳回 → 整片重跑」便宜一个数量级。
+        if (state.stage() == Stage.PLOT_REVIEW || state.stage() == Stage.PSEUDO_REVIEW) {
             nextPseudo = normalizeShots(pseudoShots == null ? List.of() : pseudoShots);
             nextFinal = List.of();
             runStore.replaceShots(runId, Phase.PSEUDO,
                     nextPseudo.stream().map(shot -> pseudoRecord(runId, shot)).toList());
+            // 改动日志：字段级 before/after 落库，刷新、换设备、审批后都还能追溯到"谁改了什么"
+            runStore.appendChanges(StoryboardChangeLog.diff(
+                    runId, source == null || source.isBlank() ? "user" : source,
+                    state.pseudoShots(), nextPseudo));
         } else {
             nextPseudo = state.pseudoShots();
             nextFinal = normalizeFinalShots(finalShots == null ? List.of() : finalShots);
@@ -658,20 +833,45 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
                 pseudo.shotId(), pseudo.segmentId(), shot.shotOrdinal(), shot.sceneDescription(),
                 shot.shotType(), shot.cameraMovement(), shot.durationSeconds(),
                 shot.imagePrompt(), shot.videoPrompt(), shot.negativePrompt(),
-                shot.referenceHints());
+                shot.referenceHints(), shot.continuityNote());
     }
 
+    /**
+     * 逐镜/分批扩写正式镜头。
+     *
+     * <p>分批的理由：逐镜版是「每镜一次模型调用」，30 镜 = 30 次串并发 4 → ~150s。
+     * 按 {@code final-batch-size}（默认 6）分批后只有 5 次调用，同样的并发下时长能压到 1/4 左右。
+     *
+     * <p>质量由代码兜：每镜返回后仍走 {@link StoryboardShotNormalizer}（字典/时长/空值），
+     * 并强制沿用伪分镜的 shotId/segmentId/shotOrdinal。模型漏返回的镜头记失败（partial），
+     * 允许后续「重试失败项」，绝不静默少一镜。
+     *
+     * <p>{@code final-batch-size=1} 即完全回退到逐镜行为。
+     */
     private List<StoryboardShot> generateFinalShots(RunState state, List<PseudoShot> shots,
                                                     StoryboardProgressListener progress) {
+        int batchSize = Math.max(1, finalBatchSize);
         int concurrency = Math.max(1, Math.min(agentConfig.getMaxParallelAgents(), 4));
         Semaphore semaphore = new Semaphore(concurrency);
-        List<CompletableFuture<StoryboardShot>> futures = shots.stream()
-                .map(pseudo -> CompletableFuture.supplyAsync(() -> {
+        List<List<PseudoShot>> batches = partition(shots, batchSize);
+        if (batchSize > 1 && shots.size() > 1) {
+            progress.stream("final_generation", "分批扩写：" + shots.size() + " 镜 → "
+                    + batches.size() + " 批（每批 ≤" + batchSize + " 镜，并发 "
+                    + concurrency + "）\n");
+        } else {
+            progress.stream("final_generation", "逐镜扩写：" + shots.size() + " 镜\n");
+        }
+        log.info("storyboard final shots: runId={}, shots={}, batchSize={}, batches={}, concurrency={}",
+                state.runId(), shots.size(), batchSize, batches.size(), concurrency);
+        List<CompletableFuture<List<StoryboardShot>>> futures = batches.stream()
+                .map(batch -> CompletableFuture.supplyAsync(() -> {
                     semaphore.acquireUninterruptibly();
                     try {
-                        return modelClient.generateShot(new ShotGenerationRequest(
-                                state.runId(), pseudo, state.storyBible(), state.assets()),
-                                sinkTo(progress));
+                        List<ShotGenerationRequest> requests = batch.stream()
+                                .map(pseudo -> new ShotGenerationRequest(
+                                        state.runId(), pseudo, state.storyBible(), state.assets()))
+                                .toList();
+                        return modelClient.generateShots(requests, sinkTo(progress));
                     } finally {
                         semaphore.release();
                     }
@@ -679,27 +879,79 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
                 .toList();
         List<StoryboardShot> generated = new ArrayList<>();
         Map<String, String> failures = new LinkedHashMap<>();
+        int total = shots.size();
         int finished = 0;
         for (int index = 0; index < futures.size(); index++) {
-            PseudoShot pseudo = shots.get(index);
-            finished++;
+            List<PseudoShot> batch = batches.get(index);
+            List<StoryboardShot> batchShots;
             try {
-                StoryboardShot shot = withPseudoIdentity(pseudo, futures.get(index).join());
-                generated.add(shot);
-                upsertShotRecord(state.runId(), pseudo, shot, "completed", "");
-                progress.stream("final_generation", "▸ " + pseudo.shotId()
-                        + " 完成（" + finished + "/" + futures.size() + "）\n");
-            } catch (Exception e) {
-                String message = rootMessage(e);
-                failures.put(pseudo.shotId(), message);
-                runStore.upsertShot(new ShotRecord(
-                        state.runId(), Phase.FINAL, pseudo.segmentId(), pseudo.shotId(),
-                        pseudo.shotOrdinal(), "failed", "{}", pseudo.referenceAssetIds(),
-                        "", message, 1));
-                progress.stream("final_generation", "▸ " + pseudo.shotId()
-                        + " 失败（" + finished + "/" + futures.size() + "）：" + message + "\n");
+                batchShots = futures.get(index).join();
+            } catch (Exception batchError) {
+                String message = rootMessage(batchError);
+                // 一批失败不能连坐：降级为逐镜重试，让「单镜坏掉」只影响那一镜（保持 partial 语义）
+                log.warn("storyboard batch failed, retrying individually: runId={}, batch={}, error={}",
+                        state.runId(), batch.size(), message);
+                progress.stream("final_generation", "▸ 批次 " + (index + 1) + "/" + batches.size()
+                        + " 失败，改为逐镜重试：" + message + "\n");
+                for (PseudoShot pseudo : batch) {
+                    finished++;
+                    try {
+                        StoryboardShot rawShot = modelClient.generateShot(
+                                new ShotGenerationRequest(
+                                        state.runId(), pseudo, state.storyBible(), state.assets()),
+                                sinkTo(progress));
+                        if (acceptShot(state, pseudo, rawShot, progress, generated, failures)) {
+                            progress.stream("final_generation", "▸ " + pseudo.shotId()
+                                    + " 完成（" + finished + "/" + total + "）\n");
+                        }
+                    } catch (Exception e) {
+                        String shotError = rootMessage(e);
+                        failures.put(pseudo.shotId(), shotError);
+                        recordShotFailure(state, pseudo, shotError);
+                        progress.stream("final_generation", "▸ " + pseudo.shotId()
+                                + " 失败（" + finished + "/" + total + "）：" + shotError + "\n");
+                    }
+                }
+                progress.update("final_generation", 40 + (50 * finished) / Math.max(1, total));
+                continue;
             }
-            progress.update("final_generation", 40 + (50 * finished) / Math.max(1, futures.size()));
+            Map<String, StoryboardShot> byShotId = new LinkedHashMap<>();
+            for (StoryboardShot shot : batchShots) {
+                byShotId.putIfAbsent(shot.shotId(), shot);
+            }
+            for (PseudoShot pseudo : batch) {
+                finished++;
+                StoryboardShot rawShot = byShotId.get(pseudo.shotId());
+                if (rawShot == null) {
+                    // 批量漏镜（实测过：12 镜里模型少写 1 镜）：先单独补一次，
+                    // 不要让整轮因为一个镜头的缺席掉到 partial。
+                    try {
+                        StoryboardShot retried = modelClient.generateShot(
+                                new ShotGenerationRequest(
+                                        state.runId(), pseudo, state.storyBible(), state.assets()),
+                                sinkTo(progress));
+                        if (acceptShot(state, pseudo, retried, progress, generated, failures)) {
+                            progress.stream("final_generation", "▸ " + pseudo.shotId()
+                                    + " 批量漏镜，已单独补跑（" + finished + "/" + total + "）\n");
+                            continue;
+                        }
+                    } catch (Exception e) {
+                        log.warn("漏镜补跑失败: runId={}, shotId={}, error={}",
+                                state.runId(), pseudo.shotId(), rootMessage(e));
+                    }
+                    String message = "批量生成未返回该镜头";
+                    failures.put(pseudo.shotId(), message);
+                    recordShotFailure(state, pseudo, message);
+                    progress.stream("final_generation", "▸ " + pseudo.shotId()
+                            + " 缺失（" + finished + "/" + total + "）\n");
+                    continue;
+                }
+                if (acceptShot(state, pseudo, rawShot, progress, generated, failures)) {
+                    progress.stream("final_generation", "▸ " + pseudo.shotId()
+                            + " 完成（" + finished + "/" + total + "）\n");
+                }
+            }
+            progress.update("final_generation", 40 + (50 * finished) / Math.max(1, total));
         }
         generated.sort(Comparator.comparing(StoryboardShot::segmentId)
                 .thenComparingInt(StoryboardShot::shotOrdinal));
@@ -707,6 +959,50 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
             log.warn("storyboard final shot partial failure runId={} failures={}", state.runId(), failures);
         }
         return generated;
+    }
+
+    /**
+     * 收下一个镜头：后处理校验（字典/时长/空值）→ 强制沿用伪分镜身份 → 落库。
+     *
+     * @return true 表示成功收录；false 表示内容不可用已记失败
+     */
+    private boolean acceptShot(RunState state, PseudoShot pseudo, StoryboardShot rawShot,
+                               StoryboardProgressListener progress,
+                               List<StoryboardShot> generated, Map<String, String> failures) {
+        StoryboardShotNormalizer.Result normalized =
+                StoryboardShotNormalizer.normalize(pseudo, rawShot, allowedDurations());
+        if (normalized.shot() == null) {
+            failures.put(pseudo.shotId(), "模型未返回镜头内容");
+            recordShotFailure(state, pseudo, "模型未返回镜头内容");
+            return false;
+        }
+        StoryboardShot shot = withPseudoIdentity(pseudo, normalized.shot());
+        if (normalized.changed()) {
+            progress.stream("final_generation", "▸ " + pseudo.shotId() + " 参数已规范："
+                    + String.join("；", normalized.adjustments()) + "\n");
+        }
+        generated.add(shot);
+        upsertShotRecord(state.runId(), pseudo, shot, "completed", "");
+        return true;
+    }
+
+    private void recordShotFailure(RunState state, PseudoShot pseudo, String message) {
+        // 失败原因带上一句可执行建议（failure atlas），避免用户对着 "400" 盲目重试
+        String hint = StoryboardFailureAtlas.advise(message);
+        String stored = hint.isEmpty() ? message : message + "｜建议：" + hint;
+        runStore.upsertShot(new ShotRecord(
+                state.runId(), Phase.FINAL, pseudo.segmentId(), pseudo.shotId(),
+                pseudo.shotOrdinal(), "failed", "{}", pseudo.referenceAssetIds(),
+                "", stored, 1));
+    }
+
+    /** 按固定大小切批（最后一批可短）。 */
+    private static <T> List<List<T>> partition(List<T> source, int size) {
+        List<List<T>> batches = new ArrayList<>();
+        for (int start = 0; start < source.size(); start += size) {
+            batches.add(source.subList(start, Math.min(source.size(), start + size)));
+        }
+        return List.copyOf(batches);
     }
 
     private void upsertShotRecord(String runId, PseudoShot pseudo, StoryboardShot shot,
@@ -836,7 +1132,8 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
                 missing.add(shot.shotId());
             }
         }
-        return "以下镜头生成失败，可单独重试: " + String.join(", ", missing);
+        return "以下镜头生成失败，可单独重试: " + String.join(", ", missing)
+                + "（每镜失败原因与建议已记录在镜头记录里；额度类错误重试无意义，参数类错误先收敛参数）";
     }
 
     private RunState require(String runId) {
@@ -876,6 +1173,15 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
         }
     }
 
+    /**
+     * 一次成文模式下的「无诊断」结论：complete=true 表示不需要任何修复，
+     * summary 说明这是有意跳过，避免下游把它当成「剧情已检查通过」。
+     */
+    private static PlotAssessment skipDiagnosisAssessment() {
+        return new PlotAssessment(true, List.of(), List.of(),
+                "跳过剧情诊断（一次成文模式）", "");
+    }
+
     private StoryboardProductionRequest requestOf(RunState state) {
         return new StoryboardProductionRequest(
                 state.userId(), state.projectId(), state.conversationId(), state.canvasId(),
@@ -899,7 +1205,7 @@ public class StoryboardProductionServiceImpl implements StoryboardProductionServ
         return new StoryboardProductionRequest(
                 request.userId(), request.projectId(), request.conversationId(), request.canvasId(),
                 request.originalScript(), request.creationType(), Integer.toString(requestedShotCount),
-                request.assets(), request.roleHints());
+                request.assets(), request.roleHints(), request.generationParams());
     }
 
     private static Integer parseShotCount(String text, Pattern pattern) {

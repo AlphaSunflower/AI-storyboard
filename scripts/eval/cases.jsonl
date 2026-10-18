@@ -1,0 +1,11 @@
+# 一行一个 JSON；# 开头是注释行，runner 会跳过
+{"name":"identity-smoke","prompt":"直接回复：EVAL-OK。禁止调用任何工具，包括 run_task_graph。","expectFinalContains":["EVAL-OK"],"expectNoTools":true,"maxDurationMs":60000}
+{"name":"hello-no-tools","prompt":"你好，直接回复 EVAL-HELLO。禁止调用任何工具，包括 run_task_graph。","expectFinalContains":["EVAL-HELLO"],"expectNoTools":true,"maxDurationMs":60000}
+{"name":"read-storyboard-no-media","prompt":"只使用 list_project_storyboard 查询当前项目分镜数量；如果为空就直接回答 0 条。不要询问用户，不要执行 shell 或 Python，不要生成任何图片或视频。","forbidTools":["generate_image","generate_image_batch","generate_video","generate_storyboard_image","execute","run_python_script","request_human_input"],"maxDurationMs":120000}
+{"name":"hitl-reject","prompt":"必须调用 run_python_script 工具执行 print('eval')，不要直接回答，也不要调用其他工具。","hitl":{"action":"reject"},"expectTools":["run_python_script"],"expectStatus":"completed","maxDurationMs":120000}
+{"name":"task-graph-readonly","prompt":"必须调用 run_task_graph 工具。任务图：research（researcher）先调研当前项目分镜；review（reviewer，依赖 research）检查是否适合继续生成。然后综合结果用一句话总结。","expectTools":["run_task_graph"],"maxDurationMs":240000}
+{"name":"task-graph-steer","prompt":"必须调用 run_task_graph 工具。任务图：research（researcher）先调研当前项目分镜；review（reviewer，依赖 research）检查是否适合继续生成。然后综合结果用一句话总结。","expectTools":["run_task_graph"],"steer":{"onEvent":"SUBAGENT_STARTED","content":"补充：最终只回复 STEER-EVAL-OK，不要输出其他内容。"},"expectFinalContains":["STEER-EVAL-OK"],"maxDurationMs":240000}
+{"name":"canvas-readonly","requiresCanvas":true,"prompt":"只读取当前画布的状态并总结，不要创建/修改节点或连线。","forbidTools":["canvas_graph_apply_plan","canvas_graph_create_node","canvas_graph_create_nodes","canvas_graph_create_edge","canvas_graph_create_edges","canvas_graph_update_node"],"maxDurationMs":180000}
+{"name":"creative-context-readonly","prompt":"读取当前项目的创作记忆和时间线，用一句话总结；不要修改任何内容。","forbidTools":["update_creative_context","save_timeline_manifest"],"maxDurationMs":120000}
+{"name":"assets-readonly","prompt":"列出当前会话的素材和资产组，用一句话总结；不要生成或删除任何东西。","forbidTools":["generate_image","generate_video","delete_project_storyboard_shot","clear_project_storyboard"],"maxDurationMs":120000}
+{"name":"hitl-approve","prompt":"必须调用 run_python_script 工具执行 print('eval-approved')，不要直接回答，也不要调用其他工具；执行完把结果告诉我。","hitl":{"action":"approve"},"expectTools":["run_python_script"],"expectStatus":"completed","maxDurationMs":180000}

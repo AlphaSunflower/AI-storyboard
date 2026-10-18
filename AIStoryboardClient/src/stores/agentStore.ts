@@ -575,6 +575,29 @@ function waitForInterruptSettled(conversationId: string, timeoutMs: number): Pro
   });
 }
 
+/**
+ * 把一条回合内插入的用户消息放到当前助手气泡之前。
+ *
+ * <p>同一 messageId 只插一次：服务端 USER_MESSAGE 事件与 HTTP 响应的乐观插入谁先到都安全。
+ */
+function insertSteerMessage(
+  conversationId: string,
+  beforeMessageId: string | undefined,
+  message: AgentMessage,
+) {
+  useAgentStore.setState((state) => {
+    if (state.activeConversationId !== conversationId) return {};
+    if (state.messages.some((item) => item.id === message.id)) return {};
+    const index = beforeMessageId
+      ? state.messages.findIndex((item) => item.id === beforeMessageId)
+      : -1;
+    const messages = index >= 0
+      ? [...state.messages.slice(0, index), message, ...state.messages.slice(index)]
+      : [...state.messages, message];
+    return { messages };
+  });
+}
+
 
 function cancelConversationTitleRefresh(conversationId: string) {
   const timer = titleRefreshTimers.get(conversationId);
@@ -771,6 +794,8 @@ export interface HumanInputInfo {
   reasons?: Record<string, string>;
   // 资产选择卡片：可勾选的资产清单（后端 human_input 事件下发；缺失时不渲染勾选）
   assets?: AssetOption[];
+  /** 写任务图：逐节点/逐工具授权选项；缺失时保持整图批准 */
+  writeTools?: { nodeId: string; role: string; tools: string[] }[];
   /** 卡片不可交互（只读回显）：formToken 为空/空白时置位，重放不得再触发提交。 */
   inactive?: boolean;
 }
@@ -815,6 +840,13 @@ interface AgentState {
   canvasSession: CanvasSessionInfo | null;
   canvasSessionStatus: string;
   canvasSessionSelection: { canvasId?: string; createNew: boolean };
+  /** run_task_graph 的逐节点进度，键为工具调用 id → 子任务 id。 */
+  subagentProgress: Record<string, Record<string, {
+    status: string;
+    role?: string;
+    output?: string;
+    error?: string;
+  }>>;
   setCanvasEditContext: (context: CanvasEditContext | null) => void;
   startCanvasBinding: (binding: CanvasBinding) => void;
   setCanvasBindingStatus: (status: string) => void;
@@ -922,6 +954,11 @@ interface AgentState {
    * 返回 false 表示打断没能及时生效（消息没发出去，调用方应把输入内容还给用户）。</p>
    */
   interruptAndSend: (content: string) => Promise<boolean>;
+  /**
+   * 回合中插入一条用户消息（steer）：不打断当前生成，在下一个模型步骤注入。
+   * 回合已结束时自动改走普通发送（开新一轮）；失败返回 false，调用方负责把文字还给用户。
+   */
+  steerMessage: (content: string) => Promise<boolean>;
 
   // 输入
   refImageUrls: string[];
@@ -2245,6 +2282,41 @@ function applyOneEnvelope(
     effects.canvasSessionRequired = payload as unknown as CanvasSessionInfo;
     return;
   }
+  if (envelope.type === 'USER_MESSAGE') {
+    const messageId = asString(payload.messageId);
+    const content = asString(payload.content);
+    if (!messageId || !content) return;
+    insertSteerMessage(context.conversationId, context.assistantId, {
+      id: messageId,
+      conversationId: context.conversationId,
+      role: 'user',
+      content,
+      metadata: { steer: true, turnId: envelope.turnId },
+      createdAt: asString(payload.createdAt) || new Date().toISOString(),
+    });
+    return;
+  }
+
+  if (envelope.type === 'SUBAGENT_STARTED' || envelope.type === 'SUBAGENT_COMPLETED') {
+    const toolCallId = asString(payload.toolCallId);
+    const subagentId = asString(payload.subagentId);
+    if (!toolCallId || !subagentId) return;
+    const status = asString(payload.status) || 'RUNNING';
+    const role = asString(payload.role);
+    const output = asString(payload.output);
+    const error = asString(payload.error);
+    useAgentStore.setState((state) => ({
+      subagentProgress: {
+        ...state.subagentProgress,
+        [toolCallId]: {
+          ...(state.subagentProgress[toolCallId] ?? {}),
+          [subagentId]: { status, role, output, error },
+        },
+      },
+    }));
+    return;
+  }
+
   if (envelope.type === 'turn_started') {
     effects.started = true;
     const startedContextWindow = asNumber(payload.contextWindowTokens ?? payload.context_window_tokens);
@@ -2324,6 +2396,7 @@ function applyOneEnvelope(
       recommended: asRecord(source.recommended) as Record<string, string> | undefined,
       reasons: asRecord(source.reasons) as Record<string, string> | undefined,
       assets: source.assets as AssetOption[] | undefined,
+      writeTools: source.writeTools as { nodeId: string; role: string; tools: string[] }[] | undefined,
       message: asString(source.message),
       duration: asNumber(source.duration, 8),
       picUrl: asString(source.picUrl),
@@ -2784,6 +2857,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
   canvasEditContext: null,
+  subagentProgress: {},
   canvasBinding: null,
   canvasBindingStatus: '',
   canvasSession: null,
@@ -3470,6 +3544,58 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       editMessageId: targetMessageId,
       references: activeReferences(content, previousReferences),
     });
+  },
+  /**
+   * 回合中插入一条用户消息（steer）。
+   *
+   * <p>与「停止并发送」的区别：不打断当前回合，消息落在下一条模型请求里；
+   * 已流出的正文、正在跑的工具都不受影响。</p>
+   *
+   * <p>回合已结束（服务端返回 not_running）时等本地流收尾，再按普通发送开新一轮；
+   * 这样用户只按一次发送，不会丢消息，也不会撞会话锁。</p>
+   *
+   * @return true=已插入或已改走普通发送；false=既没插入也没发出，调用方应回填输入框
+   */
+  steerMessage: async (content) => {
+    const trimmed = content.trim();
+    const conversationId = get().activeConversationId;
+    if (!conversationId || !trimmed) return false;
+    const generation = get().generating[conversationId];
+    const turnId = generation?.turnId;
+    if (!get().streaming || !turnId
+      || get().waitingHumanInput || get().waitingVideoPlan) {
+      // 没有可插入的回合：不打断任何东西，直接按普通发送处理
+      if (get().streaming) return false;
+      void get().sendMessage(content);
+      return true;
+    }
+    const clientMessageId = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const res = await agentApi.steerTurn(conversationId, turnId, trimmed, clientMessageId);
+      const result = res.data.data;
+      if (result?.status === 'steered') {
+        if (result.messageId) {
+          // 乐观气泡：服务端 USER_MESSAGE 事件按同一 messageId 去重，谁先到都只出现一次
+          insertSteerMessage(conversationId, generation?.assistantId, {
+            id: result.messageId,
+            conversationId,
+            role: 'user',
+            content: trimmed,
+            metadata: { steer: true, turnId, clientMessageId },
+            createdAt: new Date().toISOString(),
+          });
+        }
+        return true;
+      }
+      // 回合刚结束：等本地终态清掉 generating，再走普通发送开新一轮
+      const settled = await waitForInterruptSettled(conversationId, 4000);
+      if (!settled || get().streaming) return false;
+      void get().sendMessage(content);
+      return true;
+    } catch {
+      set({ streamError: '消息插入失败，请重试' });
+      return false;
+    }
   },
   /**
    * 打断当前生成并发送这句话。

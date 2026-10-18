@@ -21,8 +21,71 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
+import { SceneOutlineRow } from '../scene/SceneOutlineRow';
 import { LiveOrb } from '../ui/live-orb';
-import { Check, ArrowUpDown } from 'lucide-react';
+import { Check, ArrowUpDown, List, LayoutGrid } from 'lucide-react';
+
+/** 排序模式下的可拖拽行包裹（大纲视图：拖行即可重排，不需要额外进入排序模式） */
+function SortableOutlineRow({
+  scene,
+  isSelected,
+  onSelect,
+}: {
+  scene: SceneResponse;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: scene.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        zIndex: isDragging ? 999 : undefined,
+        position: 'relative',
+      }}
+      {...attributes}
+    >
+      <div
+        {...listeners}
+        aria-label={`拖动排序分镜 ${scene.sceneNumber}`}
+        style={{
+          display: 'grid',
+          placeItems: 'center',
+          width: 14,
+          flexShrink: 0,
+          color: 'var(--color-muted-soft)',
+          cursor: 'grab',
+          touchAction: 'none',
+        }}
+      >
+        <svg width="10" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="9" cy="6" r="1.4" /><circle cx="15" cy="6" r="1.4" />
+          <circle cx="9" cy="12" r="1.4" /><circle cx="15" cy="12" r="1.4" />
+          <circle cx="9" cy="18" r="1.4" /><circle cx="15" cy="18" r="1.4" />
+        </svg>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <SceneOutlineRow
+          scene={scene}
+          isSelected={isSelected}
+          onSelect={onSelect}
+          dragging={isDragging}
+        />
+      </div>
+    </div>
+  );
+}
+
+type SceneListView = 'outline' | 'card';
+
+const VIEW_STORAGE_KEY = 'sceneListView';
 
 /** 排序模式下的可拖拽卡片包裹 */
 function SortableSceneCard({
@@ -96,6 +159,23 @@ export function SceneListPanel({ width }: { width: number }) {
   const listRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef(0);
   const [sortMode, setSortMode] = useState(false);
+  // 视图切换：大纲（默认，一屏 20+ 镜）/ 卡片（旧视图，保留重命名等全部操作）
+  const [viewMode, setViewMode] = useState<SceneListView>(() => {
+    try {
+      return window.localStorage.getItem(VIEW_STORAGE_KEY) === 'card' ? 'card' : 'outline';
+    } catch {
+      return 'outline';
+    }
+  });
+
+  const switchView = (next: SceneListView) => {
+    setViewMode(next);
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // 隐私模式下 localStorage 不可用：只在本次会话生效
+    }
+  };
 
   // 新增分镜时（AI 生成脚本 / 手动添加），新卡片依次浮入；初始加载同样生效
   useGSAP(() => {
@@ -170,7 +250,61 @@ export function SceneListPanel({ width }: { width: number }) {
           分镜列表
         </h2>
         <div style={{ display: 'flex', gap: 6 }}>
-          {scenes.length > 1 && (
+          {scenes.length > 0 && !sortMode && (
+            <div
+              role="group"
+              aria-label="分镜视图"
+              style={{
+                display: 'inline-flex',
+                border: '1px solid var(--color-hairline)',
+                borderRadius: 'var(--rounded-md)',
+                overflow: 'hidden',
+                background: 'white',
+              }}
+            >
+              <button
+                type="button"
+                aria-pressed={viewMode === 'outline'}
+                onClick={() => switchView('outline')}
+                title="大纲视图：一行一镜，密度高"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  height: 28,
+                  padding: '0 9px',
+                  border: 0,
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  background: viewMode === 'outline' ? 'var(--color-primary)' : 'transparent',
+                  color: viewMode === 'outline' ? 'white' : 'var(--color-body)',
+                }}
+              >
+                <List size={12} strokeWidth={2} /> 大纲
+              </button>
+              <button
+                type="button"
+                aria-pressed={viewMode === 'card'}
+                onClick={() => switchView('card')}
+                title="卡片视图：完整信息与重命名"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  height: 28,
+                  padding: '0 9px',
+                  border: 0,
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  background: viewMode === 'card' ? 'var(--color-primary)' : 'transparent',
+                  color: viewMode === 'card' ? 'white' : 'var(--color-body)',
+                }}
+              >
+                <LayoutGrid size={12} strokeWidth={2} /> 卡片
+              </button>
+            </div>
+          )}
+          {scenes.length > 1 && viewMode === 'card' && (
             <button
               onClick={() => setSortMode(!sortMode)}
               style={{
@@ -259,6 +393,27 @@ export function SceneListPanel({ width }: { width: number }) {
               </p>
             </div>
           </div>
+        ) : viewMode === 'outline' ? (
+          /* 大纲视图：一行一镜，直接拖行重排 */
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={scenes.map(s => s.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {scenes.map((scene) => (
+                <SortableOutlineRow
+                  key={scene.id}
+                  scene={scene}
+                  isSelected={selectedSceneId === scene.id}
+                  onSelect={() => selectScene(scene.id)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         ) : sortMode ? (
           /* 排序模式：拖拽列表 */
           <DndContext

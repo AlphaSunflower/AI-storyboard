@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.human.ApprovalOutcome;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.mapper.AgentCheckpointMapper;
@@ -122,6 +123,7 @@ public class AgentScopeCheckpointService {
         payload.put("approvalMode", mode.name());
         payload.put("replyId", replyId);
         payload.put("toolCalls", calls);
+        payload.put("writeToolOptions", writeToolOptions(toolCalls));
         support.runHITLStage(request,
                 new AgentRuntimeSupport.StagePlan(
                         prompt, "agentscope-confirm", List.of(payload), "human_input", actions),
@@ -179,6 +181,8 @@ public class AgentScopeCheckpointService {
             case AgentScopeImageTools.GENERATE_IMAGE_BATCH -> imageSummary(input, true);
             case AgentScopeVideoTools.GENERATE_VIDEO -> videoSummary(input);
             // 复合旅程：确认卡片必须逐条列出真正会执行的步骤，而不是只说"执行一个工具"。
+            // 写任务图：把 allowWrite 节点和实际工具列出来，用户批准的是明确的写入面。
+            case AgentScopeOrchestrationTools.RUN_WRITE_TASK_GRAPH -> writeGraphSummary(input);
             case AgentScopeJourneyTools.PRODUCE_VIDEO_JOURNEY -> journeySummary(input);
             default -> genericSummary(toolName, input);
         };
@@ -187,6 +191,47 @@ public class AgentScopeCheckpointService {
             out.append("\n  - ").append(line);
         }
         return out.toString();
+    }
+
+    private List<Map<String, Object>> writeToolOptions(List<ToolUseBlock> toolCalls) {
+        List<Map<String, Object>> options = new ArrayList<>();
+        for (ToolUseBlock call : toolCalls == null ? List.<ToolUseBlock>of() : toolCalls) {
+            if (call == null || !AgentScopeOrchestrationTools.RUN_WRITE_TASK_GRAPH
+                    .equals(call.getName()) || call.getInput() == null) continue;
+            Object rawNodes = call.getInput().get("nodes");
+            if (!(rawNodes instanceof List<?> nodes)) continue;
+            for (Object raw : nodes) {
+                if (!(raw instanceof Map<?, ?> node)
+                        || !Boolean.TRUE.equals(node.get("allowWrite"))) continue;
+                List<String> tools = stringList(node.get("tools"));
+                if (tools.isEmpty()) tools = List.of("write_file", "run_python_script");
+                options.add(Map.of(
+                        "nodeId", stringValue(node.get("id")),
+                        "role", stringValue(node.get("role")),
+                        "tools", tools));
+            }
+        }
+        return options;
+    }
+
+    private List<String> writeGraphSummary(Map<String, Object> input) {
+        List<String> lines = new ArrayList<>();
+        Object rawNodes = input.get("nodes");
+        if (rawNodes instanceof List<?> nodes) {
+            for (Object raw : nodes) {
+                if (!(raw instanceof Map<?, ?> node)) continue;
+                if (!Boolean.TRUE.equals(node.get("allowWrite"))) continue;
+                String id = stringValue(node.get("id"));
+                String role = stringValue(node.get("role"));
+                List<String> tools = stringList(node.get("tools"));
+                String toolText = tools.isEmpty() ? "角色默认写工具" : String.join(", ", tools);
+                lines.add("节点 " + (id.isBlank() ? "(未命名)" : id)
+                        + (role.isBlank() ? "" : "（" + role + "）")
+                        + "：" + toolText);
+            }
+        }
+        if (lines.isEmpty()) lines.add("未声明 allowWrite 节点");
+        return lines;
     }
 
     /**
@@ -360,8 +405,9 @@ public class AgentScopeCheckpointService {
         String kind = stringValue(item.get("kind"));
         if (kind.isBlank()) kind = "external";
         if ("permission".equals(kind)) {
-            boolean approved = "approve".equals(action);
-            return new ResumeValue(kind, "", "", approved ? "approved" : "rejected", approved);
+            // 闭合词表 + fail-closed：只认 allowed/rejected/cancelled，其他一律 unavailable。
+            ApprovalOutcome outcome = ApprovalOutcome.fromAction(action);
+            return new ResumeValue(kind, "", "", outcome.wireValue(), outcome);
         }
         String toolCallId = stringValue(checkpoint.getRuntimeToolCallId());
         String toolName = stringValue(checkpoint.getRuntimeToolName());
@@ -372,7 +418,7 @@ public class AgentScopeCheckpointService {
         if ("storyboard-commit".equals(kind)) {
             String choice = action == null ? "" : action.trim().toLowerCase(java.util.Locale.ROOT);
             if (!List.of("append", "overwrite", "delete").contains(choice)) choice = "append";
-            return new ResumeValue(kind, toolCallId, toolName, choice, true);
+            return new ResumeValue(kind, toolCallId, toolName, choice, ApprovalOutcome.ALLOWED);
         }
         String value = customText == null ? "" : customText.trim();
         if (value.isBlank() && action != null && action.startsWith("option-")) {
@@ -390,8 +436,12 @@ public class AgentScopeCheckpointService {
             }
         }
         if (value.isBlank()) value = actionTitle(plan, action);
-        if (value.isBlank()) value = "用户已取消或未提供额外信息";
-        return new ResumeValue(kind, toolCallId, toolName, value, true);
+        if (value.isBlank()) {
+            // 既没有自定义文本，也没有可识别的选项：审批不可判定，按不可用处理。
+            return new ResumeValue(kind, toolCallId, toolName,
+                    ApprovalOutcome.UNAVAILABLE.wireValue(), ApprovalOutcome.UNAVAILABLE);
+        }
+        return new ResumeValue(kind, toolCallId, toolName, value, ApprovalOutcome.ALLOWED);
     }
 
     public List<ToolUseBlock> permissionToolCalls(AgentCheckpoint checkpoint) {
@@ -516,7 +566,18 @@ public class AgentScopeCheckpointService {
         }
     }
 
+    /**
+     * 一次 checkpoint 恢复的解析结果。
+     *
+     * <p>{@code outcome} 是闭合审批词表；{@code approved()} 只是兼容旧调用方的派生判断，
+     * 仅 {@link ApprovalOutcome#ALLOWED} 为真，其他三种终态都不得执行工具。
+     */
     public record ResumeValue(String kind, String toolCallId, String toolName,
-                              String text, boolean approved) {
+                              String text, ApprovalOutcome outcome) {
+
+        /** 是否允许执行；仅为 {@link ApprovalOutcome#ALLOWED} 时为真。 */
+        public boolean approved() {
+            return outcome != null && outcome.allowsExecution();
+        }
     }
 }

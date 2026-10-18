@@ -1,0 +1,42 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-18T11:38:47.524915+00:00",
+  "cases": [
+    {
+      "name": "canvas-readonly",
+      "result": {
+        "status": "completed",
+        "final": "已按你的要求只做读取，未创建、未修改任何节点或连线。\n\n## 画布状态总结\n\n| 项目 | 实际情况 |\n| --- | --- |\n| 画布 | eval-canvas-0001（当前会话已接管的画布） |\n| 节点数 | 0 |\n| 连线数 | 0 |\n| 版本号（revision） | 0（从未保存过任何变更） |\n| 生成记录 | 无 |\n\n**结论：** 这张画布目前是空的，没有节点、没有连线，也没有任何生成记录或历史版本，等于一张全新的空白画布，可以直接开始搭建。\n\n如果你希望，我可以基于你的需求在这张画布上搭出完整工作流（节点 + 结果槽 + 连线 + 自动布局）；也可以单纯导入素材或做局部修改——你给方向，我再动结构。",
+        "tools": [
+          "reset_equipped_tools",
+          "load_skill_through_path",
+          "canvas_graph_get_state"
+        ],
+        "metrics": {
+          "inputTokens": 73143,
+          "outputTokens": 703,
+          "cachedInputTokens": 37248,
+          "totalTokens": 73846,
+          "contextTokens": 30239,
+          "contextWindowTokens": 1000000,
+          "durationMs": 5172,
+          "modelCalls": 3,
+          "complete": true,
+          "modelDurationMs": 4902,
+          "toolDurationMs": 142,
+          "systemPromptTokens": 1585,
+          "toolDefinitionTokens": 21947,
+          "messageTokens": 6707
+        },
+        "durationMs": 5245,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0
+}

@@ -21,6 +21,11 @@ public class ScenePrompt {
     private String imagePrompt;
     private String videoPrompt;
     private String negativePrompt;
+    /**
+     * 本镜与前镜的衔接说明（继承项 / 禁改项）。独立成列而不是混写进 imagePrompt：
+     * 否则用户与智能体都没法单独审阅、单独修改。
+     */
+    private String continuityNote;
     private String cameraMovement;
     private String shotType;
     private String soundDesign;

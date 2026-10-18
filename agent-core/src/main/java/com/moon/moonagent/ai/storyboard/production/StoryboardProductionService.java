@@ -28,6 +28,13 @@ public interface StoryboardProductionService {
 
     StoryboardRunSnapshot getOwned(String runId, String userId, String projectId);
 
+    /**
+     * 读一次运行的分镜草稿改动日志（字段级 before/after，按时间正序）。
+     *
+     * <p>归属校验与 {@link #getOwned} 同口径：不属于该用户的运行一律 40401。
+     */
+    java.util.List<StoryboardChangeLog.ShotChange> changes(String runId, String userId, String projectId);
+
     StoryboardRunSnapshot getLatestOwned(String userId, String projectId, String conversationId);
 
     StoryboardRunSnapshot revise(String runId, Stage targetStage, String instruction, String shotId);
@@ -52,13 +59,34 @@ public interface StoryboardProductionService {
         return approveToFinal(runId, plotApproval);
     }
 
+    /** 用户在界面里保存草稿（改动日志记 {@code source=user}）。 */
+    default StoryboardRunSnapshot replaceDraft(
+            String runId,
+            String userId,
+            String projectId,
+            int expectedVersion,
+            List<PseudoShot> pseudoShots,
+            List<StoryboardShot> finalShots) {
+        return replaceDraft(runId, userId, projectId, expectedVersion,
+                pseudoShots, finalShots, "user");
+    }
+
+    /**
+     * 保存草稿并声明改动来源。
+     *
+     * <p>来源会影响"改动审阅"里显示的是「你」还是「智能体」——智能体调工具改大纲时，
+     * 用户醒来看到一句陌生的画面，得能分清是谁改的。
+     *
+     * @param source user / agent / system
+     */
     StoryboardRunSnapshot replaceDraft(
             String runId,
             String userId,
             String projectId,
             int expectedVersion,
             List<PseudoShot> pseudoShots,
-            List<StoryboardShot> finalShots);
+            List<StoryboardShot> finalShots,
+            String source);
 
     StoryboardRunSnapshot markCompleted(
             String runId,

@@ -104,8 +104,13 @@ test('input, planner, shot, and merge nodes share one panel surface', async ({ p
   // 点标题选中节点（节点框下方可能被别的面板遮住，标题永远在节点顶部）
   await page.locator('.react-flow__node[data-id="panel-merge"] .ai-node-external-title').click();
   const mergePanel = panelOf(page, 'panel-merge').locator('.node-float-panel');
+  // 玻璃态允许白色高光渐变；这里守的是「中性」——渐变里每个色值的通道极差 ≤ 2（旧主题的绿会被拦下）。
   const panelBackground = await mergePanel.evaluate((element) => getComputedStyle(element).backgroundImage);
-  expect(panelBackground).toBe('none');
+  const channels = [...panelBackground.matchAll(/rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/g)]
+    .map((match) => [Number(match[1]), Number(match[2]), Number(match[3])]);
+  for (const [r, g, b] of channels) {
+    expect(Math.max(r, g, b) - Math.min(r, g, b), `面板渐变出现色相：${panelBackground}`).toBeLessThanOrEqual(2);
+  }
   const action = mergePanel.locator('.video-merge-footer__action');
   await expect(action).toHaveCount(1);
   await expect(action.getByRole('button', { name: '合并视频' })).toBeVisible();

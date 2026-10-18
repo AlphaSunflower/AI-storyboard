@@ -4,7 +4,6 @@ import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { notify } from '../../stores/toastStore';
 import { Save, Pencil, Trash2, ChevronDown } from 'lucide-react';
-import { PersonalInfoModal } from '../agent/PersonalInfoModal';
 import { ProjectDropdown } from './ProjectDropdown';
 import { ContextMenu } from '../common/ContextMenu';
 import StaggeredMenu from '../StaggeredMenu';
@@ -21,7 +20,6 @@ export function AppHeader() {
   const { currentProject, updateProject } = useProjectStore();
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [renameProjectOpen, setRenameProjectOpen] = useState(false);
   const [renameProjectName, setRenameProjectName] = useState('');
   const deleteProject = useProjectStore((s) => s.deleteProject);
@@ -197,16 +195,16 @@ export function AppHeader() {
             displaySocials={false}
             items={[
               { label: 'Moon Chat', ariaLabel: 'Moon Chat', onClick: () => navigate('/chat') },
+              { label: '运行观测', ariaLabel: '运行观测', onClick: () => navigate('/observability') },
               { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
-              { label: '个人信息', ariaLabel: '个人信息', onClick: () => setProfileOpen(true) },
+              { label: '个人信息', ariaLabel: '个人信息', onClick: () => navigate('/account') },
               { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
             ]}
           />
         </div>
       </div>
 
-      {/* ── 个人信息弹窗 ─────────────────────────────────────────── */}
-      <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
+      {/* ── 项目重命名弹窗 ─────────────────────────────────────────── */}
       {renameProjectOpen && currentProject && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

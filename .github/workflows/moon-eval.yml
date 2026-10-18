@@ -1,0 +1,47 @@
+name: Moon eval
+
+# 手动触发：先部署好一套 dev/预发环境，再跑真实回合 eval。
+# 需要在仓库 Secrets 配置：MOON_EMAIL / MOON_PASSWORD / MOON_PROJECT_ID / MOON_CANVAS_ID（可选）
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "MoonAgent 入口（经网关，例如 https://dev.example.com）"
+        required: true
+      project_id:
+        description: "测试项目 id（留空用 Secrets.MOON_PROJECT_ID）"
+        required: false
+      canvas_id:
+        description: "画布 id（留空用 Secrets.MOON_CANVAS_ID；没有则 skip 画布 case）"
+        required: false
+  schedule:
+    # 每天 02:00 UTC（北京时间 10:00）跑一次；需要 Secrets.MOON_BASE_URL
+    - cron: "0 2 * * *"
+
+jobs:
+  eval:
+    name: Real-turn eval
+    runs-on: ubuntu-latest
+    environment: moon-eval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run eval
+        env:
+          MOON_BASE_URL: ${{ inputs.base_url || secrets.MOON_BASE_URL }}
+          MOON_EMAIL: ${{ secrets.MOON_EMAIL }}
+          MOON_PASSWORD: ${{ secrets.MOON_PASSWORD }}
+          MOON_PROJECT_ID: ${{ inputs.project_id || secrets.MOON_PROJECT_ID }}
+          MOON_CANVAS_ID: ${{ inputs.canvas_id || secrets.MOON_CANVAS_ID }}
+        run: python scripts/eval/run_eval.py --cases scripts/eval/cases.jsonl
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moon-eval-report
+          path: scripts/eval/reports
+          if-no-files-found: ignore

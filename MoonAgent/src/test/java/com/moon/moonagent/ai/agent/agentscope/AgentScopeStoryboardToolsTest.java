@@ -4,6 +4,8 @@ import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.ai.video.ReferenceImageRole;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.AssetRef;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardProductionRequest;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.entity.AgentConversation;
@@ -14,11 +16,13 @@ import io.agentscope.core.message.ToolUseBlock;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -657,6 +661,92 @@ class AgentScopeStoryboardToolsTest {
 
         assertThat(result).containsEntry("ok", false);
         assertThat(String.valueOf(result.get("message"))).contains("scene_id 或 scene_number");
+    }
+
+    /**
+     * 模型漏传 asset_ids 时，服务端必须把会话素材带进分镜生产请求。
+     *
+     * <p>历史事实：47 次 start_storyboard_production 调用里 asset_ids 一次没传，
+     * 于是伪分镜阶段的「可用资产」永远是空的，逐镜绑定与写库关联全是空转。
+     */
+    @Test
+    void startStoryboardAutoInjectsSessionAssetsWhenAssetIdsOmitted() {
+        StoryboardProductionService production = mock(StoryboardProductionService.class);
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        SessionAssetService sessionAssets = mock(SessionAssetService.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        when(sessionAssets.list(eq("conversation-1"), eq("image"), anyInt())).thenReturn(List.of(
+                new SessionAssetRef("asset-1", "image", "https://files/hero.png",
+                        "uploaded", OffsetDateTime.now(), "角色｜林知夏：短发女性，黑色风衣"),
+                new SessionAssetRef("asset-2", "image", "https://files/warehouse.png",
+                        "uploaded", OffsetDateTime.now(), "场景｜旧仓库：钢架与昏黄吊灯")));
+        when(storyboardClient.getProjectScenesFresh("project-1")).thenReturn(List.of());
+        when(asyncTasks.startPlotReviewStoryboardTask(any(), any(), any(), any()))
+                .thenReturn("task-1");
+        AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
+                production, asyncTasks, sessionAssets,
+                mock(AgentScopeImageTools.class), mock(AgentScopeVideoTools.class), storyboardClient);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.START_STORYBOARD)
+                .invoke(Map.of("prompt", "生成分镜"), param("project-1"));
+
+        ArgumentCaptor<StoryboardProductionRequest> request =
+                ArgumentCaptor.forClass(StoryboardProductionRequest.class);
+        verify(asyncTasks).startPlotReviewStoryboardTask(any(), request.capture(), any(), any());
+        assertThat(request.getValue().assets())
+                .extracting(AssetRef::assetId)
+                .containsExactly("asset-1", "asset-2");
+        assertThat(request.getValue().assets())
+                .extracting(AssetRef::url)
+                .containsExactly("https://files/hero.png", "https://files/warehouse.png");
+        // 素材语义必须进 purpose：模型就是靠它判断「这镜该不该用这张图」
+        assertThat(request.getValue().assets())
+                .extracting(AssetRef::purpose)
+                .containsExactly(
+                        "角色｜林知夏：短发女性，黑色风衣",
+                        "场景｜旧仓库：钢架与昏黄吊灯");
+        assertThat(result)
+                .containsEntry("ok", true)
+                .containsEntry("assetCount", 2)
+                .containsEntry("assetsAutoInjected", true);
+    }
+
+    /** 显式指定 asset_ids 时不得被会话素材顶掉，也不许再查会话素材列表。 */
+    @Test
+    void explicitAssetIdsSkipSessionAssetFallback() {
+        StoryboardProductionService production = mock(StoryboardProductionService.class);
+        AgentScopeAsyncTaskService asyncTasks = mock(AgentScopeAsyncTaskService.class);
+        SessionAssetService sessionAssets = mock(SessionAssetService.class);
+        StoryboardClient storyboardClient = mock(StoryboardClient.class);
+        when(sessionAssets.refsByIds("conversation-1", List.of("chosen"))).thenReturn(List.of(
+                new SessionAssetRef("chosen", "image", "https://files/chosen.png",
+                        "uploaded", OffsetDateTime.now(), "道具｜旧木椅：靠窗，木纹明显")));
+        when(storyboardClient.getProjectScenesFresh("project-1")).thenReturn(List.of());
+        when(asyncTasks.startPlotReviewStoryboardTask(any(), any(), any(), any()))
+                .thenReturn("task-2");
+        AgentScopeStoryboardTools tools = new AgentScopeStoryboardTools(
+                production, asyncTasks, sessionAssets,
+                mock(AgentScopeImageTools.class), mock(AgentScopeVideoTools.class), storyboardClient);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) tool(
+                tools, AgentScopeStoryboardTools.START_STORYBOARD)
+                .invoke(Map.of("prompt", "生成分镜", "asset_ids", List.of("chosen")),
+                        param("project-1"));
+
+        ArgumentCaptor<StoryboardProductionRequest> request =
+                ArgumentCaptor.forClass(StoryboardProductionRequest.class);
+        verify(asyncTasks).startPlotReviewStoryboardTask(any(), request.capture(), any(), any());
+        assertThat(request.getValue().assets())
+                .extracting(AssetRef::assetId)
+                .containsExactly("chosen");
+        assertThat(request.getValue().assets())
+                .extracting(AssetRef::purpose)
+                .containsExactly("道具｜旧木椅：靠窗，木纹明显");
+        verify(sessionAssets, never()).list(anyString(), anyString(), anyInt());
+        assertThat(result).containsEntry("assetsAutoInjected", false);
     }
 
     private static AgentScopeStoryboardTools tools() {

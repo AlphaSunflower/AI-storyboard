@@ -1,8 +1,10 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
 import com.moon.moonagent.ai.agent.skill.SkillExpander;
+import io.agentscope.core.model.ExecutionConfig;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.tool.ToolkitConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -10,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,11 +24,12 @@ import java.util.stream.Collectors;
         havingValue = "true")
 public class AgentScopeToolkitFactory {
 
-    public static final String IMAGE_TOOLS = "image-tools";
-    public static final String VIDEO_TOOLS = "video-tools";
-    public static final String CANVAS_DESIGN_TOOLS = "canvas-design-tools";
-    public static final String CANVAS_RUN_TOOLS = "canvas-run-tools";
-    public static final String STORYBOARD_TOOLS = "storyboard-tools";
+    /** 技能组名统一由 {@link ToolCatalog} 声明，这里只保留对外兼容别名。 */
+    public static final String IMAGE_TOOLS = ToolCatalog.IMAGE_TOOLS;
+    public static final String VIDEO_TOOLS = ToolCatalog.VIDEO_TOOLS;
+    public static final String CANVAS_DESIGN_TOOLS = ToolCatalog.CANVAS_DESIGN_TOOLS;
+    public static final String CANVAS_RUN_TOOLS = ToolCatalog.CANVAS_RUN_TOOLS;
+    public static final String STORYBOARD_TOOLS = ToolCatalog.STORYBOARD_TOOLS;
 
     /**
      * 画布能力探测标记：这两个工具齐全才算画布链路真的可用。
@@ -37,8 +39,7 @@ public class AgentScopeToolkitFactory {
      * 两者错位时会向模型声明「画布可用」，模型随后每个调用都拿到
      * {@code Tool not found}（2026-10-15 实测事故）。
      */
-    private static final List<String> CANVAS_MARKERS = List.of(
-            "canvas_graph_get_state", "canvas_graph_layout_graph");
+    private static final List<String> CANVAS_MARKERS = ToolCatalog.CANVAS_PROBE_TOOLS;
 
     private static final Logger log = LoggerFactory.getLogger(AgentScopeToolkitFactory.class);
 
@@ -60,6 +61,10 @@ public class AgentScopeToolkitFactory {
     private AgentScopeSandboxTools sandboxTools;
     @Autowired(required = false)
     private AgentScopeWebTools webTools;
+    @Autowired(required = false)
+    private AgentScopeOrchestrationTools orchestrationTools;
+    @Autowired(required = false)
+    private AgentScopeMemoryTools memoryTools;
     private final AgentCanvasRunService canvasRuns;
     private final AgentScopeToolPipeline toolPipeline;
     private final SkillExpander skillExpander;
@@ -105,107 +110,93 @@ public class AgentScopeToolkitFactory {
     }
 
     public Toolkit create() {
-        Toolkit toolkit = new Toolkit();
+        java.time.Duration toolTimeout = properties.getToolExecutionTimeout();
+        long required = properties.getSubagentMaxDurationMs()
+                * (properties.getSubagentMaxRepairRounds() + 1L) + 60_000;
+        if (required > 0 && toolTimeout.toMillis() < required) {
+            toolTimeout = java.time.Duration.ofMillis(required);
+            log.warn("[Subagent] tool-execution-timeout={}s 不足以覆盖初跑+修复两段预算，"
+                            + "已提升到 {}s",
+                    properties.getToolExecutionTimeout().toSeconds(), toolTimeout.toSeconds());
+        }
+        Toolkit toolkit = new Toolkit(ToolkitConfig.builder()
+                .executionConfig(ExecutionConfig.builder()
+                        .timeout(toolTimeout)
+                        .maxAttempts(1)
+                        .build())
+                .build());
 
-        // Read-only discovery stays available before a skill is activated. The human-input tool
-        // is always registered because preflight clarifications are part of the turn protocol.
-        sessionTools.tools().forEach(tool -> register(toolkit, tool));
-        structuredTools.tools().forEach(tool -> register(toolkit, tool));
-        register(toolkit, assetGroupTools.tool());
-        register(toolkit, interactionTools.storyboardCommitTool());
-        register(toolkit, interactionTools.tool());
-        register(toolkit, workflowTools.tool());
-        documentTools.tools().forEach(tool -> register(toolkit, tool));
-        if (sandboxTools != null) {
-            sandboxTools.tools().forEach(tool -> register(toolkit, tool));
-        }
-        if (webTools != null) {
-            webTools.tools().forEach(tool -> register(toolkit, tool));
-        }
-        // 创作记忆：**读取**类常驻（技能激活前就要能读），**写入/时间线**类按技能门控。
-        //
-        // 依据 TurnContextMiddleware:191-200——每轮已自动注入 <project-creative-context>
-        // （目标/方向/风格/硬软约束/参考/被拒方向/反馈/本轮模式）与约束账本，
-        // 所以 get_creative_context / extract_creative_constraints 属于"可在激活前调用"的读取面；
-        // 而 update_creative_context / save|get_timeline_manifest 只在具体创作任务里才有意义。
-        Set<String> gatedCreativeNames = Set.of(
-                AgentScopeCreativeTools.UPDATE_CONTEXT,
-                AgentScopeCreativeTools.SAVE_TIMELINE,
-                AgentScopeCreativeTools.GET_TIMELINE);
-        List<AgentScopeTool> gatedCreativeTools = new ArrayList<>();
-        creativeTools.tools().forEach(tool -> {
-            if (gatedCreativeNames.contains(tool.getName())) {
-                gatedCreativeTools.add(tool);
-            } else {
+        // 1) 技能组由 ToolCatalog 统一声明（名称/描述/技能/初始激活状态）。
+        ToolCatalog.groups().values().forEach(group -> toolkit.createSkillToolGroup(
+                group.name(), group.description(), group.activeByDefault(), group.skill()));
+
+        // 2) 收集当前可用的自研工具，按目录登记的策略/组注册。
+        Map<String, AgentScopeTool> available = new LinkedHashMap<>();
+        collect(available, sessionTools.tools());
+        collect(available, structuredTools.tools());
+        collect(available, documentTools.tools());
+        collect(available, creativeTools.tools());
+        if (memoryTools != null) collect(available, memoryTools.tools());
+        collect(available, storyboardTools.tools());
+        if (orchestrationTools != null) collect(available, orchestrationTools.tools());
+        if (sandboxTools != null) collect(available, sandboxTools.tools());
+        if (webTools != null) collect(available, webTools.tools());
+        add(available, assetGroupTools.tool());
+        add(available, interactionTools.tool());
+        add(available, interactionTools.storyboardCommitTool());
+        add(available, workflowTools.tool());
+        add(available, imageTools.tool());
+        add(available, imageTools.batchTool());
+        add(available, videoTools.tool());
+        add(available, journeyTools.tool());
+        add(available, videoMergeTools.tool());
+
+        Set<String> registered = new java.util.HashSet<>();
+        for (ToolCatalog.Spec spec : ToolCatalog.specs()) {
+            AgentScopeTool tool = available.get(spec.name());
+            if (tool == null) continue;
+            if (spec.groups().isEmpty()) {
+                // 无组的工具必须在技能激活前就可见（读取类/交互类）。
                 register(toolkit, tool);
+            } else {
+                for (String group : spec.groups()) {
+                    registerToGroup(toolkit, toolPipeline.wrap(tool), group);
+                }
             }
-        });
-        // 分镜 16 个工具改为技能门控（2026-10-17）：它们此前无条件注册，
-        // 使每一轮（哪怕只是闲聊）都带着 16 个分镜 schema，占常驻工具面 40%。
-        // storyboard 技能的 allowed-tools 已声明这些工具，激活技能即可见。
-        toolkit.createSkillToolGroup(
-                STORYBOARD_TOOLS, "Storyboard production tools", false, "storyboard");
-        storyboardTools.tools().forEach(tool -> toolkit.registration()
-                .agentTool(toolPipeline.wrap(tool))
-                .group(STORYBOARD_TOOLS).apply());
-        // 成片合并只服务于分镜链路，与分镜同组，避免常驻。
-        toolkit.registration()
-                .agentTool(toolPipeline.wrap(videoMergeTools.tool()))
-                .group(STORYBOARD_TOOLS).apply();
-        toolkit.createSkillToolGroup(
-                CANVAS_DESIGN_TOOLS, "Canvas graph design tools", false, "canvas-design");
-        toolkit.createSkillToolGroup(
-                CANVAS_RUN_TOOLS, "Canvas graph execution tools", false, "canvas-run");
+            registered.add(spec.name());
+        }
+        // 目录漏登记时按常驻兜底并告警：生产不静默丢工具，回归测试会锁住目录完整性。
+        for (Map.Entry<String, AgentScopeTool> entry : available.entrySet()) {
+            if (registered.contains(entry.getKey())) continue;
+            log.warn("[ToolCatalog] 工具未登记，按常驻兜底: {}", entry.getKey());
+            register(toolkit, entry.getValue());
+        }
+
+        // refineImage 来自 Spring AI MCP 回调，不在 AgentScopeTool 集合里。
+        ToolCallback[] imageCallbacks = skillExpander.toolCallbacks(List.of("refineImage"));
+        if (imageCallbacks.length > 0) {
+            registerToGroup(toolkit,
+                    toolPipeline.wrapGeneric(new SpringAiToolAdapter(imageCallbacks[0])),
+                    IMAGE_TOOLS);
+        }
+
         activeToolkit = toolkit;
         registerCanvasTools(toolkit);
         log.info("[Canvas] Toolkit 启动注册画布工具 {} 个{}",
                 canvasToolNames().size(),
                 canvasToolNames().isEmpty() ? "（画布 MCP 未就绪，连接看门狗会继续补齐）" : "");
-
-        toolkit.createSkillToolGroup(
-                IMAGE_TOOLS, "Image generation and reference-edit tools", false, "image");
-        toolkit.registration()
-                .agentTool(toolPipeline.wrap(imageTools.tool()))
-                .group(IMAGE_TOOLS).apply();
-        toolkit.registration()
-                .agentTool(toolPipeline.wrap(imageTools.batchTool()))
-                .group(IMAGE_TOOLS).apply();
-        ToolCallback[] imageCallbacks = skillExpander.toolCallbacks(List.of("refineImage"));
-        if (imageCallbacks.length > 0) {
-            toolkit.registration()
-                    .agentTool(toolPipeline.wrapGeneric(new SpringAiToolAdapter(imageCallbacks[0])))
-                    .group(IMAGE_TOOLS)
-                    .apply();
-        }
-
-        toolkit.createSkillToolGroup(
-                VIDEO_TOOLS, "Asynchronous video generation tools", false, "video");
-        toolkit.registration()
-                .agentTool(toolPipeline.wrap(videoTools.tool()))
-                .group(VIDEO_TOOLS).apply();
-        // 复合旅程与视频同组：用户提到「生图然后视频 / 超过 15 秒走分镜」时由它一次编排完成。
-        toolkit.registration()
-                .agentTool(toolPipeline.wrap(journeyTools.tool()))
-                .group(VIDEO_TOOLS).apply();
-
-        // 门控的创作写入/时间线工具：必须在 image/video 组创建之后再注册。
-        // 一个工具可同时属于多个技能组（画布工具就是 design+run 双组），
-        // 所以按「哪些技能真的需要它」逐个挂，而不是塞进单一组。
-        Map<String, List<String>> creativeGroupByTool = new LinkedHashMap<>();
-        creativeGroupByTool.put(AgentScopeCreativeTools.UPDATE_CONTEXT,
-                List.of(STORYBOARD_TOOLS, IMAGE_TOOLS, VIDEO_TOOLS, CANVAS_DESIGN_TOOLS));
-        creativeGroupByTool.put(AgentScopeCreativeTools.SAVE_TIMELINE,
-                List.of(STORYBOARD_TOOLS, VIDEO_TOOLS));
-        creativeGroupByTool.put(AgentScopeCreativeTools.GET_TIMELINE,
-                List.of(STORYBOARD_TOOLS, VIDEO_TOOLS));
-        for (AgentScopeTool tool : gatedCreativeTools) {
-            for (String group : creativeGroupByTool.getOrDefault(tool.getName(), List.of())) {
-                toolkit.registration()
-                        .agentTool(toolPipeline.wrap(tool))
-                        .group(group).apply();
-            }
-        }
         return toolkit;
+    }
+
+    private static void collect(Map<String, AgentScopeTool> out, List<AgentScopeTool> tools) {
+        if (tools == null) return;
+        for (AgentScopeTool tool : tools) add(out, tool);
+    }
+
+    private static void add(Map<String, AgentScopeTool> out, AgentScopeTool tool) {
+        if (tool != null && tool.getName() != null && !tool.getName().isBlank()) {
+            out.put(tool.getName(), tool);
+        }
     }
 
     /**

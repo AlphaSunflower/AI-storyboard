@@ -227,7 +227,7 @@ class BackendControllerSmokeTest {
     void sceneEndpoints_requireAuth_andReturnContract() throws Exception {
         SceneResponse scene = new SceneResponse("s1", "p1", null, 1, "内容", "图", "视频", null, null,
             null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-            null, null, null, null, null);
+            null, null, null, null, null, false);
         when(sceneService.addScene(anyString(), anyString(), any())).thenReturn(scene);
         when(sceneService.updateScene(anyString(), anyString(), any())).thenReturn(scene);
         when(sceneService.listReferences(anyString(), anyString()))

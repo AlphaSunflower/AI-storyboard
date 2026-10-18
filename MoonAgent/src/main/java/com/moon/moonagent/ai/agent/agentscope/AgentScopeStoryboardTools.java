@@ -8,6 +8,9 @@ import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.St
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardCommitMode;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardProductionRequest;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardRunSnapshot;
+import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardGenerationParams;
+import com.moon.moonagent.ai.storyboard.production.StoryboardPromptAssembly;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.ai.video.ReferenceImageRole;
@@ -47,6 +50,9 @@ public class AgentScopeStoryboardTools {
     public static final String CLEAR_PROJECT_STORYBOARD = "clear_project_storyboard";
     public static final String GENERATE_STORYBOARD_IMAGES = "generate_storyboard_images";
 
+    /** 模型漏传 asset_ids 时自动带入的会话素材上限（与 list_session_assets 的默认上限同量级）。 */
+    private static final int AUTO_ASSET_LIMIT = 12;
+
     private final StoryboardProductionService productionService;
     private final AgentScopeAsyncTaskService asyncTasks;
     private final SessionAssetService sessionAssets;
@@ -56,6 +62,13 @@ public class AgentScopeStoryboardTools {
 
     @Value("${ai.storyboard.production-v2.enabled:true}")
     private boolean enabled = true;
+
+    /**
+     * 生成参数解析（可选依赖：单测用 6 参构造器直接 new，不引入网关）。
+     * 为空时按「不带任何参数」处理，行为退化为改造前。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient StoryboardParamResolver paramResolver;
 
     public List<AgentScopeTool> tools() {
         if (!enabled) return List.of();
@@ -81,8 +94,9 @@ public class AgentScopeStoryboardTools {
     public AgentScopeTool upsertShotTool() {
         return new AgentScopeTool(
                 UPSERT_STORYBOARD_SHOT,
-                "Add or update exactly one pseudo storyboard shot in the current PSEUDO_REVIEW draft. "
-                        + "Never accept an array of shots.",
+                "Add or update exactly one draft shot. Works in both the thin outline stage "
+                        + "(PLOT_REVIEW: only action/characters/location/referenceAssetIds matter) "
+                        + "and the legacy pseudo-shot stage. Never accept an array of shots.",
                 AgentScopeTool.schema(Map.ofEntries(
                         Map.entry("run_id", Map.of("type", "string")),
                         Map.entry("shot_id", Map.of("type", "string")),
@@ -268,14 +282,14 @@ public class AgentScopeStoryboardTools {
                                 .filter(shot -> !shot.shotId().equals(shotId)).toList();
                         StoryboardRunSnapshot updated = productionService.replaceDraft(
                                 run.runId(), conversation.getUserId(),
-                                conversation.getProjectId(), run.version(), shots, List.of());
+                                conversation.getProjectId(), run.version(), shots, List.of(), "agent");
                         attachReview(context, updated);
                     } else if (run.stage() == com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage.FINAL_REVIEW) {
                         List<StoryboardShot> shots = run.finalShots().stream()
                                 .filter(shot -> !shot.shotId().equals(shotId)).toList();
                         StoryboardRunSnapshot updated = productionService.replaceDraft(
                                 run.runId(), conversation.getUserId(),
-                                conversation.getProjectId(), run.version(), List.of(), shots);
+                                conversation.getProjectId(), run.version(), List.of(), shots, "agent");
                         attachReview(context, updated);
                     } else {
                         throw new IllegalStateException("当前阶段不可删除分镜草稿: " + run.stage());
@@ -302,13 +316,13 @@ public class AgentScopeStoryboardTools {
                         List<PseudoShot> shots = reorderPseudo(run.pseudoShots(), orderedIds);
                         StoryboardRunSnapshot updated = productionService.replaceDraft(
                                 run.runId(), conversation.getUserId(),
-                                conversation.getProjectId(), run.version(), shots, List.of());
+                                conversation.getProjectId(), run.version(), shots, List.of(), "agent");
                         attachReview(context, updated);
                     } else if (run.stage() == com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage.FINAL_REVIEW) {
                         List<StoryboardShot> shots = reorderFinal(run.finalShots(), orderedIds);
                         StoryboardRunSnapshot updated = productionService.replaceDraft(
                                 run.runId(), conversation.getUserId(),
-                                conversation.getProjectId(), run.version(), List.of(), shots);
+                                conversation.getProjectId(), run.version(), List.of(), shots, "agent");
                         attachReview(context, updated);
                     } else {
                         throw new IllegalStateException("当前阶段不可排序分镜草稿: " + run.stage());
@@ -399,8 +413,11 @@ public class AgentScopeStoryboardTools {
                             continue;
                         }
                         List<String> sourceUrls = sceneReferenceImageUrls(scene);
-                        String prompt = nonBlank(scene.getImagePrompt(),
-                                nonBlank(scene.getScriptContent(), "分镜" + scene.getSceneNumber()));
+                        // 衔接说明只在送进模型前合并（库里的两列保持独立，便于单独审阅）
+                        String prompt = StoryboardPromptAssembly.withContinuity(
+                                nonBlank(scene.getImagePrompt(),
+                                        nonBlank(scene.getScriptContent(), "分镜" + scene.getSceneNumber())),
+                                scene.getContinuityNote());
                         targets.add(new AgentScopeAsyncTaskService.StoryboardImageTarget(
                                 "分镜" + scene.getSceneNumber(), scene.getId(), scene.getId(),
                                 prompt, sourceUrls));
@@ -432,18 +449,37 @@ public class AgentScopeStoryboardTools {
         return new AgentScopeTool(
                 START_STORYBOARD,
                 "Start the staged storyboard pipeline as an asynchronous task. Returns a taskId "
-                        + "immediately; the runtime diagnoses, repairs, generates the complete formal "
-                        + "storyboard and writes it to the project. If the project already has scenes, "
-                        + "return needsChoice=true and let the user choose append, overwrite or delete "
-                        + "through choose_storyboard_commit_mode before starting.",
-                AgentScopeTool.schema(Map.of(
-                        "prompt", Map.of("type", "string"),
-                        "asset_ids", array("string"),
-                        "reference_urls", array("string"),
-                        "role_hints", array("string"),
-                        "creation_type", Map.of("type", "string"),
-                        "requested_shot_count", Map.of("type", "string"),
-                        "commit_mode", Map.of("type", "string")), List.of("prompt")),
+                        + "immediately; the runtime produces a thin shot outline (A) for approval, "
+                        + "then expands each shot and writes it to the project (B). If the project "
+                        + "already has scenes, return needsChoice=true and let the user choose append, "
+                        + "overwrite or delete through choose_storyboard_commit_mode before starting. "
+                        + "Pass asset_ids whenever the session already has reference images/asset "
+                        + "library entries: those assets are what keeps characters and locations "
+                        + "consistent across shots, and every shot binds the subset it needs. When "
+                        + "asset_ids and reference_urls are both omitted the server falls back to the "
+                        + "session assets (assetsAutoInjected=true). "
+                        + "Optional generation params (omit to let the gateway defaults decide): "
+                        + "video_model / video_resolution / aspect_ratio / image_model / image_size / "
+                        + "image_quality / image_n / target_duration. Values outside what the chosen "
+                        + "model supports are clamped and reported back in paramNotes — tell the user "
+                        + "about every note, never silently change their request.",
+                AgentScopeTool.schema(Map.ofEntries(
+                        Map.entry("prompt", Map.of("type", "string")),
+                        Map.entry("asset_ids", array("string")),
+                        Map.entry("reference_urls", array("string")),
+                        Map.entry("role_hints", array("string")),
+                        Map.entry("creation_type", Map.of("type", "string")),
+                        Map.entry("requested_shot_count", Map.of("type", "string")),
+                        Map.entry("commit_mode", Map.of("type", "string")),
+                        Map.entry("video_model", Map.of("type", "string")),
+                        Map.entry("video_resolution", Map.of("type", "string")),
+                        Map.entry("aspect_ratio", Map.of("type", "string")),
+                        Map.entry("image_model", Map.of("type", "string")),
+                        Map.entry("image_size", Map.of("type", "string")),
+                        Map.entry("image_quality", Map.of("type", "string")),
+                        Map.entry("image_n", Map.of("type", "integer")),
+                        Map.entry("target_duration", Map.of("type", "integer"))),
+                        List.of("prompt")),
                 false, false, false,
                 (input, param) -> {
                     AgentScopeRunContext context = context(param);
@@ -454,13 +490,25 @@ public class AgentScopeStoryboardTools {
                         AgentConversation conversation =
                                 AgentScopeSessionTools.requireConversation(context);
                         List<String> assetIds = stringList(input.get("asset_ids"));
-                        List<String> urls = sessionAssets.urlsByIds(conversation.getId(), assetIds);
-                        List<AssetRef> assets = new ArrayList<>();
-                        for (int index = 0; index < assetIds.size(); index++) {
-                            assets.add(new AssetRef(assetIds.get(index), "reference",
-                                    index < urls.size() ? urls.get(index) : "", ""));
+                        List<String> requestedUrls = stringList(input.get("reference_urls"));
+                        // 注入型兜底：模型漏传 asset_ids 时自动带上会话素材。
+                        // 不靠「模型自觉传参」是既有教训——画布工具注入 userId/projectId 同理。
+                        // 只有显式也没给 reference_urls 时才兜底，避免用户明确指定素材时被会话素材顶掉。
+                        boolean autoInjected = false;
+                        List<SessionAssetRef> chosen;
+                        if (assetIds.isEmpty() && requestedUrls.isEmpty()) {
+                            chosen = autoSessionAssets(conversation.getId());
+                            autoInjected = !chosen.isEmpty();
+                        } else {
+                            chosen = sessionAssets.refsByIds(conversation.getId(), assetIds);
                         }
-                        for (String url : stringList(input.get("reference_urls"))) {
+                        List<AssetRef> assets = new ArrayList<>();
+                        for (SessionAssetRef ref : chosen) {
+                            // purpose 承载素材语义标签（「角色｜林知夏：短发女性…」）：
+                            // 模型就是靠这一列判断「这镜该不该用这张图」，留空等于没素材。
+                            assets.add(new AssetRef(ref.assetId(), "reference", ref.url(), ref.label()));
+                        }
+                        for (String url : requestedUrls) {
                             assets.add(new AssetRef("reference-" + (assets.size() + 1), "image", url, ""));
                         }
                         int existingSceneCount = storyboardClient
@@ -496,32 +544,151 @@ public class AgentScopeStoryboardTools {
                             context.turnState().takePendingStoryboardCommitCount();
                         }
                         if (commitMode == null) commitMode = StoryboardCommitMode.APPEND;
+                        // 生成参数：用户偏好 > 模型入参 > 网关能力默认值；越界值收敛并回传 notes
+                        int shotCount = parseShotCount(input.get("requested_shot_count"));
+                        StoryboardParamResolver.Resolved resolvedParams = resolveParams(context, input, shotCount);
                         StoryboardProductionRequest request = new StoryboardProductionRequest(
                                 conversation.getUserId(), conversation.getProjectId(), conversation.getId(), "",
                                 string(input.get("prompt")), string(input.get("creation_type")),
-                                string(input.get("requested_shot_count")), assets, stringList(input.get("role_hints")));
+                                string(input.get("requested_shot_count")), assets,
+                                stringList(input.get("role_hints")), resolvedParams.params());
                         String taskId = asyncTasks.startPlotReviewStoryboardTask(
                                 conversation, request, toolCallId(param), commitMode);
+                        if (taskId == null || taskId.isBlank()) {
+                            // 没有 taskId 就不能告诉模型「已受理」，否则它会去轮询一个不存在的任务
+                            throw new IllegalStateException("分镜任务创建失败，请稍后重试");
+                        }
                         if (context != null && context.turnState() != null) {
-                            context.turnState().addTaskCard(taskId, "生成剧情稿", "storyboard");
+                            context.turnState().addTaskCard(taskId, "生成镜头大纲", "storyboard");
                             context.turnState().addText("分镜生成任务已受理，任务 ID：`" + taskId + "`。");
                         }
                         if (context != null && context.support() != null && context.request() != null) {
                             context.support().sendEvent(context.request(), "task_accepted", Map.of(
                                     "taskId", taskId,
                                     "taskKind", "long-tool",
-                                    "message", "分镜生成任务已受理，正在生成剧情、诊断修正并制作完整分镜"));
+                                    "message", "分镜生成任务已受理，正在生成镜头大纲，确认后逐镜补全"));
                         }
-                        return Map.of(
-                                "ok", true,
-                                "status", "queued",
-                                "taskId", taskId,
-                                "taskKind", "long-tool",
-                                "commitMode", commitMode.name(),
-                                "existingSceneCount", existingSceneCount,
-                                "message", "剧情优化、分镜生成任务已受理，完成后会自动写入项目分镜");
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("ok", true);
+                        result.put("status", "queued");
+                        result.put("taskId", taskId);
+                        result.put("taskKind", "long-tool");
+                        result.put("commitMode", commitMode.name());
+                        result.put("existingSceneCount", existingSceneCount);
+                        result.put("assetCount", assets.size());
+                        result.put("assetsAutoInjected", autoInjected);
+                        result.put("appliedParams", describeParams(resolvedParams.params()));
+                        result.put("paramNotes", resolvedParams.notes());
+                        result.put("paramsUnverified", resolvedParams.unverified());
+                        result.put("message", "分镜任务已受理：先出镜头大纲等你确认，确认后逐镜补全并写入项目");
+                        return result;
                     });
                 });
+    }
+
+    /** 把工具入参 + 用户偏好交给解析器；解析器不可用（单测/降级）时返回空参数。 */
+    private StoryboardParamResolver.Resolved resolveParams(AgentScopeRunContext context,
+                                                           Map<String, Object> input, int shotCount) {
+        StoryboardParamResolver resolver = paramResolver;
+        if (resolver == null) {
+            return new StoryboardParamResolver.Resolved(
+                    StoryboardGenerationParams.EMPTY, List.of(), true);
+        }
+        Map<String, String> requested = new LinkedHashMap<>();
+        putIfPresent(requested, "videoModel", input.get("video_model"));
+        putIfPresent(requested, "videoResolution", input.get("video_resolution"));
+        putIfPresent(requested, "aspectRatio", input.get("aspect_ratio"));
+        putIfPresent(requested, "imageModel", input.get("image_model"));
+        putIfPresent(requested, "imageSize", input.get("image_size"));
+        putIfPresent(requested, "imageQuality", input.get("image_quality"));
+        putIfPresent(requested, "imageN", input.get("image_n"));
+        putIfPresent(requested, "targetDuration", input.get("target_duration"));
+        // 用户把总时长写进提示词（"总时长 30 秒"）时模型经常不翻译成参数，这里补一层兜底
+        if (!requested.containsKey("targetDuration")) {
+            Integer fromPrompt = totalSecondsFromPrompt(String.valueOf(input.getOrDefault("prompt", "")));
+            if (fromPrompt != null) requested.put("targetDuration", String.valueOf(fromPrompt));
+        }
+        AgentGenerationPreferences preferences = context != null && context.request() != null
+                ? context.request().getGenerationPreferences()
+                : AgentGenerationPreferences.none();
+        return resolver.resolve(requested, preferences, shotCount);
+    }
+
+    private static void putIfPresent(Map<String, String> target, String key, Object value) {
+        if (value == null) return;
+        String text = String.valueOf(value).trim();
+        if (!text.isEmpty()) target.put(key, text);
+    }
+
+    /**
+     * 从用户提示词里抓「总时长 N 秒」。
+     *
+     * <p>实测：用户说"总时长 30 秒"，模型只把它当成创作约束，不会翻译成 {@code target_duration}
+     * 参数（连续两轮都是 null），结果四镜各 4s、合计 16s，与用户要的 30s 不符。
+     * 所以这里做一条保守的正则兜底：必须带「总时长/全长/总长/时长/一共」这类总括词，
+     * 避免把「每一镜 5 秒」误读成总时长。
+     */
+    static Integer totalSecondsFromPrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) return null;
+        java.util.regex.Matcher matcher = TOTAL_SECONDS.matcher(prompt);
+        if (!matcher.find()) return null;
+        try {
+            int seconds = Integer.parseInt(matcher.group(1));
+            return seconds >= 4 && seconds <= 3600 ? seconds : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    /** 「总时长 30 秒 / 全长30s / 时长：60秒 / 一共约 20 S」。 */
+    private static final java.util.regex.Pattern TOTAL_SECONDS = java.util.regex.Pattern.compile(
+            "(?:总时长|总长|全长|时长|一共|总共)\\s*(?:为|是|约|:|：)?\\s*(\\d{1,4})\\s*(?:秒|s|S)");
+
+    /** 只把有值的参数回给模型，避免一串 null 干扰它写说明。 */
+    private static Map<String, String> describeParams(StoryboardGenerationParams params) {
+        Map<String, String> applied = new LinkedHashMap<>();
+        if (params == null) return applied;
+        putIfPresent(applied, "videoModel", params.videoModel());
+        putIfPresent(applied, "videoResolution", params.videoResolution());
+        putIfPresent(applied, "aspectRatio", params.videoAspectRatio());
+        putIfPresent(applied, "imageModel", params.imageModel());
+        putIfPresent(applied, "imageSize", params.imageSize());
+        putIfPresent(applied, "imageQuality", params.imageQuality());
+        putIfPresent(applied, "imageN", params.imageN());
+        putIfPresent(applied, "targetDuration", params.targetDurationSeconds());
+        return applied;
+    }
+
+    /** requested_shot_count 可能是 "4" / "四" / 空；解析不出返回 0（按叙事节拍决定）。 */
+    private static int parseShotCount(Object raw) {
+        String text = raw == null ? "" : String.valueOf(raw).trim();
+        if (text.isEmpty()) return 0;
+        try {
+            return Math.max(0, Integer.parseInt(text));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
+    /**
+     * 会话素材兜底（图片优先，上限 {@link #AUTO_ASSET_LIMIT}），带语义标签。
+     *
+     * <p>模型漏传 {@code asset_ids} 是常态（历史上 47 次调用 0 次传过），而资产一旦没进
+     * {@link StoryboardProductionRequest#assets()}，伪分镜阶段的「可用资产」就是空的，
+     * 后续逐镜绑定与写库关联全是空转。这里把「会话里有素材」这个事实直接兑现成参数。
+     */
+    private List<SessionAssetRef> autoSessionAssets(String conversationId) {
+        try {
+            List<SessionAssetRef> refs = new ArrayList<>();
+            for (SessionAssetRef ref : sessionAssets.list(conversationId, "image", AUTO_ASSET_LIMIT)) {
+                if (ref == null || ref.assetId() == null || ref.assetId().isBlank()) continue;
+                if (refs.stream().anyMatch(existing -> ref.assetId().equals(existing.assetId()))) continue;
+                refs.add(ref);
+            }
+            return refs;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private static StoryboardCommitMode commitMode(Object value) {

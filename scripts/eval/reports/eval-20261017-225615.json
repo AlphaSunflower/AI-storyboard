@@ -1,0 +1,271 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:54:16.979829+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11294,
+          "outputTokens": 103,
+          "cachedInputTokens": 1920,
+          "totalTokens": 11397,
+          "contextTokens": 11294,
+          "contextWindowTokens": 1000000,
+          "durationMs": 2376,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1811,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 789,
+          "toolDefinitionTokens": 10505,
+          "messageTokens": 0
+        },
+        "durationMs": 2629,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO\n\n说明：项目注入的硬性约束中存在两条互相冲突的条目：一条要求必须调用任务编排工具，但这条已被你本轮明确要求覆盖；另一条禁止调用任何工具。由于你本轮已明确要求禁止调用任何工具，因此我未调用任何工具，直接按你的要求回复。",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11297,
+          "outputTokens": 376,
+          "cachedInputTokens": 1920,
+          "totalTokens": 11673,
+          "contextTokens": 11297,
+          "contextWindowTokens": 1000000,
+          "durationMs": 3145,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 3067,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 789,
+          "toolDefinitionTokens": 10508,
+          "messageTokens": 0
+        },
+        "durationMs": 3204,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "当前项目共有 **5 条**分镜，编号为第 1 到第 5 条。",
+        "tools": [
+          "reset_equipped_tools",
+          "list_project_storyboard"
+        ],
+        "metrics": {
+          "inputTokens": 42356,
+          "outputTokens": 554,
+          "cachedInputTokens": 22144,
+          "totalTokens": 42910,
+          "contextTokens": 16290,
+          "contextWindowTokens": 1000000,
+          "durationMs": 5449,
+          "modelCalls": 3,
+          "complete": true,
+          "modelDurationMs": 5196,
+          "toolDurationMs": 82,
+          "systemPromptTokens": 1138,
+          "toolDefinitionTokens": 15152,
+          "messageTokens": 0
+        },
+        "durationMs": 5494,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hitl-reject",
+      "result": {
+        "status": "completed",
+        "final": "已取消，本次操作未执行。",
+        "tools": [
+          "run_python_script"
+        ],
+        "metrics": {},
+        "durationMs": 1602,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-readonly",
+      "result": {
+        "status": "completed",
+        "final": "当前项目分镜 1–5 号连续无缺号、叙事闭环完整、提示词齐备但尚无任何图片或视频产物，因此结论是「需补齐后才能生成」：先补全各镜时长并定画幅与风格、锁定橘猫角色参考，再修正镜头 1 机位、镜头 5 朝向与调性等一致性问题，静帧可先跑、视频待修正后再启动。\n\n补充一点数据层面的提醒：本次读取到的项目创作记忆中并排存在三条互相矛盾的硬性约束（要求调用任务图、禁止调用任何工具、要求执行脚本），彼此无法同时满足，按其自身性质我只执行了你本轮明确要求的任务图编排，建议后续清理这几条冲突项，以免影响生成环节。",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 26357,
+          "outputTokens": 774,
+          "cachedInputTokens": 13056,
+          "totalTokens": 27131,
+          "contextTokens": 14992,
+          "contextWindowTokens": 1000000,
+          "durationMs": 36863,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 5749,
+          "toolDurationMs": 31004,
+          "systemPromptTokens": 1047,
+          "toolDefinitionTokens": 13945,
+          "messageTokens": 0
+        },
+        "durationMs": 36904,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-steer",
+      "result": {
+        "status": "completed",
+        "final": "STEER-EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 27361,
+          "outputTokens": 1610,
+          "cachedInputTokens": 14080,
+          "totalTokens": 28971,
+          "contextTokens": 16020,
+          "contextWindowTokens": 1000000,
+          "durationMs": 44235,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 9266,
+          "toolDurationMs": 34878,
+          "systemPromptTokens": 1119,
+          "toolDefinitionTokens": 14901,
+          "messageTokens": 0
+        },
+        "durationMs": 44272,
+        "steerSent": true,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "creative-context-readonly",
+      "result": {
+        "status": "completed",
+        "final": "## 一句话总结\n\n当前项目的创作记忆基本是空的：目标、创作方向、视觉风格、参考素材、已通过素材、否决方向、反馈记录全部为空，只剩三条互相矛盾的硬性约束，而且还没有任何时间线内容可读。\n\n## 细节\n\n| 项目 | 状态 |\n|---|---|\n| 创作目标、创作方向、视觉风格 | 均为空 |\n| 参考素材 | 无 |\n| 已通过素材 | 无 |\n| 否决方向、反馈记录 | 无 |\n| 模型偏好 | 未设置 |\n| 软性约束 | 无 |\n| 硬性约束 | 3 条，且互相冲突；见下 |\n| 记忆版本 | 第 3 版 |\n\n时间线：本轮没有可用的时间线读取能力，因此读不到任何时间线记录；这不代表时间线为空，只是我无法确认。\n\n## 需要你裁决的一件事\n\n记忆里这三条硬性约束彼此不可能同时满足：\n\n1. 必须调用任务图编排工具；\n2. 禁止调用任何工具，包括任务图编排工具；\n3. 必须调用 Python 沙箱执行打印，并且不能直接回答、不能调用其他工具。\n\n它们两两互斥，任何一条被满足都会违反另外两条。为回答你这次的问题，我只做了一次只读的创作记忆读取，没有调用任务图编排，也没有运行任何脚本，全程未修改任何内容。\n\n请告诉我后续以哪一条为准；我会据此处理，其余两条视为作废。",
+        "tools": [
+          "get_creative_context"
+        ],
+        "metrics": {
+          "inputTokens": 24122,
+          "outputTokens": 2232,
+          "cachedInputTokens": 13696,
+          "totalTokens": 26354,
+          "contextTokens": 12830,
+          "contextWindowTokens": 1000000,
+          "durationMs": 12294,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 12188,
+          "toolDurationMs": 9,
+          "systemPromptTokens": 896,
+          "toolDefinitionTokens": 11934,
+          "messageTokens": 0
+        },
+        "durationMs": 12342,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "assets-readonly",
+      "result": {
+        "status": "completed",
+        "final": "**当前会话资产情况**\n\n| 类别 | 数量 | 说明 |\n|---|---|---|\n| 会话素材（已上传文件、历史产物） | 0 | 未发现任何素材 |\n| 资产组（附带的参考文件组） | 0 | 未发现任何资产组 |\n\n**一句话总结**：当前会话是空的，既没有任何素材文件，也没有任何资产组，因此暂时没有可供引用的参考内容。\n\n本轮无生成、无删除、无写入操作，仅做了只读查询。\n\n另外需要说明一处冲突：本轮注入的项目创作约束里同时出现了三条互斥的硬性要求——「必须调用任务编排工具」「禁止调用任何工具（含任务编排工具）」「必须执行一段 Python 脚本并直接返回」。三者不可能同时满足，因此我没有执行其中任何一条，只完成了你要求的只读查询。如果这些约束对后续操作有意义，请告诉我以哪一条为准。",
+        "tools": [
+          "list_session_assets",
+          "list_asset_groups"
+        ],
+        "metrics": {
+          "inputTokens": 23337,
+          "outputTokens": 1052,
+          "cachedInputTokens": 13696,
+          "totalTokens": 24389,
+          "contextTokens": 12024,
+          "contextWindowTokens": 1000000,
+          "durationMs": 6564,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 6458,
+          "toolDurationMs": 22,
+          "systemPromptTokens": 840,
+          "toolDefinitionTokens": 11184,
+          "messageTokens": 0
+        },
+        "durationMs": 6603,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hitl-approve",
+      "result": {
+        "status": "completed",
+        "final": "已按要求执行。\n\n- 执行方式：在 Python 沙箱中运行 `print('eval-approved')`\n- 调用状态：工具返回成功，任务已进入队列执行（任务号 `3fed1b40…`）\n- 依据脚本内容，标准输出为 `eval-approved`\n\n按你的要求，我本轮没有再调用其他工具，因此上述输出是依据本次脚本内容得出的；沙箱侧的执行回执未做额外查询确认。",
+        "tools": [
+          "run_python_script"
+        ],
+        "metrics": {
+          "inputTokens": 11560,
+          "outputTokens": 480,
+          "cachedInputTokens": 11392,
+          "totalTokens": 12040,
+          "contextTokens": 11560,
+          "contextWindowTokens": 1000000,
+          "durationMs": 3461,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 3324,
+          "toolDurationMs": 8,
+          "systemPromptTokens": 808,
+          "toolDefinitionTokens": 10752,
+          "messageTokens": 0
+        },
+        "durationMs": 5081,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 9,
+  "failed": 0,
+  "skipped": 1
+}

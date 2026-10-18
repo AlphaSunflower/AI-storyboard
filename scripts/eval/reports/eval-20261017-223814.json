@@ -1,0 +1,207 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:36:45.625464+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11769,
+          "outputTokens": 190,
+          "cachedInputTokens": 1152,
+          "totalTokens": 11959,
+          "contextTokens": 11769,
+          "contextWindowTokens": 1000000,
+          "durationMs": 2380,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 2305,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 822,
+          "toolDefinitionTokens": 10947,
+          "messageTokens": 0
+        },
+        "durationMs": 2410,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11772,
+          "outputTokens": 160,
+          "cachedInputTokens": 2688,
+          "totalTokens": 11932,
+          "contextTokens": 11772,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1752,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1694,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 822,
+          "toolDefinitionTokens": 10950,
+          "messageTokens": 0
+        },
+        "durationMs": 1797,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "无法完成这次读取，也不会用推测内容代替。\n\n**情况说明**\n\n- 当前会话里没有 `list_project_storyboard` 这个可用能力。你现在处于画布编辑模式，分镜相关的技能与工具在这种模式下不会加载，因此我无法调用它，也就没有任何分镜内容可读——我不会凭猜测写一句总结。\n- 你要求的三条限制我都没有越过：没有执行 shell 或 Python，没有生成任何图片或视频，也没有用其他工具替代读取。\n\n**另外有一处需要你裁决**：本轮项目注入里同时存在两条互相冲突的硬性约束——一条要求必须调用任务编排工具 `run_task_graph`，另一条禁止调用任何工具（含 `run_task_graph`）——两者无法同时满足，我不会自行取舍。\n\n**下一步可选**：\n\n1. 通过 `/` 菜单退出画布模式，进入分镜模式后重发这句话，我就能按要求只做读取并给出一句话总结；\n2. 或者你明确授权我用当前可用的其他读取途径（如项目创作记忆）去看分镜相关内容；\n3. 或者你给出这两条冲突约束的优先级，我按你的裁决继续。\n\n你希望走哪一种？",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11757,
+          "outputTokens": 1461,
+          "cachedInputTokens": 2048,
+          "totalTokens": 13218,
+          "contextTokens": 11757,
+          "contextWindowTokens": 1000000,
+          "durationMs": 7495,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 7429,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 821,
+          "toolDefinitionTokens": 10936,
+          "messageTokens": 0
+        },
+        "durationMs": 7540,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hitl-reject",
+      "result": {
+        "status": "completed",
+        "final": "已取消，本次操作未执行。",
+        "tools": [
+          "run_python_script"
+        ],
+        "metrics": {},
+        "durationMs": 2435,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-readonly",
+      "result": {
+        "status": "completed",
+        "final": "**一句话结论：** 当前项目已有 5 个镜头完整的分镜（1–5 号镜头连续、题材为夕阳屋顶上的橘猫治愈短片，图像与视频均为 0 生成、无任何参考资产），内容层面适合继续生成，但有条件——需要先补齐每镜时长与成片总时长、明确第 5 镜字幕「温柔常在」的处理方式、补一条猫形象与项目风格的锁定标准，属于「有条件继续生成」。\n\n另需你裁决一点：项目创意记忆里同时存在两条互相排斥的硬约束——「必须调用 run_task_graph」与「禁止调用任何工具（包括 run_task_graph）」。本轮我按你的明确要求执行了前者；请确认保留哪一条、作废哪一条，以免后续生成步骤卡在冲突上。",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 27150,
+          "outputTokens": 1505,
+          "cachedInputTokens": 14848,
+          "totalTokens": 28655,
+          "contextTokens": 15351,
+          "contextWindowTokens": 1000000,
+          "durationMs": 32581,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 9034,
+          "toolDurationMs": 23453,
+          "systemPromptTokens": 1072,
+          "toolDefinitionTokens": 14279,
+          "messageTokens": 0
+        },
+        "durationMs": 32624,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-steer",
+      "result": {
+        "status": "completed",
+        "final": "STEER-EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 27510,
+          "outputTokens": 1668,
+          "cachedInputTokens": 16128,
+          "totalTokens": 29178,
+          "contextTokens": 15726,
+          "contextWindowTokens": 1000000,
+          "durationMs": 33446,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 9417,
+          "toolDurationMs": 23937,
+          "systemPromptTokens": 1099,
+          "toolDefinitionTokens": 14627,
+          "messageTokens": 0
+        },
+        "durationMs": 33488,
+        "steerSent": true,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "canvas-readonly",
+      "result": {
+        "status": "completed",
+        "final": "## 当前画布状态\n\n画布是**完全空的**，画布名称为空，当前画布即为本会话绑定的那张画布。\n\n| 项目 | 状态 |\n|---|---|\n| 节点数量 | 0 |\n| 连线数量 | 0 |\n| 版本号 | 0（从未保存过变更，也没有更新记录） |\n| 画布进度 | 20% |\n\n图结构里的节点列表、连线列表和生成记录都是空的；视口处于默认缩放与居中位置。因此目前没有任何素材节点、生成节点、结果槽或依赖链可供总结。\n\n本轮我只做读取，没有新建或修改任何节点与连线，也没有改动任何节点的属性或位置。\n\n## 需要向你说明的一点\n\n项目上下文中携带了两条互相排斥的“硬约束”，一条要求必须调用任务编排工具，另一条禁止调用任何工具，其中也包括该编排工具。这两条约束无法同时成立，按规则它们不应由我单方面取舍；我在本轮把它们作为数据看待，并按你本轮的明确指令执行：只读取，不做任何写操作。如果你确实需要进入某个特定流程，请单独说明以哪条为准。\n\n需要我在这张空画布上搭建工作流吗？告诉我目标（例如「一张底图 → 图生视频」），我可以一次性把节点、结果槽、连线与布局建好。",
+        "tools": [
+          "reset_equipped_tools",
+          "load_skill_through_path",
+          "canvas_graph_get_state"
+        ],
+        "metrics": {
+          "inputTokens": 66714,
+          "outputTokens": 1194,
+          "cachedInputTokens": 34176,
+          "totalTokens": 67908,
+          "contextTokens": 29505,
+          "contextWindowTokens": 1000000,
+          "durationMs": 8629,
+          "modelCalls": 3,
+          "complete": true,
+          "modelDurationMs": 8396,
+          "toolDurationMs": 213,
+          "systemPromptTokens": 1585,
+          "toolDefinitionTokens": 21105,
+          "messageTokens": 6815
+        },
+        "durationMs": 8683,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 7,
+  "failed": 0,
+  "skipped": 0
+}

@@ -1,0 +1,66 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:22:51.805177+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11220,
+          "outputTokens": 5,
+          "cachedInputTokens": 1792,
+          "totalTokens": 11225,
+          "contextTokens": 11220,
+          "contextWindowTokens": 1000000,
+          "durationMs": 974,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 893,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 784,
+          "toolDefinitionTokens": 10436,
+          "messageTokens": 0
+        },
+        "durationMs": 1022
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "当前项目共有 5 个分镜，累计 5 个镜头全部处于图片、视频待生成状态，时长均未设定。\n\n一句话总结：这是一组以夕阳屋顶上的橘猫为主角的写实治愈短片分镜。镜头从远景屋顶剪影缓慢推近到毛发特写，再拉远看暮色入睡，共 5 镜，景别与运镜各不相同，旁白是“温柔的傍晚属于它”“世界安静下来”“它看见了光”，字幕是“温柔常在”，目前所有镜头都还没有图片和视频。",
+        "tools": [
+          "load_skill_through_path",
+          "reset_equipped_tools",
+          "list_project_storyboard"
+        ],
+        "metrics": {
+          "inputTokens": 59447,
+          "outputTokens": 360,
+          "cachedInputTokens": 35200,
+          "totalTokens": 59807,
+          "contextTokens": 18081,
+          "contextWindowTokens": 1000000,
+          "durationMs": 4701,
+          "modelCalls": 4,
+          "complete": true,
+          "modelDurationMs": 4452,
+          "toolDurationMs": 102,
+          "systemPromptTokens": 1263,
+          "toolDefinitionTokens": 16818,
+          "messageTokens": 0
+        },
+        "durationMs": 4748
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 2,
+  "failed": 0
+}

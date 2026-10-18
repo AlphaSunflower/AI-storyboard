@@ -30,10 +30,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class TurnCapabilityReporter {
 
-    /** 画布设计/执行能力的探测标记：任一缺失即视为该能力组不可用。 */
-    private static final List<String> CANVAS_MARKERS = List.of(
-            "canvas_graph_get_state",
-            "canvas_graph_layout_graph");
+    /** 画布设计/执行能力的探测标记：与 Toolkit 共用同一份口径。 */
+    private static final List<String> CANVAS_MARKERS = ToolCatalog.CANVAS_PROBE_TOOLS;
 
     private final ToolAvailability tools;
     private final AgentScopeProperties properties;

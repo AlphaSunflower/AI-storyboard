@@ -1718,7 +1718,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     {!isUser && canvasRunMeta && (
       <CanvasRunCard metadata={canvasRunMeta} conversationId={conversationId} />
     )}
-    <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
+    <div ref={bubbleRef} data-turn-id={metadata?.turnId || undefined} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       {/* 助手消息：正文上方渲染推理面板（实时/已思考） */}
       {!isUser && (metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
         <ReasoningPanel reasoning={metadata?.reasoning} agentTrace={metadata?.agentTrace} streaming={streaming} />

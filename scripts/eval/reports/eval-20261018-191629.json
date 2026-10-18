@@ -1,0 +1,67 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-18T11:16:26.437682+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11577,
+          "outputTokens": 236,
+          "cachedInputTokens": 2048,
+          "totalTokens": 11813,
+          "contextTokens": 11577,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1941,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1871,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 805,
+          "toolDefinitionTokens": 10772,
+          "messageTokens": 0
+        },
+        "durationMs": 1987,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11580,
+          "outputTokens": 37,
+          "cachedInputTokens": 2048,
+          "totalTokens": 11617,
+          "contextTokens": 11580,
+          "contextWindowTokens": 1000000,
+          "durationMs": 900,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 838,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 805,
+          "toolDefinitionTokens": 10775,
+          "messageTokens": 0
+        },
+        "durationMs": 933,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 2,
+  "failed": 0,
+  "skipped": 0
+}

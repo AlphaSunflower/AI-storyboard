@@ -96,6 +96,7 @@ public class InternalApiServiceImpl implements InternalApiService {
             prompt.setImagePrompt(s.imagePrompt());
             prompt.setVideoPrompt(s.videoPrompt());
             prompt.setNegativePrompt(s.negativePrompt());
+            prompt.setContinuityNote(s.continuityNote());
             prompt.setCameraMovement(s.cameraMovement());
             prompt.setShotType(s.shotType());
             prompt.setSoundDesign(s.soundDesign());
@@ -307,6 +308,7 @@ public class InternalApiServiceImpl implements InternalApiService {
         if (s.imagePrompt() != null) prompt.setImagePrompt(s.imagePrompt());
         if (s.videoPrompt() != null) prompt.setVideoPrompt(s.videoPrompt());
         if (s.negativePrompt() != null) prompt.setNegativePrompt(s.negativePrompt());
+        if (s.continuityNote() != null) prompt.setContinuityNote(s.continuityNote());
         if (s.cameraMovement() != null) prompt.setCameraMovement(s.cameraMovement());
         if (s.shotType() != null) prompt.setShotType(s.shotType());
         if (s.soundDesign() != null) prompt.setSoundDesign(s.soundDesign());
@@ -365,7 +367,8 @@ public class InternalApiServiceImpl implements InternalApiService {
             normalized.add(new SceneFull(
                     id, projectId, source.conversationId(), startSceneNumber + index,
                     source.scriptContent(), source.imagePrompt(), source.videoPrompt(),
-                    source.negativePrompt(), source.cameraMovement(), source.shotType(),
+                    source.negativePrompt(), source.continuityNote(),
+                    source.cameraMovement(), source.shotType(),
                     source.soundDesign(), source.aiModel(), source.videoResolution(),
                     source.duration(), source.imageUrl(), source.videoUrl(),
                     source.imageStatus(), source.videoStatus(), source.imageTaskId(),
@@ -405,6 +408,7 @@ public class InternalApiServiceImpl implements InternalApiService {
             p != null ? p.getImagePrompt() : null,
             p != null ? p.getVideoPrompt() : null,
             p != null ? p.getNegativePrompt() : null,
+            p != null ? p.getContinuityNote() : null,
             p != null ? p.getCameraMovement() : null,
             p != null ? p.getShotType() : null,
             p != null ? p.getSoundDesign() : null,

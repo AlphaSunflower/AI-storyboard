@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent;
 
 import com.moon.moonagent.dto.request.AgentAttachmentRequest;
 import com.moon.moonagent.dto.request.AgentReferenceRequest;
+import com.moon.moonagent.dto.response.AgentSteerResponse;
 import com.moon.moonagent.dto.response.MessagePageVO;
 import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.entity.AgentConversation;
@@ -173,6 +174,17 @@ public interface AgentChatService {
      * @return true（命中断开请求；无论是否有活跃编排均安全返回）
      */
     boolean interrupt(String userId, String conversationId);
+
+    /**
+     * 回合中插入一条用户消息（steer）：消息落库、走同一 turn 的有序事件通道，并在下一个
+     * 模型步骤注入；不打断正在执行的工具。回合已结束时返回 {@code not_running}，
+     * 由前端改走普通发送（自动开新一轮）。
+     */
+    AgentSteerResponse steerTurn(String userId,
+                                 String conversationId,
+                                 String turnId,
+                                 String content,
+                                 String clientMessageId);
 
     /**
      * AgentScope native turn stream. Emits sequenced `turn_started`, `agent_event`,

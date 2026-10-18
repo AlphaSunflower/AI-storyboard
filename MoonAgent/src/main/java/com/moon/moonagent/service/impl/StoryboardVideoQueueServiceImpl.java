@@ -3,6 +3,7 @@ package com.moon.moonagent.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.video.ReferenceImage;
 import com.moon.moonagent.ai.video.ReferenceImageRole;
+import com.moon.moonagent.ai.storyboard.production.StoryboardPromptAssembly;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueItem;
 import com.moon.moonagent.dto.request.StoryboardVideoEnqueueRequest;
@@ -243,6 +244,10 @@ public class StoryboardVideoQueueServiceImpl implements StoryboardVideoQueueServ
             prompt = scene != null && scene.getVideoPrompt() != null && !scene.getVideoPrompt().isBlank()
                     ? scene.getVideoPrompt() : (scene != null && scene.getScriptContent() != null && !scene.getScriptContent().isBlank()
                     ? scene.getScriptContent() : "分镜视频生成");
+        }
+        // 衔接说明（继承项/禁改项）在送进模型前合并，保证跨镜承接不断
+        if (scene != null) {
+            prompt = StoryboardPromptAssembly.withContinuity(prompt, scene.getContinuityNote());
         }
 
         // 参考图：分镜已生成图作首帧 + 场景关联「视频用途」资产图 + 用户上传参考图

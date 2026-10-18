@@ -35,6 +35,15 @@ public final class AgentScopeTurnState {
     private ReferenceInputMode referenceInputMode = ReferenceInputMode.NONE;
     private final Map<String, Integer> preflightFailures = new HashMap<>();
     private final Set<String> deliveredAssetIds = new LinkedHashSet<>();
+    private boolean synchronousGraphCalled;
+
+    synchronized void markSynchronousGraphCalled() {
+        synchronousGraphCalled = true;
+    }
+
+    synchronized boolean hasSynchronousGraphCalled() {
+        return synchronousGraphCalled;
+    }
 
     public synchronized void addDeliveredAsset(String assetId) {
         if (assetId == null || assetId.isBlank()) return;

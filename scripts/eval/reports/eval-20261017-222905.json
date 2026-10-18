@@ -1,0 +1,214 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:27:35.703768+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11730,
+          "outputTokens": 5,
+          "cachedInputTokens": 2688,
+          "totalTokens": 11735,
+          "contextTokens": 11730,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1183,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1122,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 819,
+          "toolDefinitionTokens": 10911,
+          "messageTokens": 0
+        },
+        "durationMs": 1222,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11732,
+          "outputTokens": 7,
+          "cachedInputTokens": 2688,
+          "totalTokens": 11739,
+          "contextTokens": 11732,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1202,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1152,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 820,
+          "toolDefinitionTokens": 10912,
+          "messageTokens": 0
+        },
+        "durationMs": 1227,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "我按你的要求只做了读取，没有执行 shell 或 Python，也没有生成任何图片或视频；但分镜读取未能完成。\n\n**结果**：分镜工具在当前画布编辑模式下不加载，调用直接返回失败（提示为“画布编辑模式下不加载分镜工具，也无法生成或修改分镜”），因此没有任何分镜内容可读，我也不会凭猜测补写。\n\n**一句话总结**：当前处于画布编辑模式，分镜工具不可用，未能读到本项目的任何分镜内容，需通过 `/` 菜单退出画布模式后再读取。\n\n如果你确实只想确认分镜现状，退出画布模式后重试即可；如果希望留在画布模式，我可以改用画布节点信息来查看现有的分镜相关节点。",
+        "tools": [
+          "run_task_graph",
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 38522,
+          "outputTokens": 1716,
+          "cachedInputTokens": 28800,
+          "totalTokens": 40238,
+          "contextTokens": 13727,
+          "contextWindowTokens": 1000000,
+          "durationMs": 12857,
+          "modelCalls": 3,
+          "complete": true,
+          "modelDurationMs": 9912,
+          "toolDurationMs": 2834,
+          "systemPromptTokens": 959,
+          "toolDefinitionTokens": 12768,
+          "messageTokens": 0
+        },
+        "durationMs": 12887,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [
+        "出现了禁止工具 run_task_graph"
+      ],
+      "passed": false
+    },
+    {
+      "name": "hitl-reject",
+      "result": {
+        "status": "completed",
+        "final": "已取消，本次操作未执行。",
+        "tools": [
+          "run_python_script",
+          "run_task_graph"
+        ],
+        "metrics": {},
+        "durationMs": 6521,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-readonly",
+      "result": {
+        "status": "completed",
+        "final": "**一句话结论：** 项目现有 5 个分镜提示词已就绪、叙事骨架可用，但镜头长度全部为空、参考素材为零，且场景 1 的机位写法互相矛盾、场景 5 的字幕与负面提示词冲突，**目前不适合直接进入生成**，需先补齐时长与角色参考图并修正两处冲突。\n\n补充要点（供你决定优先级）：\n\n- 5 场均为提示词就绪、图片/视频状态全部待生成，无任何已绑定或已批准素材。\n- 阻断项：场景 1 同时出现「远景固定」「缓慢推近」「航拍下降」三种机位；5 场时长均为空；无橘猫角色参考图，跨镜一致性无保障。\n- 待修补项：场景 5 需要字幕，但共用的负面提示词排除了文字；场景 5 单镜内包含日落到月升等多个时间跨度事件，建议拆分。\n- 流程限制：当前处于画布编辑模式，分镜类工具不加载，若要在分镜层面改稿，需通过 / 菜单退出画布模式。",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 26120,
+          "outputTokens": 601,
+          "cachedInputTokens": 14720,
+          "totalTokens": 26721,
+          "contextTokens": 14349,
+          "contextWindowTokens": 1000000,
+          "durationMs": 31131,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 3848,
+          "toolDurationMs": 27203,
+          "systemPromptTokens": 1002,
+          "toolDefinitionTokens": 13347,
+          "messageTokens": 0
+        },
+        "durationMs": 31160,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-steer",
+      "result": {
+        "status": "completed",
+        "final": "STEER-EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 25765,
+          "outputTokens": 471,
+          "cachedInputTokens": 14848,
+          "totalTokens": 26236,
+          "contextTokens": 13994,
+          "contextWindowTokens": 1000000,
+          "durationMs": 21492,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 3377,
+          "toolDurationMs": 18018,
+          "systemPromptTokens": 978,
+          "toolDefinitionTokens": 13016,
+          "messageTokens": 0
+        },
+        "durationMs": 21535,
+        "steerSent": true,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "canvas-readonly",
+      "result": {
+        "status": "completed",
+        "final": "当前画布是**空白状态**：没有任何节点或连线，也没有任何生成记录。本轮我只进行了读取，没有创建或修改任何内容。\n\n| 项目 | 实际值 |\n|---|---|\n| 节点数量 | 0 |\n| 连线数量 | 0 |\n| 画布版本 | 0（从未落库变更） |\n| 最后更新时间 | 数据未提供（为空） |\n| 生成记录 | 0 条 |\n| 视口 | 缩放 100%，偏移 (0, 0) |\n\n补充说明两点：\n\n- 画布里没有任何素材、提示词或执行结果可供复用，所以下面不存在可总结的链路结构。\n- 服务端返回的进度字段值为 20，但该字段的具体含义在返回数据里没有说明，我无法据此判断它代表什么，不做推测。\n\n如果你想在这张空画布上搭点什么（比如一条「参考图 → 图生视频 → 结果」的链路，或某个分镜的生成流程），告诉我目标，我直接把节点、结果槽和连线一次建好。",
+        "tools": [
+          "reset_equipped_tools",
+          "load_skill_through_path",
+          "canvas_graph_get_state",
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 101562,
+          "outputTokens": 1907,
+          "cachedInputTokens": 68352,
+          "totalTokens": 103469,
+          "contextTokens": 30592,
+          "contextWindowTokens": 1000000,
+          "durationMs": 14490,
+          "modelCalls": 4,
+          "complete": true,
+          "modelDurationMs": 11901,
+          "toolDurationMs": 2454,
+          "systemPromptTokens": 1585,
+          "toolDefinitionTokens": 21105,
+          "messageTokens": 7902
+        },
+        "durationMs": 14539,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 6,
+  "failed": 1,
+  "skipped": 0
+}

@@ -90,6 +90,11 @@ public final class AgentTurnEventPublisher implements Consumer<AgentEvent>, Auto
         write(List.of(new AgentTurnEventStore.EventDraft(type, payload)));
     }
 
+    /** 是否仍可写入；回合收尾后返回 false，用于 steer 的 fail-fast。 */
+    public synchronized boolean isOpen() {
+        return !closed && failure == null;
+    }
+
     /**
      * 发布一个已经构造好的 turn 事件（生命周期与结构事件，例如 turn_started、turn_paused、
      * turn_completed、turn_failed、canvas_*）。

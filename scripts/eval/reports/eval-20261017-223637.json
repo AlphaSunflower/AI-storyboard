@@ -1,0 +1,67 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:36:32.437963+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11309,
+          "outputTokens": 204,
+          "cachedInputTokens": 1152,
+          "totalTokens": 11513,
+          "contextTokens": 11309,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1937,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1868,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 790,
+          "toolDefinitionTokens": 10519,
+          "messageTokens": 0
+        },
+        "durationMs": 1999,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO\n\n补充说明：本轮项目上下文里同时存在两条互相冲突的硬约束（一条要求必须调用任务编排工具，另一条要求禁止调用任何工具）。我按约束清单中生效的「禁止调用任何工具」执行，同时这也与你的当轮指令一致，因此没有调用任何工具。如果实际需要我执行编排任务，请明确告诉我，我再开始。",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11288,
+          "outputTokens": 328,
+          "cachedInputTokens": 1920,
+          "totalTokens": 11616,
+          "contextTokens": 11288,
+          "contextWindowTokens": 1000000,
+          "durationMs": 2644,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 2577,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 789,
+          "toolDefinitionTokens": 10499,
+          "messageTokens": 0
+        },
+        "durationMs": 2689,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 2,
+  "failed": 0,
+  "skipped": 0
+}

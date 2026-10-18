@@ -25,4 +25,13 @@ public interface StoryboardRunStore {
         if (records == null) return;
         records.forEach(this::upsertShot);
     }
+
+    /** 追加字段级改动日志（变更审阅数据源）。默认空实现，测试假件只需关心主线行为。 */
+    default void appendChanges(List<StoryboardChangeLog.ShotChange> changes) {
+    }
+
+    /** 按时间正序读改动日志。默认空列表。 */
+    default List<StoryboardChangeLog.ShotChange> listChanges(String runId) {
+        return List.of();
+    }
 }

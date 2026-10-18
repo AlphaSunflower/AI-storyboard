@@ -67,61 +67,6 @@ public class AgentScopeToolPipeline {
     /** 非 Map 工具结果在管线内部传递时使用的装箱键，只在 {@link #rawResult} 拆箱，绝不外泄到模型。 */
     private static final String RAW_RESULT_KEY = "__moonRawToolResult";
 
-    private static final Map<String, ToolPolicy> POLICIES = Map.ofEntries(
-            Map.entry(AgentScopeImageTools.GENERATE_IMAGE,
-                    new ToolPolicy("MEDIA_IMAGE", "media-image", true, false)),
-            Map.entry(AgentScopeImageTools.GENERATE_IMAGE_BATCH,
-                    new ToolPolicy("MEDIA_IMAGE_BATCH", "media-image-batch", true, false)),
-            Map.entry(AgentScopeVideoTools.GENERATE_VIDEO,
-                    new ToolPolicy("MEDIA_VIDEO", "media-video", true, false)),
-            Map.entry(AgentScopeStoryboardTools.START_STORYBOARD,
-                    new ToolPolicy("LONG_TOOL", "storyboard-start", false, false)),
-            Map.entry(AgentScopeStoryboardTools.REVISE_STORYBOARD,
-                    new ToolPolicy("STORYBOARD_WRITE", "storyboard-revise", false, false)),
-            Map.entry(AgentScopeStoryboardTools.APPROVE_STORYBOARD,
-                    new ToolPolicy("LONG_TOOL", "storyboard-approve", false, false)),
-            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGE,
-                    new ToolPolicy("MEDIA_IMAGE", "storyboard-image", false, false)),
-            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEO,
-                    new ToolPolicy("MEDIA_VIDEO", "storyboard-video", false, false)),
-            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_VIDEOS,
-                    new ToolPolicy("MEDIA_VIDEO_BATCH", "storyboard-video-batch", false, false)),
-            Map.entry(AgentScopeStoryboardTools.UPSERT_STORYBOARD_SHOT,
-                    new ToolPolicy("STORYBOARD_WRITE", "", false, false)),
-            Map.entry(AgentScopeStoryboardTools.LIST_STORYBOARD_DRAFT,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry(AgentScopeStoryboardTools.LIST_PROJECT_STORYBOARD,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry(AgentScopeStoryboardTools.UPDATE_PROJECT_STORYBOARD_SHOT,
-                    new ToolPolicy("STORYBOARD_WRITE", "", false, false)),
-            Map.entry(AgentScopeStoryboardTools.DELETE_STORYBOARD_DRAFT_SHOT,
-                    new ToolPolicy("STORYBOARD_WRITE", "storyboard-draft-delete", false, false)),
-            Map.entry(AgentScopeStoryboardTools.REORDER_STORYBOARD_DRAFT,
-                    new ToolPolicy("STORYBOARD_WRITE", "storyboard-draft-reorder", false, false)),
-            Map.entry(AgentScopeStoryboardTools.DELETE_PROJECT_STORYBOARD_SHOT,
-                    new ToolPolicy("STORYBOARD_DELETE", "storyboard-project-delete", false, false)),
-            Map.entry(AgentScopeStoryboardTools.CLEAR_PROJECT_STORYBOARD,
-                    new ToolPolicy("STORYBOARD_DELETE", "storyboard-project-clear", false, false)),
-            Map.entry(AgentScopeStoryboardTools.GENERATE_STORYBOARD_IMAGES,
-                    new ToolPolicy("MEDIA_IMAGE_BATCH", "storyboard-image-batch", false, false)),
-            Map.entry(AgentScopeVideoMergeTools.MERGE_STORYBOARD_VIDEOS,
-                    new ToolPolicy("MEDIA_VIDEO", "storyboard-video-merge", false, false)),
-            Map.entry(AgentScopeCreativeTools.GET_CONTEXT,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry(AgentScopeCreativeTools.UPDATE_CONTEXT,
-                    new ToolPolicy("CREATIVE_CONTEXT_WRITE", "", false, false)),
-            Map.entry(AgentScopeCreativeTools.EXTRACT_CONSTRAINTS,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry(AgentScopeCreativeTools.REVIEW_MEDIA,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry(AgentScopeCreativeTools.LIST_CRITIQUES,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry(AgentScopeCreativeTools.SAVE_TIMELINE,
-                    new ToolPolicy("TIMELINE_WRITE", "", false, false)),
-            Map.entry(AgentScopeCreativeTools.GET_TIMELINE,
-                    new ToolPolicy("READ", "", false, true)),
-            Map.entry("refineImage",
-                    new ToolPolicy("MEDIA_IMAGE", "", false, false)));
 
     private final ToolInvocationLedger ledger;
     private final ToolExecutionTemplate executionTemplate;
@@ -345,8 +290,9 @@ public class AgentScopeToolPipeline {
     }
 
     private static ToolPolicy policy(String toolName, boolean readOnly) {
-        return POLICIES.getOrDefault(toolName,
-                new ToolPolicy(readOnly ? "READ" : "WRITE", "", false, readOnly));
+        return ToolCatalog.policy(toolName)
+                .orElseGet(() -> new ToolPolicy(
+                        readOnly ? "READ" : "WRITE", "", false, readOnly));
     }
 
     private java.util.Set<String> preflightFor(AgentScopeTool tool) {
@@ -407,13 +353,6 @@ public class AgentScopeToolPipeline {
         return "";
     }
 
-    private record ToolPolicy(
-            String toolKind,
-            String actionType,
-            boolean preflight,
-            boolean readOnly
-    ) {
-    }
 
     record ToolBaseResult(Object value, Object auditValue) {
     }

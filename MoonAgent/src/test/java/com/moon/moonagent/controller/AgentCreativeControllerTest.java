@@ -8,6 +8,7 @@ import com.moon.moonagent.ai.agent.creative.CreativeMode;
 import com.moon.moonagent.ai.agent.creative.CreativeRunService;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContext;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
+import com.moon.moonagent.ai.agent.memory.AgentMemoryService;
 import com.moon.moonagent.dto.request.CreativeContextUpdateRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.Authentication;
@@ -34,7 +35,8 @@ class AgentCreativeControllerTest {
         when(contexts.get("u1", "p1")).thenReturn(context);
         when(contexts.patch(eq("u1"), eq("p1"), any())).thenReturn(context);
         AgentCreativeController controller = new AgentCreativeController(
-                contexts, mock(CreativeRunService.class), mock(CreativeCritiqueService.class),
+                contexts, mock(AgentMemoryService.class),
+                mock(CreativeRunService.class), mock(CreativeCritiqueService.class),
                 mock(AgentChatService.class), new AgentAiConfigProperties());
         Authentication auth = mock(Authentication.class);
         when(auth.getName()).thenReturn("u1");
@@ -58,7 +60,7 @@ class AgentCreativeControllerTest {
                 .thenReturn(new CreativeRunService.RepairTarget(
                         "c1", "repair prompt", List.of("/bad.png")));
         AgentCreativeController controller = new AgentCreativeController(
-                mock(ProjectCreativeContextService.class), runs,
+                mock(ProjectCreativeContextService.class), mock(AgentMemoryService.class), runs,
                 mock(CreativeCritiqueService.class), chat, new AgentAiConfigProperties());
         Authentication auth = mock(Authentication.class);
         when(auth.getName()).thenReturn("u1");

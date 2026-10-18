@@ -1,0 +1,182 @@
+{
+  "project": "日式单层平屋三镜",
+  "version": "2026-10-18-range",
+  "fps": 25,
+  "durationSeconds": 14,
+  "totalFrames": 350,
+  "renderFrames": 358,
+  "handleFrames": 8,
+  "aspectRatio": "16:9",
+  "resolution": "1920x1080",
+  "colorTemperatureK": 5600,
+  "sensorHeightMm": 20.25,
+  "focalLengthMm": 28,
+  "aperture": 5.6,
+  "shutter": "1/50s",
+  "door": {
+    "heightM": 1.8,
+    "widthM": 1.2,
+    "centerX": 0
+  },
+  "house": {
+    "facadeZ": 5.0,
+    "eaveZ": 1.2857,
+    "eaveHeightM": 2.8,
+    "ridgeHeightM": 5.2,
+    "ridgeZ": 3.0,
+    "ridgeInFrame": false
+  },
+  "axisSpeedMps": 0.142857,
+  "foreground": [
+    {
+      "id": "maple",
+      "x": -0.93,
+      "z": 4.0,
+      "canopyM": 2.4,
+      "topM": 3.4,
+      "frameWidthRatioAtShot1": 0.18,
+      "frameWidthRatioRange": [
+        0.15,
+        0.2
+      ],
+      "zRange": [
+        3.5,
+        4.5
+      ]
+    },
+    {
+      "id": "bamboo-fence",
+      "x": 0.69,
+      "z": 4.5,
+      "heightM": 1.8,
+      "lengthM": 2.4,
+      "frameWidthRatioAtShot1": 0.12,
+      "frameWidthRatioRange": [
+        0.1,
+        0.15
+      ],
+      "zRange": [
+        4.0,
+        5.0
+      ]
+    }
+  ],
+  "lighting": {
+    "keyRatio": 2.5,
+    "tolerance": 0.2
+  },
+  "shots": [
+    {
+      "id": 1,
+      "startFrame": 1,
+      "endFrame": 100,
+      "durationSeconds": 4,
+      "startZ": 0.0,
+      "endZ": 0.5714,
+      "startY": 1.2,
+      "endY": 1.2,
+      "yawDeg": 0,
+      "pitchDeg": 1,
+      "rollDeg": 0,
+      "doorHeightRatioStart": 0.498,
+      "doorHeightRatioEnd": 0.562,
+      "movement": "dolly-in",
+      "description": "大远景推至全景；檐外，距檐口 1.286m",
+      "doorDistanceM": 4.4286,
+      "doorDistanceStartM": 5.0,
+      "doorDistanceEndM": 4.4286,
+      "pitchDegRange": [
+        0.5,
+        1.5
+      ],
+      "endYRange": [
+        1.2,
+        1.2
+      ]
+    },
+    {
+      "id": 2,
+      "startFrame": 101,
+      "endFrame": 225,
+      "durationSeconds": 5,
+      "startZ": 0.5714,
+      "endZ": 1.2857,
+      "startY": 1.2,
+      "endY": 1.2,
+      "yawDeg": 0,
+      "pitchDeg": 1,
+      "rollDeg": 0,
+      "doorHeightRatioStart": 0.562,
+      "doorHeightRatioEnd": 0.67,
+      "movement": "dolly-in",
+      "description": "全景推至中景；终点在檐口正下方，入檐下土間前，不穿门",
+      "doorDistanceM": 3.7143,
+      "doorDistanceStartM": 4.4286,
+      "doorDistanceEndM": 3.7143,
+      "pitchDegRange": [
+        0.5,
+        1.5
+      ],
+      "endYRange": [
+        1.2,
+        1.2
+      ]
+    },
+    {
+      "id": 3,
+      "startFrame": 226,
+      "endFrame": 350,
+      "durationSeconds": 5,
+      "startZ": 1.2857,
+      "endZ": 2.0,
+      "startY": 1.2,
+      "endY": 1.35,
+      "yawDeg": 0,
+      "pitchDeg": -5.5,
+      "rollDeg": 0,
+      "doorHeightRatioStart": 0.67,
+      "doorHeightRatioEnd": 0.83,
+      "movement": "dolly-in + pedestal-up",
+      "description": "中景升至立面近景；屋脊不入画，末帧门洞占高 0.83",
+      "doorDistanceM": 3.0,
+      "riseM": 0.15,
+      "riseSpeedMps": 0.03,
+      "pitchStartDeg": 0.0,
+      "pitchEndDeg": -5.5,
+      "doorDistanceStartM": 3.7143,
+      "doorDistanceEndM": 3.0,
+      "pitchDegRange": [
+        -6.0,
+        -4.0
+      ],
+      "endYRange": [
+        1.25,
+        1.4
+      ]
+    }
+  ],
+  "reviewCriteria": {
+    "speedStepTolerance": 0.02,
+    "doorHeightRatioTolerance": 0.02,
+    "lightRatioTolerance": 0.2,
+    "forbiddenTerms": [
+      "人物",
+      "剪影",
+      "二层结构",
+      "楼梯",
+      "阳台",
+      "夹层",
+      "露台",
+      "室内陈设"
+    ]
+  },
+  "referenceOnly": true,
+  "tolerances": {
+    "axisSpeedMps": 0.005,
+    "doorHeightRatio": 0.03,
+    "lightRatio": 0.3,
+    "foregroundWidthRatio": 0.02,
+    "yawDeg": 0.5,
+    "pitchDeg": 1.0
+  }
+}

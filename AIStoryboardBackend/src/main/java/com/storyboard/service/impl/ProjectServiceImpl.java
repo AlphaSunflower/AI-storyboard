@@ -133,7 +133,7 @@ public class ProjectServiceImpl implements ProjectService {
             p != null ? p.getImageN() : null,
             p != null ? p.getVideoModel() : null,
             p != null ? p.getVideoAspectRatio() : null,
-            s.getCreatedAt(), s.getUpdatedAt()
+            s.getCreatedAt(), s.getUpdatedAt(), false
         );
         }).toList();
         return new ProjectResponse(

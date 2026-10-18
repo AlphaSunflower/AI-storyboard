@@ -452,6 +452,7 @@ class AgentReferencePassThroughTest {
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService.class),
                 mock(com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService.class),
                 mock(com.moon.moonagent.ai.agent.context.ConversationContextCleanupService.class),
+                new com.moon.moonagent.ai.agent.turn.TurnSteerRegistry(),
                 transactionManager);
     }
 

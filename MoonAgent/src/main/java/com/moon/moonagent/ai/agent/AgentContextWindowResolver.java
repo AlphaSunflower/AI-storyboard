@@ -72,4 +72,18 @@ public class AgentContextWindowResolver {
         }
         return best > 0 ? best : DEFAULT_WINDOW_TOKENS;
     }
+
+    /**
+     * 决定压缩阈值该用哪个窗口：**网关配置优先**，其次 AgentScope 模型自报，最后默认值。
+     *
+     * <p>为什么需要这一步：压缩阈值原先直接读 {@code model.getContextWindowSize()}，
+     * 那是 AgentScope 自己认的窗口（很可能是 128k 一类默认值），而网关 {@code model_params.context_window}
+     * 配的是真实能力（例如 deepseek-flash 是 1M）。两者不一致时，压缩会在 64k 就被触发——
+     * 对 1M 模型等于白白丢掉 90% 的可用上下文，还会多付一次压缩调用。
+     */
+    public static int prefer(int gatewayResolved, int agentScopeReported) {
+        if (gatewayResolved > 0) return gatewayResolved;
+        if (agentScopeReported > 0) return agentScopeReported;
+        return DEFAULT_WINDOW_TOKENS;
+    }
 }

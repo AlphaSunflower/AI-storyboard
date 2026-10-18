@@ -59,6 +59,11 @@ export interface SceneResponse {
   duration: number;
   createdAt?: string;
   updatedAt?: string;
+  /**
+   * 媒体已过期：这镜出图/出视频之后，画面（或地点/资产）又被改过。
+   * 后端读取时派生（比对改动日志时间戳），不是落库字段。
+   */
+  stale?: boolean;
 }
 
 export const projectApi = {

@@ -75,6 +75,23 @@ export function HumanInputCard({
       return next;
     });
   const typeLabel = (t: string) => (t === "character" ? "人物" : t === "prop" ? "道具" : t === "scene" ? "场景" : t);
+  // 写任务图：逐节点/逐工具授权；未下发 writeTools 时保持整图批准
+  const writeToolOptions = info.writeTools ?? [];
+  const allWriteTools = Array.from(new Set(writeToolOptions.flatMap((o) => o.tools)));
+  const [selectedWriteTools, setSelectedWriteTools] = useState<Set<string>>(
+    () => new Set(allWriteTools),
+  );
+  const withApprovedTools = (p: Record<string, string>) =>
+    allWriteTools.length === 0
+      ? p
+      : { ...p, approvedTools: Array.from(selectedWriteTools).join(",") };
+  const toggleWriteTool = (tool: string) =>
+    setSelectedWriteTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(tool)) next.delete(tool);
+      else next.add(tool);
+      return next;
+    });
   // 按钮提交：有 assets 时所有 action 均携带勾选 ID；asset-skip 携带空数组
   const hasAssets = !!(info.assets && info.assets.length > 0);
   // 已选择的 action ID（用于选择后仍显示卡片）
@@ -87,12 +104,12 @@ export function HumanInputCard({
       return;
     }
     if (a.id === "asset-skip") {
-      submitHumanInput(a.id, undefined, selectedParams, []);
+      submitHumanInput(a.id, undefined, withApprovedTools(selectedParams), []);
     } else if (hasAssets) {
       // 有资产/分镜列表时，所有 action 均携带勾选 ID
-      submitHumanInput(a.id, undefined, selectedParams, Array.from(selectedAssets));
+      submitHumanInput(a.id, undefined, withApprovedTools(selectedParams), Array.from(selectedAssets));
     } else {
-      submitHumanInput(a.id, undefined, selectedParams);
+      submitHumanInput(a.id, undefined, withApprovedTools(selectedParams));
     }
     // 记录已选择的 action
     setSelectedActionId(a.id);
@@ -318,7 +335,7 @@ export function HumanInputCard({
             onChange={(e) => setCustomInputText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && customInputText.trim() && !streaming) {
-                submitHumanInput("custom", customInputText.trim(), selectedParams);
+                submitHumanInput("custom", customInputText.trim(), withApprovedTools(selectedParams));
               }
             }}
             placeholder="输入你的想法…"
@@ -331,7 +348,7 @@ export function HumanInputCard({
           <div style={{ display: "flex", gap: 8 }}>
             <button
               disabled={streaming || !customInputText.trim()}
-              onClick={() => submitHumanInput("custom", customInputText.trim(), selectedParams)}
+              onClick={() => submitHumanInput("custom", customInputText.trim(), withApprovedTools(selectedParams))}
               style={{
                 padding: "10px 18px", border: "none", borderRadius: "var(--rounded-md)",
                 background: "var(--color-primary)", color: "white", fontSize: 15,
@@ -358,6 +375,43 @@ export function HumanInputCard({
       ) : (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+            {writeToolOptions.length > 0 && (
+              <div
+                data-testid="hitl-write-tools"
+                style={{
+                  border: "1px solid var(--color-hairline)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  background: "var(--color-canvas)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <div style={{ fontSize: 12, color: "var(--color-muted)", letterSpacing: 0.5 }}>
+                  批准写入工具（取消勾选后不会执行）
+                </div>
+                {writeToolOptions.map((option) =>
+                  option.tools.map((tool) => (
+                    <label
+                      key={`${option.nodeId}:${tool}`}
+                      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-ink)" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedWriteTools.has(tool)}
+                        onChange={() => toggleWriteTool(tool)}
+                        disabled={archived || inert || streaming}
+                      />
+                      <span>
+                        <code>{option.nodeId || "(未命名)"}</code>
+                        <span style={{ color: "var(--color-muted)", marginLeft: 6 }}>{tool}</span>
+                      </span>
+                    </label>
+                  )),
+                )}
+              </div>
+            )}
             {info.actions.map((a) => (
               <button
                 key={a.id}

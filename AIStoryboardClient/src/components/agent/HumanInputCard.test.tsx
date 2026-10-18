@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HumanInputCard } from './HumanInputCard';
 import { useAgentStore, type HumanInputInfo } from '../../stores/agentStore';
 import { defaultGenerationPreferences } from '../../lib/generationPreferences';
@@ -46,5 +46,22 @@ describe('HumanInputCard 生成偏好预选', () => {
     render(<HumanInputCard info={info} />);
     expect(selectFor('尺寸').value).toBe('2K');
     expect(selectFor('画幅').value).toBe('1:1');
+  });
+
+  it('写任务图逐工具勾选后把 approvedTools 带进提交参数', () => {
+    const submit = vi.fn();
+    useAgentStore.setState({ submitHumanInput: submit });
+    render(<HumanInputCard info={{
+      ...info,
+      writeTools: [{ nodeId: 'writer', role: 'writer', tools: ['write_file', 'run_python_script'] }],
+    }} />);
+
+    expect(screen.getByTestId('hitl-write-tools')).toBeTruthy();
+    fireEvent.click(screen.getByText('确认'));
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0][2]).toMatchObject({
+      approvedTools: 'write_file,run_python_script',
+    });
   });
 });

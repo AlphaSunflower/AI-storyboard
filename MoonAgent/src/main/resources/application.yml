@@ -169,8 +169,16 @@ ai:
       subagents-enabled: ${AGENTSCOPE_SUBAGENTS_ENABLED:true}
       plan-mode-enabled: ${AGENTSCOPE_PLAN_MODE_ENABLED:true}
       task-list-enabled: ${AGENTSCOPE_TASK_LIST_ENABLED:true}
+      subagent-max-tokens: ${SUBAGENT_MAX_TOKENS:200000}
+      subagent-max-duration-ms: ${SUBAGENT_MAX_DURATION_MS:300000}
+      subagent-max-repair-rounds: ${SUBAGENT_MAX_REPAIR_ROUNDS:2}
+      subagent-node-timeout: ${SUBAGENT_NODE_TIMEOUT:240s}
+      subagent-context-root: ${SUBAGENT_CONTEXT_ROOT:docs/specs}
+      subagent-context-max-chars: ${SUBAGENT_CONTEXT_MAX_CHARS:32000}
       plan-file-directory: ${AGENTSCOPE_PLAN_FILE_DIRECTORY:plans}
-      tool-result-eviction-enabled: ${AGENTSCOPE_TOOL_RESULT_EVICTION_ENABLED:true}
+      # 无损上下文：不再把超长工具结果截成预览后丢弃。结果原样进入上下文，
+      # 由压缩链路负责深度；压缩前的完整 transcript 由 offloadBeforeCompact 落盘。
+      tool-result-eviction-enabled: ${AGENTSCOPE_TOOL_RESULT_EVICTION_ENABLED:false}
       tool-result-eviction-max-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_MAX_CHARS:16000}
       tool-result-eviction-preview-chars: ${AGENTSCOPE_TOOL_RESULT_EVICTION_PREVIEW_CHARS:2000}
       otel-tracing-enabled: ${AGENTSCOPE_OTEL_TRACING_ENABLED:true}
@@ -217,7 +225,8 @@ ai:
       compaction-keep-messages: ${AGENTSCOPE_COMPACTION_KEEP_MESSAGES:12}
       compaction-keep-tokens: ${AGENTSCOPE_COMPACTION_KEEP_TOKENS:8000}
       async-enabled: ${AGENTSCOPE_ASYNC_ENABLED:true}
-      async-tool-timeout: ${AGENTSCOPE_ASYNC_TOOL_TIMEOUT:90s}
+      async-tool-timeout: ${AGENTSCOPE_ASYNC_TOOL_TIMEOUT:21m}
+      tool-execution-timeout: ${AGENTSCOPE_TOOL_EXECUTION_TIMEOUT:20m}
       batch-confirm-threshold: ${AGENTSCOPE_BATCH_CONFIRM_THRESHOLD:4}
       image-batch-concurrency: ${AGENTSCOPE_IMAGE_BATCH_CONCURRENCY:4}
       wakeup-enabled: ${AGENTSCOPE_WAKEUP_ENABLED:true}

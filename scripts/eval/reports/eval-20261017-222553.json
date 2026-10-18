@@ -1,0 +1,178 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:24:39.055026+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11256,
+          "outputTokens": 5,
+          "cachedInputTokens": 1792,
+          "totalTokens": 11261,
+          "contextTokens": 11256,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1277,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1215,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 786,
+          "toolDefinitionTokens": 10470,
+          "messageTokens": 0
+        },
+        "durationMs": 1312,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11234,
+          "outputTokens": 7,
+          "cachedInputTokens": 1792,
+          "totalTokens": 11241,
+          "contextTokens": 11234,
+          "contextWindowTokens": 1000000,
+          "durationMs": 432,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 377,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 785,
+          "toolDefinitionTokens": 10449,
+          "messageTokens": 0
+        },
+        "durationMs": 476,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "当前项目共有 **5 个分镜**，全部为「橘猫在夕阳屋顶上」的写实治愈短片：**5 镜都还没有图片和视频**，时长也都没填（提示词、景别、运镜和音效都是齐的）。\n\n| 镜号 | 景别 | 运镜 | 内容 | 图、视频 |\n|---|---|---|---|---|\n| 1 | 远景 | 缓慢推近 | 橘猫剪影立于屋顶边缘，尾巴垂下 | 缺、缺 |\n| 2 | 中景 | 轻微摇动 | 侧卧瓦片上，眯眼享受夕阳 | 缺、缺 |\n| 3 | 特写 | 缓慢推近 | 瞳孔细成一线，毛尖泛光晕 | 缺、缺 |\n| 4 | 全景 | 缓慢上升 | 站起伸展，剪影融入夕阳天空 | 缺、缺 |\n| 5 | 全景 | 缓慢拉远 | 夕阳沉落，望月后打哈欠入睡 | 缺、缺 |\n\n一句话总结：这是一个 5 镜的「橘猫夕阳屋顶」写实治愈短片分镜，由远景剪影逐渐到特写细节、最后拉远收尾，景别、运镜和音效都已写全，但还停在提示词阶段——没有任何图片或视频，也没有设定时长。\n\n是否需要下一步为这 5 镜批量生成图片或补上时长，你确认后我再开始。",
+        "tools": [
+          "load_skill_through_path",
+          "reset_equipped_tools",
+          "list_project_storyboard"
+        ],
+        "metrics": {
+          "inputTokens": 59384,
+          "outputTokens": 629,
+          "cachedInputTokens": 35200,
+          "totalTokens": 60013,
+          "contextTokens": 18064,
+          "contextWindowTokens": 1000000,
+          "durationMs": 6536,
+          "modelCalls": 4,
+          "complete": true,
+          "modelDurationMs": 6368,
+          "toolDurationMs": 32,
+          "systemPromptTokens": 1262,
+          "toolDefinitionTokens": 16802,
+          "messageTokens": 0
+        },
+        "durationMs": 6569,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hitl-reject",
+      "result": {
+        "status": "completed",
+        "final": "已取消，本次操作未执行。",
+        "tools": [
+          "run_python_script"
+        ],
+        "metrics": {},
+        "durationMs": 748,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-readonly",
+      "result": {
+        "status": "completed",
+        "final": "项目现有 5 个连续镜头的完整分镜，框架可用于继续生成，但目前所有镜头都还没有图像和视频，时长全部未定，并且存在首帧机位与运镜矛盾、S1–S3 朝向夕阳而 S5 转向月亮的跳轴风险，以及缺少橘猫、屋顶一致性参考；因此建议先补齐时长、运镜朝向和参考图这三项，再进入出图与出视频。",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 25060,
+          "outputTokens": 569,
+          "cachedInputTokens": 12800,
+          "totalTokens": 25629,
+          "contextTokens": 13759,
+          "contextWindowTokens": 1000000,
+          "durationMs": 30272,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 4130,
+          "toolDurationMs": 26034,
+          "systemPromptTokens": 961,
+          "toolDefinitionTokens": 12798,
+          "messageTokens": 0
+        },
+        "durationMs": 30410,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-steer",
+      "result": {
+        "status": "completed",
+        "final": "STEER-EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 26518,
+          "outputTokens": 620,
+          "cachedInputTokens": 13824,
+          "totalTokens": 27138,
+          "contextTokens": 15217,
+          "contextWindowTokens": 1000000,
+          "durationMs": 34315,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 4109,
+          "toolDurationMs": 30106,
+          "systemPromptTokens": 1063,
+          "toolDefinitionTokens": 14154,
+          "messageTokens": 0
+        },
+        "durationMs": 34360,
+        "steerSent": true,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 6,
+  "failed": 0,
+  "skipped": 1
+}

@@ -13,6 +13,7 @@ import {
 } from '../../lib/renderIntent';
 import { foldTasksByToolCallId, foldedTaskIds } from '../../lib/taskFolding';
 import { AgentTaskCard } from './AgentTaskCard';
+import { RunTaskGraphCard } from './RunTaskGraphCard';
 import { resolveRenderIntentRenderer } from './renderIntentRegistry';
 import {
   toolDisplayName,
@@ -63,6 +64,7 @@ const ICON_STROKE = 1.9;
 export function orderedToolDrafts(drafts?: Record<string, AgentToolDraft>): Array<[string, AgentToolDraft]> {
   if (!drafts) return [];
   return Object.entries(drafts)
+    .filter(([, draft]) => draft.name !== '__fragment__')
     .map(([id, draft], index) => ({ id, draft, index }))
     .sort((a, b) => {
       const aSeq = typeof a.draft.seq === 'number' ? a.draft.seq : Number.MAX_SAFE_INTEGER;
@@ -96,6 +98,98 @@ function ToolOutput({ text }: { text: string }) {
         >
           {expanded ? '收起' : `显示更多（共 ${text.length} 字符）`}
         </button>
+      )}
+    </div>
+  );
+}
+
+type GraphInputSummary = { task?: string; nodeCount?: number; repair?: boolean };
+type GraphOutputSummary = { reviewPassed?: boolean; repairRounds?: number; violations?: number };
+
+function asJsonRecord(raw?: string): Record<string, unknown> | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function graphInputSummary(raw?: string): GraphInputSummary {
+  const root = asJsonRecord(raw);
+  if (!root) return {};
+  return {
+    task: typeof root.task === 'string' ? root.task : undefined,
+    nodeCount: Array.isArray(root.nodes) ? root.nodes.length : undefined,
+    repair: root.repair === true,
+  };
+}
+
+function graphOutputSummary(raw?: string): GraphOutputSummary {
+  const root = asJsonRecord(raw);
+  if (!root) return {};
+  return {
+    reviewPassed: typeof root.reviewPassed === 'boolean' ? root.reviewPassed : undefined,
+    repairRounds: typeof root.repairRounds === 'number' ? root.repairRounds : undefined,
+    violations: Array.isArray(root.parameterViolations)
+      ? root.parameterViolations.length : undefined,
+  };
+}
+
+/** `run_task_graph` 的入参/输出摘要：先看结论，原始 JSON 折叠到 details 里。 */
+function TaskGraphDetail({ draft }: { draft: AgentToolDraft }) {
+  const input = graphInputSummary(draft.input);
+  const output = graphOutputSummary(draft.text);
+  const hasInput = !!draft.input;
+  const hasOutput = !!draft.text;
+  return (
+    <div className="tool-node__graph-detail">
+      {hasInput && (
+        <div className="tool-node__graph-block">
+          <div className="tool-node__section-label">入参</div>
+          <div className="tool-node__summary-chips">
+            {input.task && (
+              <span className="tool-node__summary-chip tool-node__summary-chip--wide">
+                {input.task.length > 72 ? `${input.task.slice(0, 72)}…` : input.task}
+              </span>
+            )}
+            {typeof input.nodeCount === 'number' && (
+              <span className="tool-node__summary-chip">{input.nodeCount} 个节点</span>
+            )}
+            {input.repair && <span className="tool-node__summary-chip">自动修复开启</span>}
+          </div>
+          <details className="tool-node__raw">
+            <summary>查看原始入参</summary>
+            <ToolOutput text={draft.input} />
+          </details>
+        </div>
+      )}
+      {hasOutput && (
+        <div className="tool-node__graph-block">
+          <div className="tool-node__section-label">输出</div>
+          <div className="tool-node__summary-chips">
+            {output.reviewPassed === true && (
+              <span className="tool-node__summary-chip tool-node__summary-chip--ok">评审通过</span>
+            )}
+            {output.reviewPassed === false && (
+              <span className="tool-node__summary-chip tool-node__summary-chip--bad">评审未通过</span>
+            )}
+            {typeof output.repairRounds === 'number' && (
+              <span className="tool-node__summary-chip">修复 {output.repairRounds} 轮</span>
+            )}
+            {(output.violations ?? 0) > 0 && (
+              <span className="tool-node__summary-chip tool-node__summary-chip--bad">
+                参数冲突 {output.violations}
+              </span>
+            )}
+          </div>
+          <details className="tool-node__raw">
+            <summary>查看原始输出</summary>
+            <ToolOutput text={draft.text} />
+          </details>
+        </div>
       )}
     </div>
   );
@@ -170,6 +264,10 @@ function ToolDraftRow({ toolCallId, draft, nestedTasks = [] }: {
           )}
         </div>
 
+        {(draft.name === 'run_task_graph' || draft.name === 'run_write_task_graph') && (
+          <RunTaskGraphCard draft={draft} toolCallId={toolCallId} />
+        )}
+
         {nestedTasks.length > 0 && (
           <div className="tool-node__nested" data-nested-tool-tasks={toolCallId}>
             <div className="tool-node__nested-label">步骤进度（{nestedTasks.length}）</div>
@@ -181,17 +279,23 @@ function ToolDraftRow({ toolCallId, draft, nestedTasks = [] }: {
 
         {expanded && (
           <div className="tool-node__detail">
-            {draft.input && (
-              <div>
-                <div className="tool-node__section-label">入参</div>
-                <ToolOutput text={draft.input} />
-              </div>
-            )}
-            {hasOutput && (
-              <div>
-                <div className="tool-node__section-label">输出</div>
-                <ToolOutput text={draft.text} />
-              </div>
+            {draft.name === 'run_task_graph' || draft.name === 'run_write_task_graph' ? (
+              <TaskGraphDetail draft={draft} />
+            ) : (
+              <>
+                {draft.input && (
+                  <div>
+                    <div className="tool-node__section-label">入参</div>
+                    <ToolOutput text={draft.input} />
+                  </div>
+                )}
+                {hasOutput && (
+                  <div>
+                    <div className="tool-node__section-label">输出</div>
+                    <ToolOutput text={draft.text} />
+                  </div>
+                )}
+              </>
             )}
             {intent && Renderer && <Renderer intent={intent} />}
           </div>

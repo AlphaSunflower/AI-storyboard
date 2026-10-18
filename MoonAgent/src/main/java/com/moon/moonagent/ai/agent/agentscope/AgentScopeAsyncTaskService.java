@@ -25,6 +25,7 @@ import com.moon.moonagent.ai.storyboard.StoryboardShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Approval;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.AssetRef;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardGenerationParams;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardCommitMode;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardProductionRequest;
@@ -450,6 +451,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         request.put("roleHints", productionRequest.roleHints());
         request.put("commitMode",
                 (commitMode == null ? StoryboardCommitMode.APPEND : commitMode).name());
+        // 生成参数随任务落库：写库阶段可能发生在另一个 approve 任务里，必须能按会话回读
+        request.put("generationParams", productionRequest.generationParams());
         request.put("auto", auto);
         String requestJson = writeJson(request);
         String idempotencyKey = UUID.nameUUIDFromBytes(
@@ -1272,7 +1275,8 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                     string(request.get("creationType")),
                     string(request.get("requestedShotCount")),
                     assetRefs(request.get("assets")),
-                    stringList(request.get("roleHints")));
+                    stringList(request.get("roleHints")),
+                    generationParamsOf(request.get("generationParams")));
             boolean auto = Boolean.TRUE.equals(request.get("auto"));
             com.moon.moonagent.ai.storyboard.production.StoryboardProgressListener listener =
                     liveListener(taskId);
@@ -1496,8 +1500,14 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         List<StoryboardShot> finalShots = current.finalShots().stream()
                 .filter(shot -> seenShotIds.add(shot.shotId()))
                 .toList();
+        StoryboardGenerationParams generationParams =
+                storyboardParamsFor(conversation.getId());
+        // 用户给了总时长就精确摊到每一镜（总和不偏离），否则各镜保留模型给的时长并吸附到合法档位
+        List<Integer> durationPlan = generationParams.targetDurationSeconds() == null
+                ? null
+                : StoryboardParamResolver.perShotDurations(generationParams, finalShots.size(), 4);
         List<Scene> scenes = finalShots.stream()
-                .map(shot -> sceneForStoryboard(conversation, shot))
+                .map(shot -> sceneForStoryboard(conversation, shot, generationParams, durationPlan))
                 .toList();
         // 该运行此前已写入过项目分镜（如改写剧情后重新确认）：先清掉自己写过的那批，
         // 否则按「追加」会把同一份分镜写第二遍。
@@ -1522,6 +1532,14 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         for (int index = 0; index < finalShots.size(); index++) {
             mappings.put(finalShots.get(index).shotId(), sceneIds.get(index));
         }
+        // 资产绑定落库：此前 sceneForStoryboard 只写文本列，分镜写进项目后资产关联整段丢失
+        // （全库 scene_assets 长期只有 1 条）。挂的是 scene_reference_images：
+        // 生图链路（sceneReferenceImageUrls）读的就是它，而 scene_assets.asset_id 有外键指向
+        // 项目资产库 assets(id)，塞 agent_assets 的 id 会被外键直接拒掉。
+        int linkedShots = linkShotAssets(current, finalShots, mappings);
+        if (listener != null && linkedShots > 0) {
+            listener.stream("final_generation", "已为 " + linkedShots + " 个镜头关联参考资产。\n");
+        }
         try {
             StoryboardRunSnapshot completed = storyboardProductionService.markCompleted(
                     current.runId(), conversation.getUserId(), conversation.getProjectId(), mappings);
@@ -1537,6 +1555,101 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             }
             throw e;
         }
+    }
+
+    /**
+     * 把每镜绑定的资产挂到写库后的项目分镜上（写 {@code scene_reference_images}）。
+     *
+     * <p>为什么不是 {@code scene_assets}：那张表的 {@code asset_id} 有外键指向项目资产库
+     * {@code assets(id)}，而分镜阶段绑定的是会话素材 {@code agent_assets} 的 id，写进去会被
+     * 外键直接拒绝（实测 0 行、静默 warn）。而且生图链路
+     * （{@code AgentScopeStoryboardTools.sceneReferenceImageUrls}）读的本身就是
+     * {@code scene_reference_images}。
+     *
+     * <p>best-effort：单个镜头失败只记日志，绝不回滚已经写好的分镜。
+     *
+     * @return 成功挂上资产的镜头数
+     */
+    private int linkShotAssets(StoryboardRunSnapshot run, List<StoryboardShot> finalShots,
+                               Map<String, String> mappings) {
+        if (run == null || finalShots == null || finalShots.isEmpty()) return 0;
+        // assetId → url：运行快照里就是请求带进去的那份资产（含 url），不必再查会话素材
+        Map<String, String> urlsById = new LinkedHashMap<>();
+        for (var asset : run.assets()) {
+            if (asset == null) continue;
+            String assetId = asset.assetId() == null ? "" : asset.assetId().trim();
+            if (assetId.isEmpty() || asset.url() == null || asset.url().isBlank()) continue;
+            urlsById.putIfAbsent(assetId, asset.url());
+        }
+        if (urlsById.isEmpty()) return 0;
+
+        int linked = 0;
+        for (StoryboardShot shot : finalShots) {
+            String sceneId = mappings.get(shot.shotId());
+            if (sceneId == null || sceneId.isBlank()) continue;
+            List<String> assetIds;
+            try {
+                assetIds = storyboardProductionService
+                        .referenceAssetIds(run.runId(), shot.shotId()).assetIds();
+            } catch (Exception e) {
+                log.warn("分镜资产解析失败: runId={}, shotId={}, error={}",
+                        run.runId(), shot.shotId(), e.getMessage());
+                continue;
+            }
+            List<Map<String, Object>> refs = new ArrayList<>();
+            for (String raw : assetIds) {
+                String assetId = normalizeAssetId(raw);
+                String url = urlsById.get(assetId);
+                if (url == null || url.isBlank()) continue;
+                Map<String, Object> ref = new LinkedHashMap<>();
+                ref.put("url", url);
+                ref.put("type", "image");
+                ref.put("purpose", "image");
+                ref.put("role", "REFERENCE");
+                ref.put("sourceType", "agent_asset");
+                ref.put("sourceId", assetId);
+                refs.add(ref);
+            }
+            if (refs.isEmpty()) continue;
+            try {
+                storyboardClient.linkSceneReferences(sceneId, refs);
+                linked++;
+            } catch (Exception e) {
+                log.warn("分镜资产关联失败: sceneId={}, shotId={}, error={}",
+                        sceneId, shot.shotId(), e.getMessage());
+            }
+        }
+        log.info("分镜资产关联完成: runId={}, shots={}, linked={}",
+                run.runId(), finalShots.size(), linked);
+        return linked;
+    }
+
+    /**
+     * 从模型可能写歪的引用串里提取真实资产 id。
+     *
+     * <p>实测见过三种写法：
+     * <ul>
+     *   <li>{@code 27abfc16…｜仅用于镜头4的背影站位构图关系参考}（purpose 拼进 id）</li>
+     *   <li>{@code 参考资产 da0917…：仅用于锁定少年背影造型}</li>
+     *   <li>{@code [asset:da0917…] 参考神龙召唤的构图范式}</li>
+     * </ul>
+     * 先按 id 形状（16 位以上 hex 或 UUID）抓第一个匹配；抓不到再退回按分隔符截断。
+     */
+    private static final java.util.regex.Pattern ASSET_ID_PATTERN = java.util.regex.Pattern.compile(
+            "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                    + "|[0-9a-fA-F]{16,})");
+
+    static String normalizeAssetId(String raw) {
+        if (raw == null) return "";
+        java.util.regex.Matcher matcher = ASSET_ID_PATTERN.matcher(raw);
+        if (matcher.find()) return matcher.group(1);
+        String value = raw.trim();
+        int cut = value.indexOf('｜');
+        if (cut < 0) cut = value.indexOf('|');
+        if (cut > 0) value = value.substring(0, cut).trim();
+        int space = value.indexOf(' ');
+        if (space > 0) value = value.substring(0, space).trim();
+        return value;
     }
 
     private void deleteProjectSceneQuietly(String projectId, String sceneId) {
@@ -1700,8 +1813,17 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         }
     }
 
+    /**
+     * 把正式镜头转成项目分镜行，并把**生成参数落到分镜级**。
+     *
+     * <p>参数优先级已在 {@link StoryboardParamResolver} 收敛成「用户偏好 > 模型自选 > 网关默认」；
+     * 这里只负责回填与时长吸附：每镜时长必须落在当前视频模型支持的档位内
+     * （有总时长时按镜数均分再吸附），否则生成的视频会被上游直接拒。
+     */
     private static Scene sceneForStoryboard(AgentConversation conversation,
-                                            StoryboardShot shot) {
+                                            StoryboardShot shot,
+                                            StoryboardGenerationParams params,
+                                            List<Integer> durationPlan) {
         Scene scene = new Scene();
         scene.setProjectId(conversation.getProjectId());
         scene.setConversationId(conversation.getId());
@@ -1710,12 +1832,72 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
         scene.setImagePrompt(shot.imagePrompt());
         scene.setVideoPrompt(shot.videoPrompt());
         scene.setNegativePrompt(shot.negativePrompt());
+        scene.setContinuityNote(shot.continuityNote());
         scene.setCameraMovement(shot.cameraMovement());
         scene.setShotType(shot.shotType());
-        scene.setDuration(shot.durationSeconds());
+        scene.setDuration(durationFor(shot, params, durationPlan));
         scene.setImageStatus("pending");
         scene.setVideoStatus("pending");
+        if (params != null) {
+            if (!params.imageModel().isEmpty()) scene.setImageModel(params.imageModel());
+            if (!params.imageSize().isEmpty()) scene.setImageSize(params.imageSize());
+            if (!params.imageQuality().isEmpty()) scene.setImageQuality(params.imageQuality());
+            if (params.imageN() != null) scene.setImageN(params.imageN());
+            if (!params.videoModel().isEmpty()) scene.setVideoModel(params.videoModel());
+            if (!params.videoResolution().isEmpty()) scene.setVideoResolution(params.videoResolution());
+            if (!params.videoAspectRatio().isEmpty()) scene.setVideoAspectRatio(params.videoAspectRatio());
+        }
         return scene;
+    }
+
+    /**
+     * 单镜时长：有总时长计划就用计划值（保证总和不偏离目标），否则保留模型给的时长
+     * 并吸附到当前视频模型的合法档位。
+     */
+    private static int durationFor(StoryboardShot shot, StoryboardGenerationParams params,
+                                   List<Integer> durationPlan) {
+        if (durationPlan != null && !durationPlan.isEmpty()) {
+            int index = Math.min(Math.max(0, shot.shotOrdinal() - 1), durationPlan.size() - 1);
+            return durationPlan.get(index);
+        }
+        return StoryboardParamResolver.snapDuration(
+                params == null ? List.of() : params.allowedDurations(), shot.durationSeconds());
+    }
+
+    /**
+     * 回读本次分镜的生成参数：写在 START 任务的 requestJson 里（写库可能发生在后续 approve 任务中）。
+     * 读不到就返回 {@link StoryboardGenerationParams#EMPTY}，行为与改造前一致。
+     */
+    private StoryboardGenerationParams storyboardParamsFor(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return StoryboardGenerationParams.EMPTY;
+        }
+        try {
+            AgentAsyncTask task = taskMapper.selectOne(new LambdaQueryWrapper<AgentAsyncTask>()
+                    .eq(AgentAsyncTask::getConversationId, conversationId)
+                    .eq(AgentAsyncTask::getToolName, AgentScopeStoryboardTools.START_STORYBOARD)
+                    .orderByDesc(AgentAsyncTask::getCreatedAt)
+                    .last("LIMIT 1"));
+            if (task == null) return StoryboardGenerationParams.EMPTY;
+            Object raw = readMap(task.getRequestJson()).get("generationParams");
+            if (raw == null) return StoryboardGenerationParams.EMPTY;
+            return JSON.convertValue(raw, StoryboardGenerationParams.class);
+        } catch (Exception e) {
+            log.warn("读取分镜生成参数失败(按无参数处理): conversationId={}, error={}",
+                    conversationId, e.getMessage());
+            return StoryboardGenerationParams.EMPTY;
+        }
+    }
+
+    /** 任务 JSON 里的生成参数 → 领域对象（缺失/畸形一律退回空参数，不阻断任务）。 */
+    private static StoryboardGenerationParams generationParamsOf(Object raw) {
+        if (raw == null) return StoryboardGenerationParams.EMPTY;
+        try {
+            return JSON.convertValue(raw, StoryboardGenerationParams.class);
+        } catch (Exception e) {
+            log.warn("解析任务生成参数失败(按无参数处理): {}", e.getMessage());
+            return StoryboardGenerationParams.EMPTY;
+        }
     }
 
     private String startFollowUpVideo(
@@ -2628,15 +2810,46 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
                 .toList();
     }
 
+    /**
+     * 阶段 A 的审阅内容：剧情梗概 + 镜头大纲表 + run_id。
+     *
+     * <p>两点是硬要求：
+     * <ul>
+     *   <li><b>必须带 {@code run_id}</b>——前端「确认」按钮靠 {@code storyboardRunIdFromTask}
+     *       从这段文字里正则取 runId，缺了按钮就不出现（旧文案只写剧情稿，等于把审批入口弄丢）；</li>
+     *   <li><b>必须列出每一镜</b>——用户审批的是「拍哪几镜、每镜一句画面、带哪张图」，
+     *       而不是一整篇剧本。</li>
+     * </ul>
+     */
     private static String storyboardReviewContent(StoryboardRunSnapshot snapshot) {
-        String script = snapshot.selectedScript().isBlank()
+        String synopsis = snapshot.selectedScript().isBlank()
                 ? snapshot.originalScript() : snapshot.selectedScript();
         StringBuilder content = new StringBuilder();
-        content.append("# 剧情稿\n\n")
-                .append(script.isBlank() ? "未返回剧情稿。" : script)
-                .append("\n\n---\n\n")
-                .append("请确认是否采用当前剧情稿；确认后继续生成正式分镜。");
+        content.append("# 镜头大纲\n\n")
+                .append(synopsis.isBlank() ? "未返回剧情梗概。" : synopsis)
+                .append("\n\n")
+                .append("- run_id: `").append(snapshot.runId()).append("`\n")
+                .append("- 镜头数: ").append(snapshot.pseudoShots().size()).append("\n\n");
+        if (!snapshot.pseudoShots().isEmpty()) {
+            content.append("| # | 画面 | 参考资产 |\n")
+                    .append("| --- | --- | --- |\n");
+            for (PseudoShot shot : snapshot.pseudoShots()) {
+                content.append("| ").append(shot.shotOrdinal()).append(" | ")
+                        .append(escapeTableCell(shot.action())).append(" | ")
+                        .append(shot.referenceAssetIds().isEmpty()
+                                ? "—" : shot.referenceAssetIds().size() + " 个")
+                        .append(" |\n");
+            }
+            content.append('\n');
+        }
+        content.append("请确认大纲；确认后逐镜补全景别、运镜、提示词与时长，并写入项目分镜。");
         return content.toString();
+    }
+
+    /** Markdown 表格单元转义：竖线与换行会把表格撑破。 */
+    private static String escapeTableCell(String value) {
+        if (value == null || value.isBlank()) return "—";
+        return value.replace("|", "｜").replace("\n", " ").trim();
     }
 
     private static boolean isStoryboardVideoTool(String toolName) {

@@ -70,6 +70,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   task_output: '读取后台任务结果',
   wait_async_results: '等待后台任务',
   agent_list: '查询子智能体',
+  run_task_graph: '编排子智能体',
+  run_write_task_graph: '编排可写子智能体',
   // 沙箱文件与命令
   read_file: '读取文件',
   write_file: '写入文件',

@@ -40,6 +40,11 @@ import com.moon.moonagent.ai.agent.turn.AgentTurnEventEnvelope;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventPublisher;
 import com.moon.moonagent.ai.agent.turn.AgentTurnEventStore;
 import com.moon.moonagent.ai.agent.turn.AgentTurnFanout;
+import com.moon.moonagent.ai.agent.turn.ActiveTurnSteer;
+import com.moon.moonagent.ai.agent.turn.TurnSteerMessage;
+import com.moon.moonagent.ai.agent.turn.TurnSteerRegistry;
+import com.moon.moonagent.ai.agent.turn.TurnEventSinkHolder;
+import com.moon.moonagent.dto.response.AgentSteerResponse;
 import com.moon.moonagent.ai.agent.recovery.CheckpointClaim;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeService;
@@ -133,6 +138,8 @@ public class AgentChatServiceImpl implements AgentChatService {
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasRunService canvasRunService;
     /** 「/清空上下文」的真删除执行器（会话级上下文行全部 DELETE）。 */
     private final com.moon.moonagent.ai.agent.context.ConversationContextCleanupService contextCleanupService;
+    /** 在途回合 steer 注册表：HTTP 线程写入，运行时在下一个模型步骤注入。 */
+    private final TurnSteerRegistry steerRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
     /**
      * 专用 executor（I6）：SSE 长连接任务不再占用 ForkJoinPool.commonPool，
@@ -145,6 +152,13 @@ public class AgentChatServiceImpl implements AgentChatService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentScopeAsyncTaskService agentScopeAsyncTaskService;
+
+    /**
+     * 上传素材语义打标（可选依赖）：上传后异步用视觉模型判定「角色/场景/道具」并写回
+     * agent_assets.description。没有它素材在模型眼里只有「会话图片」，分镜无法按剧情绑资产。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private transient com.moon.moonagent.ai.agent.asset.AssetCaptionService assetCaptionService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private transient AgentTurnEventStore turnEventStore;
@@ -795,6 +809,13 @@ public class AgentChatServiceImpl implements AgentChatService {
         asset.setStatus("completed");
         assetMapper.insert(asset);
         log.info("Agent 参考图已落库: assetId={}, url={}", asset.getId(), url);
+        // 异步打标：给素材补一条「角色｜林知夏：短发女性…」的语义描述，模型才认得出它是谁/是什么。
+        // 失败只记日志，不影响上传返回。
+        try {
+            if (assetCaptionService != null) assetCaptionService.captionAsync(asset.getId());
+        } catch (Exception e) {
+            log.debug("素材打标触发失败(忽略): assetId={}, error={}", asset.getId(), e.getMessage());
+        }
 
         String name = file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
                 ? "未命名文件" : file.getOriginalFilename();
@@ -1194,6 +1215,11 @@ public class AgentChatServiceImpl implements AgentChatService {
      * hitlPaused=true 时由 runHITLStage 已落库，调用方应在调用前跳过（本方法防御性跳过）。
      */
     private AgentMessage persistAssistant(AgentConversation conversation, AgentTurnResult turn) {
+        return persistAssistant(conversation, turn, null);
+    }
+
+    private AgentMessage persistAssistant(AgentConversation conversation, AgentTurnResult turn,
+                                           String turnId) {
         if (turn == null) return null;
         if (turn.hitlPaused()) {
             log.info("persistAssistant 跳过 HITL 暂停消息（runHITLStage 已落库）: conversationId={}", conversation.getId());
@@ -1202,6 +1228,7 @@ public class AgentChatServiceImpl implements AgentChatService {
         Map<String, Object> metadata = new java.util.LinkedHashMap<>();
         if (turn.metadata() != null) metadata.putAll(turn.metadata());
         metadata.remove("_terminalEventSent");
+        if (turnId != null && !turnId.isBlank()) metadata.put("turnId", turnId);
         if (turn.agentTrace() != null && !turn.agentTrace().isEmpty()) metadata.put("agentTrace", turn.agentTrace());
         if (turn.reasoning() != null) metadata.put("reasoning", turn.reasoning());
         if (turn.suggestedActions() != null && !turn.suggestedActions().isEmpty()) metadata.put("suggestedActions", turn.suggestedActions());
@@ -1508,6 +1535,8 @@ public class AgentChatServiceImpl implements AgentChatService {
                     orderedPublisher = eventPublisher(
                             turn.getId(), emitter, trace.contextWindowTokens());
                     orderedPublisher.publish("turn_started", started);
+                    // 登记 steer 通道：与 turn_started 同一时刻开，publisher 关闭前注销。
+                    steerRegistry.open(conversationId, turn.getId(), orderedPublisher);
                     if (ledger.strict() || !ledger.unresolved().isEmpty()) {
                         orderedPublisher.publish("constraint_flagged", Map.of(
                                 "mode", turnLedger.mode().name(),
@@ -1519,11 +1548,14 @@ public class AgentChatServiceImpl implements AgentChatService {
                     // lambda 只能捕获 effectively-final：orderedPublisher 在 catch/finally 里会被再赋值
                     final AgentTurnEventPublisher streamPublisher = orderedPublisher;
                     final String streamTurnId = turn.getId();
-                    result = withTraceStreaming(trace, streamPublisher, () ->
-                            agentScopeMediaRuntime.runTurn(
-                                    conversation, request, trace,
-                                    eventObserver(trace, streamPublisher, streamTurnId, emitter,
-                                            trace.contextWindowTokens())));
+                    try (TurnEventSinkHolder.Scope ignored =
+                                 TurnEventSinkHolder.open(streamPublisher)) {
+                        result = withTraceStreaming(trace, streamPublisher, () ->
+                                agentScopeMediaRuntime.runTurn(
+                                        conversation, request, trace,
+                                        eventObserver(trace, streamPublisher, streamTurnId, emitter,
+                                                trace.contextWindowTokens())));
+                    }
                     throwIfInterrupted(conversationId);
                     result = withToolDrafts(reconcileSandboxOutputs(conversation, turn.getId(), result), trace);
                     finishAgentScopeTurn(conversation, turn, result, orderedPublisher);
@@ -1609,10 +1641,116 @@ public class AgentChatServiceImpl implements AgentChatService {
             } finally {
                 lease.close();
                 try { emitter.complete(); } catch (Exception ignore) { }
+                // 回合已收尾：注销 steer，后续插入一律按 not_running 交给前端开新轮。
+                // 极端竞态（消息已入队但模型没有再走一步）下把残留显式记下来，便于排查“消息没被读到”。
+                ActiveTurnSteer activeSteer = steerRegistry.find(conversationId);
+                if (activeSteer != null && turn != null
+                        && activeSteer.turnId().equals(turn.getId())
+                        && activeSteer.inbox().size() > 0) {
+                    log.warn("steer 未在回合内注入，已落库但模型未读取: conversationId={}, turnId={}, pending={}",
+                            conversationId, turn.getId(), activeSteer.inbox().size());
+                }
+                steerRegistry.close(conversationId, turn == null ? null : turn.getId());
                 // 本轮所有事件都已落库并推送完毕：释放续传订阅者（完成/失败/取消/暂停同一收口）
                 completeTurnFanout(turn == null ? null : turn.getId());
             }
         }, agentExecutor);
+    }
+
+    /**
+     * 回合中插入用户消息：落库 → 同一有序 publisher 发 {@code USER_MESSAGE} → 入 steer 队列。
+     *
+     * <p>找不到活跃回合（含刚结束的竞态）时返回 {@code not_running}，由前端改走普通发送；
+     * 不在这里直接开新回合，避免在没有 SSE 连接的情况下产生一个用户看不到的回合。
+     */
+    @Override
+    public AgentSteerResponse steerTurn(String userId, String conversationId, String turnId,
+                                        String content, String clientMessageId) {
+        AgentConversation conversation = getOwnedConversation(userId, conversationId);
+        requireWritable(conversation);
+        String text = content == null ? "" : content.trim();
+        if (text.isEmpty()) {
+            throw new BusinessException(40001, "消息内容不能为空");
+        }
+        ActiveTurnSteer active = steerRegistry.find(conversationId);
+        if (active == null || !active.turnId().equals(turnId) || !active.publisher().isOpen()) {
+            return AgentSteerResponse.notRunning(turnId);
+        }
+        AgentMessage message = persistSteerMessage(conversation, text, turnId, clientMessageId);
+        // 幂等：同一 clientMessageId 重试时，已投递过的消息不再发事件、不再入队。
+        if (isSteerDelivered(message)) {
+            log.info("steer 重复请求已忽略: conversationId={}, messageId={}",
+                    conversationId, message.getId());
+            return AgentSteerResponse.steered(turnId, message.getId());
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("messageId", message.getId());
+        payload.put("conversationId", conversationId);
+        payload.put("turnId", turnId);
+        payload.put("content", text);
+        payload.put("steer", true);
+        payload.put("createdAt", OffsetDateTime.now().toString());
+        try {
+            active.publisher().publishRaw("USER_MESSAGE", payload);
+        } catch (RuntimeException e) {
+            // publisher 已收尾/持久化失败：不要假装插入成功
+            log.warn("steer 事件发布失败: conversationId={}, turnId={}, error={}",
+                    conversationId, turnId, e.getMessage());
+            return AgentSteerResponse.notRunning(turnId);
+        }
+        active.inbox().offer(new TurnSteerMessage(message.getId(), text, OffsetDateTime.now()));
+        markSteerDelivered(message);
+        log.info("steer 已插入: conversationId={}, turnId={}, messageId={}",
+                conversationId, turnId, message.getId());
+        return AgentSteerResponse.steered(turnId, message.getId());
+    }
+
+    private static boolean isSteerDelivered(AgentMessage message) {
+        return message != null && message.getMetadata() != null
+                && Boolean.TRUE.equals(message.getMetadata().get("steerDelivered"));
+    }
+
+    /** 标记已投递：重试请求据此跳过重复的事件发布与入队。 */
+    private void markSteerDelivered(AgentMessage message) {
+        if (message == null || message.getId() == null || message.getId().isBlank()) {
+            return;
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>(
+                message.getMetadata() == null ? Map.of() : message.getMetadata());
+        metadata.put("steerDelivered", true);
+        message.setMetadata(metadata);
+        transactionTemplate().executeWithoutResult(tx -> messageMapper.updateById(message));
+    }
+
+    /**
+     * 落一条带 {@code steer} 标记的用户消息。下一轮从产品历史重建会话时也能识别它是
+     * 回合内插入，而不是一条独立的新消息。
+     *
+     * <p>按 {@code metadata.clientMessageId} 幂等：同一客户端请求重试只落一条。
+     */
+    private AgentMessage persistSteerMessage(AgentConversation conversation, String content,
+                                             String turnId, String clientMessageId) {
+        String clientId = clientMessageId == null ? "" : clientMessageId.trim();
+        if (!clientId.isEmpty()) {
+            AgentMessage existing = messageMapper.findSteerByClientMessageId(
+                    conversation.getId(), clientId);
+            if (existing != null) {
+                return existing;
+            }
+        }
+        AgentMessage message = new AgentMessage();
+        message.setConversationId(conversation.getId());
+        message.setRole("user");
+        message.setContent(content);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("steer", true);
+        metadata.put("turnId", turnId);
+        if (!clientId.isEmpty()) {
+            metadata.put("clientMessageId", clientId);
+        }
+        message.setMetadata(metadata);
+        transactionTemplate().executeWithoutResult(tx -> messageMapper.insert(message));
+        return message;
     }
 
     @Override
@@ -1704,16 +1842,22 @@ public class AgentChatServiceImpl implements AgentChatService {
                     orderedPublisher = eventPublisher(
                             turn.getId(), emitter, trace.contextWindowTokens());
                     orderedPublisher.publish("turn_started", started);
+                    // HITL 续流同样允许 steer（长批量任务常见）
+                    steerRegistry.open(conversationId, turn.getId(), orderedPublisher);
 
                     // lambda 只能捕获 effectively-final：orderedPublisher 在 catch/finally 里会被再赋值
                     final AgentTurnEventPublisher resumePublisher = orderedPublisher;
                     final String orderedTurnId = turn.getId();
-                    AgentTurnResult result = withTraceStreaming(trace, resumePublisher, () ->
-                            agentScopeMediaRuntime.resumeTurn(
-                                    conversation, claim.checkpoint(), request, trace,
-                                    action, customText,
-                                    eventObserver(trace, resumePublisher, orderedTurnId, emitter,
-                                            trace.contextWindowTokens())));
+                    AgentTurnResult result;
+                    try (TurnEventSinkHolder.Scope ignored =
+                                 TurnEventSinkHolder.open(resumePublisher)) {
+                        result = withTraceStreaming(trace, resumePublisher, () ->
+                                agentScopeMediaRuntime.resumeTurn(
+                                        conversation, claim.checkpoint(), request, trace,
+                                        action, customText,
+                                        eventObserver(trace, resumePublisher, orderedTurnId, emitter,
+                                                trace.contextWindowTokens())));
+                    }
                     throwIfInterrupted(conversationId);
                     result = withToolDrafts(reconcileSandboxOutputs(conversation, turn.getId(), result), trace);
                     checkpointResumeService.complete(claim);
@@ -1782,6 +1926,7 @@ public class AgentChatServiceImpl implements AgentChatService {
             } finally {
                 lease.close();
                 try { emitter.complete(); } catch (Exception ignore) { }
+                steerRegistry.close(conversationId, turn == null ? null : turn.getId());
                 completeTurnFanout(turn == null ? null : turn.getId());
             }
         }, agentExecutor);
@@ -2323,7 +2468,7 @@ public class AgentChatServiceImpl implements AgentChatService {
                 && result.metadata().get("sandboxAttachments") instanceof List<?> list
                 && !list.isEmpty();
         if ((result.content() != null && !result.content().isBlank()) || hasSandboxAttachments) {
-            persistAssistant(conversation, result);
+            persistAssistant(conversation, result, turn.getId());
         }
         var canvasRun = canvasRunService.activeByTurn(turn.getId());
         if (canvasRun != null

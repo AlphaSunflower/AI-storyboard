@@ -5,6 +5,7 @@ import com.moon.moonagent.ai.storyboard.StoryboardShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardRunSnapshot;
+import com.moon.moonagent.ai.storyboard.production.StoryboardChangeLog;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionService;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.mapper.AgentConversationMapper;
@@ -43,6 +44,17 @@ public class AgentStoryboardController {
     public ApiResponse<StoryboardRunSnapshot> get(Authentication auth, @PathVariable String runId) {
         StoryboardRunSnapshot run = ownedRun(auth, runId);
         return ApiResponse.ok(run);
+    }
+
+    /**
+     * 分镜草稿改动日志（字段级）：刷新、换设备、审批之后都能追溯"谁把哪一镜改成了什么"。
+     */
+    @GetMapping("/{runId}/changes")
+    public ApiResponse<List<StoryboardChangeLog.ShotChange>> changes(
+            Authentication auth, @PathVariable String runId) {
+        StoryboardRunSnapshot run = ownedRun(auth, runId);
+        AgentConversation conversation = requireConversation(run.conversationId(), auth.getName());
+        return ApiResponse.ok(productionService.changes(runId, auth.getName(), conversation.getProjectId()));
     }
 
     @PutMapping("/{runId}/draft")

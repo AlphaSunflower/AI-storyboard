@@ -30,5 +30,12 @@ public record SceneResponse(
     String videoModel,
     String videoAspectRatio,
     OffsetDateTime createdAt,
-    OffsetDateTime updatedAt
+    OffsetDateTime updatedAt,
+    /**
+     * 媒体是否已过期：画面/地点/资产在该镜出图或出视频之后又被改过。
+     *
+     * <p>读取时派生（比对改动日志时间戳），不落库——过期状态随时可重算，
+     * 每次改一句大纲都去 UPDATE 一批行只会加重写入负担。
+     */
+    Boolean stale
 ) {}

@@ -3,6 +3,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
 import com.moon.moonagent.ai.agent.handler.AgentRuntimeSupport;
 import com.moon.moonagent.ai.agent.handler.OrchestrationRequest;
+import com.moon.moonagent.ai.agent.human.ApprovalOutcome;
 import com.moon.moonagent.ai.agent.recovery.CheckpointResumeException;
 import com.moon.moonagent.entity.AgentCheckpoint;
 import com.moon.moonagent.entity.AgentConversation;
@@ -447,7 +448,81 @@ class AgentScopeCheckpointServiceTest {
                                         AgentScopeCheckpointService service) {
     }
 
+    @Test
+    void permissionResumeUsesClosedApprovalVocabularyAndFailsClosed() {
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(
+                mock(AgentRuntimeSupport.class), mock(AgentCheckpointMapper.class));
+        AgentCheckpoint checkpoint = new AgentCheckpoint();
+        checkpoint.setPlan("{\"items\":[{\"kind\":\"permission\"}]}");
+
+        assertThat(service.resolve(checkpoint, "approve", "").outcome())
+                .isEqualTo(ApprovalOutcome.ALLOWED);
+        assertThat(service.resolve(checkpoint, "reject", "").outcome())
+                .isEqualTo(ApprovalOutcome.REJECTED);
+        assertThat(service.resolve(checkpoint, "cancel", "").outcome())
+                .isEqualTo(ApprovalOutcome.CANCELLED);
+        assertThat(service.resolve(checkpoint, "not-a-real-action", "").outcome())
+                .isEqualTo(ApprovalOutcome.UNAVAILABLE);
+        assertThat(service.resolve(checkpoint, null, "").approved()).isFalse();
+        assertThat(service.resolve(checkpoint, "not-a-real-action", "").text())
+                .isEqualTo(ApprovalOutcome.UNAVAILABLE.wireValue());
+    }
+
     /** 用指定的属性（阈值）与工具输入触发一次确认卡片，捕获其中的方案与动作。 */
+    @Test
+    void writeGraphConfirmationListsWriteNodesAndTools() {
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(
+                mock(AgentRuntimeSupport.class),
+                mock(com.moon.moonagent.mapper.AgentCheckpointMapper.class));
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-write")
+                .name(AgentScopeOrchestrationTools.RUN_WRITE_TASK_GRAPH)
+                .input(Map.of("task", "写文件", "nodes", List.of(Map.of(
+                        "id", "writer",
+                        "role", "writer",
+                        "allowWrite", true,
+                        "tools", List.of("write_file", "run_python_script")))))
+                .build();
+
+        String prompt = service.confirmationPrompt(
+                AgentApprovalMode.PLAN_APPROVAL, List.of(call));
+
+        assertThat(prompt)
+                .contains("writer")
+                .contains("write_file")
+                .contains("run_python_script");
+    }
+
+    @Test
+    void writeGraphPayloadExposesApprovalOptions() {
+        AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);
+        AgentScopeCheckpointService service = new AgentScopeCheckpointService(
+                support, mock(com.moon.moonagent.mapper.AgentCheckpointMapper.class));
+        AgentConversation conversation = new AgentConversation();
+        conversation.setId("c1");
+        conversation.setApprovalMode(AgentApprovalMode.PLAN_APPROVAL.name());
+        OrchestrationRequest request = new OrchestrationRequest(conversation, "", List.of(), null);
+        ToolUseBlock call = ToolUseBlock.builder()
+                .id("call-write")
+                .name(AgentScopeOrchestrationTools.RUN_WRITE_TASK_GRAPH)
+                .input(Map.of("task", "写文件", "nodes", List.of(Map.of(
+                        "id", "writer",
+                        "role", "writer",
+                        "allowWrite", true,
+                        "tools", List.of("write_file")))))
+                .build();
+
+        service.pauseForConfirmation(request, "reply-write", List.of(call));
+
+        org.mockito.ArgumentCaptor<AgentRuntimeSupport.StagePlan> stage =
+                org.mockito.ArgumentCaptor.forClass(AgentRuntimeSupport.StagePlan.class);
+        verify(support).runHITLStage(any(), stage.capture(), any(Consumer.class));
+        assertThat(stage.getValue().planPayload().getFirst())
+                .extractingByKey("writeToolOptions")
+                .asList()
+                .isNotEmpty();
+    }
+
     private static CapturedConfirmation confirmJourney(Map<String, Object> input,
                                                        AgentScopeProperties properties) {
         AgentRuntimeSupport support = mock(AgentRuntimeSupport.class);

@@ -935,6 +935,13 @@ public class AgentRuntimeSupport {
         if (plan.reasons() != null && !plan.reasons().isEmpty()) event.put("reasons", plan.reasons());
         // 资产选择卡片：勾选清单下发（前端渲染多选；无资产/非选择卡片时字段缺失）
         if (plan.assets() != null && !plan.assets().isEmpty()) event.put("assets", plan.assets());
+        // 写任务图：逐节点/逐工具授权选项（前端渲染勾选；缺失时保持整图批准）
+        if (plan.planPayload() != null && !plan.planPayload().isEmpty()) {
+            Object writeTools = plan.planPayload().getFirst().get("writeToolOptions");
+            if (writeTools instanceof List<?> list && !list.isEmpty()) {
+                event.put("writeTools", list);
+            }
+        }
         sendEvent(req, plan.eventName(), event);
         return plan.planText();
     }
@@ -948,6 +955,9 @@ public class AgentRuntimeSupport {
             m.setContent(plan.planText());
             Map<String, Object> metadata = new java.util.LinkedHashMap<>();
             metadata.put("kind", "video_plan".equals(plan.eventName()) ? "video-plan" : "hitl");
+            if (req.getTurnId() != null && !req.getTurnId().isBlank()) {
+                metadata.put("turnId", req.getTurnId());
+            }
             metadata.put("pending", true);
             metadata.put("formContent", plan.planText());
             metadata.put("hitlType", plan.eventName());

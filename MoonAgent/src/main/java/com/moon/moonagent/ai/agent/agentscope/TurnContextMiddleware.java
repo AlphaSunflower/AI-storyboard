@@ -45,6 +45,8 @@ final class TurnContextMiddleware implements MiddlewareBase {
     private final SceneReferenceService sceneReferences;
     /** 项目库文件 → 会话资产转存服务；未接线时为 null，此时项目库文件只能给元数据（正文不可用）。 */
     private final LibraryReferenceAssetService libraryAssets;
+    /** 项目级长期记忆；未接线时不注入。 */
+    private final com.moon.moonagent.ai.agent.memory.AgentMemoryService memories;
 
     TurnContextMiddleware(AgentWorkflowService workflows,
                           ProjectCreativeContextService creativeContext,
@@ -77,6 +79,18 @@ final class TurnContextMiddleware implements MiddlewareBase {
                           TurnCapabilityReporter capabilities,
                           SceneReferenceService sceneReferences,
                           LibraryReferenceAssetService libraryAssets) {
+        this(workflows, creativeContext, constraints, documents, capabilities,
+                sceneReferences, libraryAssets, null);
+    }
+
+    TurnContextMiddleware(AgentWorkflowService workflows,
+                          ProjectCreativeContextService creativeContext,
+                          ConstraintExtractionService constraints,
+                          AgentDocumentService documents,
+                          TurnCapabilityReporter capabilities,
+                          SceneReferenceService sceneReferences,
+                          LibraryReferenceAssetService libraryAssets,
+                          com.moon.moonagent.ai.agent.memory.AgentMemoryService memories) {
         this.workflows = workflows;
         this.creativeContext = creativeContext;
         this.constraints = constraints;
@@ -84,6 +98,7 @@ final class TurnContextMiddleware implements MiddlewareBase {
         this.capabilities = capabilities;
         this.sceneReferences = sceneReferences;
         this.libraryAssets = libraryAssets;
+        this.memories = memories;
     }
 
     @Override
@@ -193,6 +208,14 @@ final class TurnContextMiddleware implements MiddlewareBase {
             if (!projectContext.isBlank()) {
                 lines.add("<project-creative-context>\n" + projectContext
                         + "\n</project-creative-context>");
+            }
+            if (memories != null) {
+                String memoryContext = memories.promptContext(
+                        runContext.conversation().getProjectId(), request.getContent(), 5);
+                if (!memoryContext.isBlank()) {
+                    lines.add("<project-memories>\n" + memoryContext
+                            + "\n</project-memories>");
+                }
             }
         }
         ConstraintLedger ledger = constraints.extract(request.getContent());

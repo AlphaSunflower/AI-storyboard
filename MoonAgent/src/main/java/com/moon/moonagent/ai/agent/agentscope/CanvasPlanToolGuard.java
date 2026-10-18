@@ -28,7 +28,12 @@ import java.util.Map;
  */
 final class CanvasPlanToolGuard extends ToolBase {
 
-    /** 需要加守卫的工具名（顺序固定，便于日志与测试断言）。 */
+    /**
+     * 需要加守卫的工具名（顺序固定，便于日志与测试断言）。
+     *
+     * <p>这些是 AgentScope 框架自带的计划/待办工具，不是 Moon 自研工具，因此不进
+     * {@link ToolCatalog}；升级 AgentScope 时若框架改名，需要同步这里。
+     */
     static final List<String> GUARDED_TOOL_NAMES =
             List.of("plan_enter", "plan_write", "plan_exit", "todo_write");
 

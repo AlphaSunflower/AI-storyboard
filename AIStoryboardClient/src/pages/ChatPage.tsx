@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
 import { MessageBubble } from '../components/agent/MessageBubble';
@@ -42,7 +42,6 @@ import {
 } from '../lib/chatMessageRail';
 import { ProjectDropdown } from '../components/layout/ProjectDropdown';
 import { Tooltip, TooltipGroup } from '../components/common/Tooltip';
-import { PersonalInfoModal } from '../components/agent/PersonalInfoModal';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
@@ -125,6 +124,7 @@ function AgentStreamErrorNotice({ message }: { message: string }) {
 export function ChatPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const location = useLocation();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
   const userName = user?.displayName || '未登录';
@@ -146,6 +146,28 @@ export function ChatPage() {
     renameConversation, editAndResend,
   } = useAgentStore();
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+  useEffect(() => {
+    const state = location.state as { conversationId?: string; turnId?: string } | null;
+    if (state?.conversationId) {
+      pendingTurnJumpRef.current = state.turnId || null;
+      void useAgentStore.getState().selectConversation(state.conversationId);
+      navigate('/chat', { replace: true, state: null });
+    }
+  }, [location.state, navigate]);
+
+  useEffect(() => {
+    const turnId = pendingTurnJumpRef.current;
+    if (!turnId || messages.length === 0) return;
+    const timer = window.setTimeout(() => {
+      const target = document.querySelector(`[data-turn-id="${turnId}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        pendingTurnJumpRef.current = null;
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [messages]);
+
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
   const conversationReadOnly = activeConversation?.status === 'archived'
     || activeConversation?.orchestrationMode === 'LEGACY';
@@ -156,7 +178,6 @@ export function ChatPage() {
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
   const [projectOpen, setProjectOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [generationCenterOpen, setGenerationCenterOpen] = useState(false);
   const [generationCenterTab, setGenerationCenterTab] = useState<GenerationCenterTab>('active');
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -165,6 +186,7 @@ export function ChatPage() {
   /** 输入卡当前是否收缩（含聚焦还原）：用于「回到底部」对齐卡片右边缘 */
   const [composerCollapsed, setComposerCollapsed] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
+  const pendingTurnJumpRef = useRef<string | null>(null);
   const openedCanvasSessionRef = useRef<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
   const titleSavingRef = useRef(false);
@@ -956,7 +978,7 @@ export function ChatPage() {
           <MobileSidebarContent
             onSelectConversation={handleMobileSelectConversation}
             onClose={() => setMobileSidebarOpen(false)}
-            onOpenSettings={() => { setProfileOpen(true); setMobileSidebarOpen(false); }}
+            onOpenSettings={() => { setMobileSidebarOpen(false); navigate('/account'); }}
             onOpenRecords={() => { setRecordsOpen(true); setMobileSidebarOpen(false); }}
             logout={logout}
             canvasLocked={canvasPhase !== 'natural'}
@@ -1165,7 +1187,6 @@ export function ChatPage() {
         )}
 
         <MobileBottomNav onOpenAssets={() => navigate('/library')} />
-        <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
     <div
@@ -1223,7 +1244,7 @@ export function ChatPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                   <Tooltip side="right" label="个人信息">
                     <button
-                      onClick={() => setProfileOpen(true)}
+                      onClick={() => navigate('/account')}
                       aria-label="个人信息"
                       style={railIconBtn}
                       className="chat-icon-button"
@@ -1319,7 +1340,7 @@ export function ChatPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Tooltip className="tooltip-grow" label="个人信息">
                   <button
-                    onClick={() => setProfileOpen(true)}
+                    onClick={() => navigate('/account')}
                     aria-label="个人信息"
                     style={{
                       flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
@@ -1774,7 +1795,6 @@ export function ChatPage() {
         </ChatDockShell>
       </div>
 
-      <PersonalInfoModal open={profileOpen} onClose={() => setProfileOpen(false)} />
       {!embed && !chatApps.layout.fullscreen && (
         <GenerationCenterPanel
           open={generationCenterOpen}

@@ -1,0 +1,183 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:34:25.678767+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 23902,
+          "outputTokens": 1264,
+          "cachedInputTokens": 14336,
+          "totalTokens": 25166,
+          "contextTokens": 12621,
+          "contextWindowTokens": 1000000,
+          "durationMs": 9080,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 7449,
+          "toolDurationMs": 1024,
+          "systemPromptTokens": 882,
+          "toolDefinitionTokens": 11739,
+          "messageTokens": 0
+        },
+        "durationMs": 9311,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11277,
+          "outputTokens": 7,
+          "cachedInputTokens": 1920,
+          "totalTokens": 11284,
+          "contextTokens": 11277,
+          "contextWindowTokens": 1000000,
+          "durationMs": 1202,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 1125,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 788,
+          "toolDefinitionTokens": 10489,
+          "messageTokens": 0
+        },
+        "durationMs": 1247,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "当前项目共有 5 个分镜，讲的是同一只橘猫在黄昏的屋顶上，依次经历远景远眺、中景侧卧、面部特写与光影、起身舒展，再到暮色中望向月亮并入睡的过程，首尾旁白与字幕相互呼应；这 5 个镜头都还没有生成图片和视频，进度为 0/5，时长尚未填，也没有角色固定的外观描述。",
+        "tools": [
+          "reset_equipped_tools",
+          "load_skill_through_path",
+          "list_project_storyboard",
+          "run_task_graph",
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 91311,
+          "outputTokens": 2996,
+          "cachedInputTokens": 66432,
+          "totalTokens": 94307,
+          "contextTokens": 21995,
+          "contextWindowTokens": 1000000,
+          "durationMs": 34692,
+          "modelCalls": 5,
+          "complete": true,
+          "modelDurationMs": 17685,
+          "toolDurationMs": 16795,
+          "systemPromptTokens": 1536,
+          "toolDefinitionTokens": 20459,
+          "messageTokens": 0
+        },
+        "durationMs": 34747,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hitl-reject",
+      "result": {
+        "status": "completed",
+        "final": "已取消，本次操作未执行。",
+        "tools": [
+          "load_skill_through_path",
+          "run_python_script"
+        ],
+        "metrics": {},
+        "durationMs": 3992,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-readonly",
+      "result": {
+        "status": "completed",
+        "final": "当前项目 5 场分镜的字段与运镜设计基本完整，但仍有四处 P0 级问题：镜头时长全部缺失、第 1 场机位自相矛盾、负面词写入了“无文字无字幕”、完全没有参考素材；因此应先修正这些问题，再批量生成图片和视频。",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 25481,
+          "outputTokens": 583,
+          "cachedInputTokens": 13568,
+          "totalTokens": 26064,
+          "contextTokens": 14183,
+          "contextWindowTokens": 1000000,
+          "durationMs": 35123,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 4886,
+          "toolDurationMs": 30139,
+          "systemPromptTokens": 991,
+          "toolDefinitionTokens": 13192,
+          "messageTokens": 0
+        },
+        "durationMs": 35163,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-steer",
+      "result": {
+        "status": "completed",
+        "final": "STEER-EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 26854,
+          "outputTokens": 524,
+          "cachedInputTokens": 13696,
+          "totalTokens": 27378,
+          "contextTokens": 15538,
+          "contextWindowTokens": 1000000,
+          "durationMs": 35006,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 4059,
+          "toolDurationMs": 30855,
+          "systemPromptTokens": 1085,
+          "toolDefinitionTokens": 14453,
+          "messageTokens": 0
+        },
+        "durationMs": 35057,
+        "steerSent": true,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 6,
+  "failed": 0,
+  "skipped": 1
+}

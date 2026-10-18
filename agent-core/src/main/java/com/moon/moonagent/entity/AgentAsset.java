@@ -28,6 +28,12 @@ public class AgentAsset {
     private String prompt;
     private String model;
     private String purpose; // 用户上传素材时填写的用途/说明（人物/场景/风格参考等）
+    /**
+     * 视觉模型生成的素材语义描述（「角色｜林知夏：短发女性，黑色风衣…」）。
+     * 上传后由 AssetCaptionService 异步写入；SessionAssetService 的 label 优先读它，
+     * 否则模型只会看到「会话图片」，无法按剧本把对应资产绑到分镜。
+     */
+    private String description;
     private String kind;    // reference | asset（asset=带文字约束，无需整理智能体再次分类）
     private String status;  // queued | generating | completed | failed
     private String taskId;  // 视频异步任务 ID

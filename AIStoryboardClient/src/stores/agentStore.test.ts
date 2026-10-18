@@ -720,6 +720,41 @@ describe('agentStore message metrics', () => {
     expect(useAgentStore.getState().generating['conversation-1']?.contextWindowTokens).toBe(1000000);
   });
 
+  it('inserts a steered user message before the streaming assistant bubble exactly once', () => {
+    const context = { conversationId: 'conversation-1', assistantId: 'assistant-1' };
+    useAgentStore.setState({
+      activeConversationId: 'conversation-1',
+      messages: [{
+        id: 'assistant-1',
+        conversationId: 'conversation-1',
+        role: 'assistant',
+        content: '',
+        createdAt: '2026-10-17T00:00:00.000Z',
+      }],
+      generating: {},
+    });
+    const turnId = 'turn-steer-test';
+    const envelope = (seq: number) => sseEnvelope(
+      seq,
+      'USER_MESSAGE',
+      {
+        messageId: 'steer-1',
+        content: '改成暖色',
+        createdAt: '2026-10-17T00:00:01.000Z',
+      },
+      turnId,
+    );
+
+    applyAgentTurnEnvelope(envelope(1), context);
+    // 同一条事件重放（重连/补偿）不得插出第二个气泡
+    applyAgentTurnEnvelope(envelope(2), context);
+
+    const messages = useAgentStore.getState().messages;
+    expect(messages.map((message) => message.id)).toEqual(['steer-1', 'assistant-1']);
+    expect(messages[0].metadata?.steer).toBe(true);
+    expect(messages[0].metadata?.turnId).toBe(turnId);
+  });
+
   it('keeps attachment metadata on the optimistic user message and send request', async () => {
     const body = sseBody([
       sseEnvelope(1, 'turn_started', { conversationId: 'conversation-1' }),

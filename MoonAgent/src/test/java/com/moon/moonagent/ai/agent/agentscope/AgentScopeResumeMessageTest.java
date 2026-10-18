@@ -1,5 +1,6 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
+import com.moon.moonagent.ai.agent.human.ApprovalOutcome;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.ToolResultBlock;
@@ -13,7 +14,8 @@ class AgentScopeResumeMessageTest {
     void externalToolResumeUsesToolRoleForToolResultBlock() {
         Msg message = MoonAgentRuntime.resumeMessage(
                 new AgentScopeCheckpointService.ResumeValue(
-                        "external", "call-1", "request_human_input", "append", true));
+                        "external", "call-1", "request_human_input", "append",
+                        ApprovalOutcome.ALLOWED));
 
         assertThat(message.getRole()).isEqualTo(MsgRole.TOOL);
         assertThat(message.getContent()).singleElement()

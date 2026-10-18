@@ -1,0 +1,200 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:25:59.823039+00:00",
+  "cases": [
+    {
+      "name": "identity-smoke",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-OK",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11730,
+          "outputTokens": 5,
+          "cachedInputTokens": 1152,
+          "totalTokens": 11735,
+          "contextTokens": 11730,
+          "contextWindowTokens": 1000000,
+          "durationMs": 567,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 512,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 819,
+          "toolDefinitionTokens": 10911,
+          "messageTokens": 0
+        },
+        "durationMs": 611,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "hello-no-tools",
+      "result": {
+        "status": "completed",
+        "final": "EVAL-HELLO",
+        "tools": [],
+        "metrics": {
+          "inputTokens": 11747,
+          "outputTokens": 7,
+          "cachedInputTokens": 2688,
+          "totalTokens": 11754,
+          "contextTokens": 11747,
+          "contextWindowTokens": 1000000,
+          "durationMs": 976,
+          "modelCalls": 1,
+          "complete": true,
+          "modelDurationMs": 916,
+          "toolDurationMs": 0,
+          "systemPromptTokens": 821,
+          "toolDefinitionTokens": 10926,
+          "messageTokens": 0
+        },
+        "durationMs": 1021,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "paused",
+        "final": "",
+        "tools": [
+          "get_creative_context",
+          "run_task_graph",
+          "run_task_graph",
+          "execute"
+        ],
+        "metrics": {},
+        "durationMs": 8142,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [
+        "status=paused 期望 completed"
+      ],
+      "passed": false
+    },
+    {
+      "name": "hitl-reject",
+      "result": {
+        "status": "completed",
+        "final": "已取消，本次操作未执行。",
+        "tools": [
+          "run_python_script",
+          "run_task_graph"
+        ],
+        "metrics": {},
+        "durationMs": 3528,
+        "steerSent": false,
+        "hitlHandled": true
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-readonly",
+      "result": {
+        "status": "completed",
+        "final": "**一句话总结**：项目分镜目前因处于画布编辑模式而完全不可读，所以无法判断是否适合继续生成；评审结论是\"评审不可执行\"，因此需要先退出画布模式，重新读取分镜，再决定是否继续。\n\n补充关键事实：\n\n| 检查项 | 结果 |\n|---|---|\n| 分镜列表 | 画布模式下分镜工具不可用，无法读取镜号、时长、场景、画面描述、台词 |\n| 时间轴 | 无可用时间轴数据 |\n| 创意上下文 | 创作目标、创意方向、视觉风格均为空；没有已批准的参考素材 |\n| 会话素材 / 素材组 | 均为空 |\n| 结论 | 不是\"0 个镜头\"，而是\"未知\"，应按阻塞处理，暂不下发生成 |\n\n建议二选一：退出画布模式后重新发起分镜调研；或留在画布模式，把评审对象改为画布节点编排结构，并先提供节点清单与连边信息。",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 25421,
+          "outputTokens": 659,
+          "cachedInputTokens": 13952,
+          "totalTokens": 26080,
+          "contextTokens": 13655,
+          "contextWindowTokens": 1000000,
+          "durationMs": 20894,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 4704,
+          "toolDurationMs": 16056,
+          "systemPromptTokens": 954,
+          "toolDefinitionTokens": 12701,
+          "messageTokens": 0
+        },
+        "durationMs": 20931,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "task-graph-steer",
+      "result": {
+        "status": "completed",
+        "final": "STEER-EVAL-OK",
+        "tools": [
+          "run_task_graph"
+        ],
+        "metrics": {
+          "inputTokens": 27374,
+          "outputTokens": 585,
+          "cachedInputTokens": 14976,
+          "totalTokens": 27959,
+          "contextTokens": 15593,
+          "contextWindowTokens": 1000000,
+          "durationMs": 36797,
+          "modelCalls": 2,
+          "complete": true,
+          "modelDurationMs": 4956,
+          "toolDurationMs": 31747,
+          "systemPromptTokens": 1089,
+          "toolDefinitionTokens": 14504,
+          "messageTokens": 0
+        },
+        "durationMs": 36829,
+        "steerSent": true,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "name": "canvas-readonly",
+      "result": {
+        "status": "completed",
+        "final": "## 当前画布状态\n\n| 项目 | 状态 |\n|---|---|\n| 节点数量 | 0 |\n| 连线数量 | 0 |\n| 生成记录 | 无 |\n| 版本（revision） | 0，从未保存过修改 |\n| 最近更新时间 | 还没有更新记录 |\n\n画布现在是完全空的：没有任何图片或视频节点、没有生成节点、没有结果槽，也没有连线，也没有历史生成记录。本轮只做了读取，没有创建、修改或连接任何内容。\n\n补充一点：项目里存着一条要求额外跑一轮编排流程的硬性设置，但它和「只读汇总」无关，本轮没有触发。如果后续要在这张空画布上搭结构（例如文生图、图生视频链路），告诉我想要的镜头或画面内容即可。",
+        "tools": [
+          "load_skill_through_path",
+          "reset_equipped_tools",
+          "canvas_graph_get_state"
+        ],
+        "metrics": {
+          "inputTokens": 69277,
+          "outputTokens": 1055,
+          "cachedInputTokens": 37248,
+          "totalTokens": 70332,
+          "contextTokens": 28884,
+          "contextWindowTokens": 1000000,
+          "durationMs": 7335,
+          "modelCalls": 3,
+          "complete": true,
+          "modelDurationMs": 7086,
+          "toolDurationMs": 139,
+          "systemPromptTokens": 1585,
+          "toolDefinitionTokens": 21105,
+          "messageTokens": 6194
+        },
+        "durationMs": 7373,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 6,
+  "failed": 1,
+  "skipped": 0
+}

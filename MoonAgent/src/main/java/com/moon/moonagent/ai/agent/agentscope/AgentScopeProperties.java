@@ -24,6 +24,17 @@ public class AgentScopeProperties {
     private String workspaceDir = "";
     private boolean structuredOutputEnabled = true;
     private boolean subagentsEnabled = true;
+    /** 一张任务图的总 token 预算；0 表示不限。 */
+    private int subagentMaxTokens = 200_000;
+    /** 一张任务图的总时长预算（毫秒）；0 表示不限。 */
+    private long subagentMaxDurationMs = 300_000;
+    /** 任务图最多自动修复几轮；有界，避免模型无限“再修一轮”。 */
+    private int subagentMaxRepairRounds = 2;
+    /** 单个子 Agent 节点的硬超时；修复节点重写整稿时 180s 不够。 */
+    private Duration subagentNodeTimeout = Duration.ofSeconds(240);
+    /** 服务端共享常量目录；contextRef 只能读这里的文件。 */
+    private String subagentContextRoot = "docs/specs";
+    private int subagentContextMaxChars = 32_000;
     private boolean compactionEnabled = true;
     /**
      * 消息数触发的压缩条件：{@code <= 0} 表示禁用该条件（harness 的
@@ -43,7 +54,18 @@ public class AgentScopeProperties {
     private int compactionKeepMessages = 12;
     private int compactionKeepTokens = 8_000;
     private boolean asyncEnabled = true;
-    private Duration asyncToolTimeout = Duration.ofSeconds(90);
+    /**
+     * 单个工具调用的硬超时（AgentScope Toolkit 级）。默认 5 分钟对“初跑+修复”任务图不够，
+     * 会导致 ToolExecutor 在 5 分钟后直接报 Tool execution timeout。
+     */
+    private Duration toolExecutionTimeout = Duration.ofMinutes(20);
+
+    /**
+     * 工具超过该时长会被 AsyncToolMiddleware 后台化。必须覆盖“初跑 + 一轮修复”两段
+     * 任务图预算：后台结果投递会走 sandbox filesystem（无 active call context 时直接报
+     * No active sandbox），导致结果丢失。
+     */
+    private Duration asyncToolTimeout = Duration.ofMinutes(21);
     private int batchConfirmThreshold = 4;
     private int imageBatchConcurrency = 3;
     private boolean wakeupEnabled = true;
@@ -62,7 +84,11 @@ public class AgentScopeProperties {
      * 置 false 时恢复到"原样透出 MCP schema"的旧行为。
      */
     private boolean canvasSchemaHideInjectedParams = true;
-    private boolean toolResultEvictionEnabled = true;
+    /**
+     * 工具结果驱逐开关。默认关闭：超长结果不再截成「头尾预览」后丢弃，而是原样留在上下文里。
+     * 打开后超过 {@link #toolResultEvictionMaxChars} 的结果会写入工作区并替换成预览。
+     */
+    private boolean toolResultEvictionEnabled = false;
     private int toolResultEvictionMaxChars = 80_000;
     private int toolResultEvictionPreviewChars = 2_000;
     private boolean otelTracingEnabled = true;
@@ -204,6 +230,57 @@ public class AgentScopeProperties {
         this.subagentsEnabled = subagentsEnabled;
     }
 
+    public int getSubagentMaxTokens() {
+        return subagentMaxTokens;
+    }
+
+    public void setSubagentMaxTokens(int subagentMaxTokens) {
+        this.subagentMaxTokens = subagentMaxTokens;
+    }
+
+    public long getSubagentMaxDurationMs() {
+        return subagentMaxDurationMs;
+    }
+
+    public void setSubagentMaxDurationMs(long subagentMaxDurationMs) {
+        this.subagentMaxDurationMs = subagentMaxDurationMs;
+    }
+
+    public Duration getSubagentNodeTimeout() {
+        return subagentNodeTimeout;
+    }
+
+    public void setSubagentNodeTimeout(Duration subagentNodeTimeout) {
+        this.subagentNodeTimeout = subagentNodeTimeout == null
+                ? Duration.ofSeconds(240) : subagentNodeTimeout;
+    }
+
+    public String getSubagentContextRoot() {
+        return subagentContextRoot;
+    }
+
+    public void setSubagentContextRoot(String subagentContextRoot) {
+        this.subagentContextRoot = subagentContextRoot == null || subagentContextRoot.isBlank()
+                ? "docs/specs" : subagentContextRoot.trim();
+    }
+
+    public int getSubagentContextMaxChars() {
+        return subagentContextMaxChars;
+    }
+
+    public void setSubagentContextMaxChars(int subagentContextMaxChars) {
+        this.subagentContextMaxChars = subagentContextMaxChars <= 0
+                ? 32_000 : subagentContextMaxChars;
+    }
+
+    public int getSubagentMaxRepairRounds() {
+        return subagentMaxRepairRounds;
+    }
+
+    public void setSubagentMaxRepairRounds(int subagentMaxRepairRounds) {
+        this.subagentMaxRepairRounds = Math.max(0, Math.min(3, subagentMaxRepairRounds));
+    }
+
     public boolean isCompactionEnabled() {
         return compactionEnabled;
     }
@@ -275,7 +352,16 @@ public class AgentScopeProperties {
 
     public void setAsyncToolTimeout(Duration asyncToolTimeout) {
         this.asyncToolTimeout = asyncToolTimeout == null
-                ? Duration.ofSeconds(90) : asyncToolTimeout;
+                ? Duration.ofMinutes(21) : asyncToolTimeout;
+    }
+
+    public Duration getToolExecutionTimeout() {
+        return toolExecutionTimeout;
+    }
+
+    public void setToolExecutionTimeout(Duration toolExecutionTimeout) {
+        this.toolExecutionTimeout = toolExecutionTimeout == null
+                ? Duration.ofMinutes(20) : toolExecutionTimeout;
     }
 
     public int getBatchConfirmThreshold() {

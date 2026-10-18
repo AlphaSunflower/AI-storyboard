@@ -1,0 +1,42 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "startedAt": "2026-10-17T14:27:28.969335+00:00",
+  "cases": [
+    {
+      "name": "read-storyboard-no-media",
+      "result": {
+        "status": "completed",
+        "final": "当前项目共有 5 个分镜，内容是橘猫在夕阳屋顶上从静立、小憩、特写，到伸展并入睡的温柔暮色短片；提示词和镜头参数都已齐备，但 5 个分镜均尚未生成图片和视频。",
+        "tools": [
+          "reset_equipped_tools",
+          "load_skill_through_path",
+          "list_project_storyboard"
+        ],
+        "metrics": {
+          "inputTokens": 60379,
+          "outputTokens": 318,
+          "cachedInputTokens": 37504,
+          "totalTokens": 60697,
+          "contextTokens": 18118,
+          "contextWindowTokens": 1000000,
+          "durationMs": 4215,
+          "modelCalls": 4,
+          "complete": true,
+          "modelDurationMs": 4044,
+          "toolDurationMs": 27,
+          "systemPromptTokens": 1266,
+          "toolDefinitionTokens": 16852,
+          "messageTokens": 0
+        },
+        "durationMs": 4259,
+        "steerSent": false,
+        "hitlHandled": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0
+}

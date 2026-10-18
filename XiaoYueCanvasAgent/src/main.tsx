@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import '@xyflow/react/dist/style.css';
 import './index.css';
 import './styles.css';
+// 玻璃态表层：必须排在 styles.css 之后（同优先级下后加载者生效），
+// 且只覆盖画布组件，不触碰 Moon 智能体面板。
+import './glass.css';
 import App from './App';
 import { installRailDebug } from './railDebug';
 

@@ -751,12 +751,18 @@ function refreshOllamaBlock() {
   section.style.display = show ? '' : 'none';
 }
 
-/** 参数配置区（按类型分组表单）：数值参数用滑块（n 范围/temperature/max_tokens/top_p/时长），字符串枚举保持输入框 */
+/**
+ * 参数配置区（按类型分组表单）：数值参数用滑块（n 范围/时长），字符串枚举保持输入框。
+ *
+ * text 类型**不再暴露 temperature / max_tokens / top_p**：
+ * 网关只在 /v1/models 的 defaults 里透出它们，从不注入 OpenAI 兼容请求，
+ * 放在这里等于假旋钮——改了不起作用，还会让人误以为 1024 是真实输出上限。
+ * 采样与输出长度由调用方（MoonAgent 的 OpenAiChatOptions）显式决定。
+ * 文本模型真正需要维护的只有「上下文窗口」，它决定压缩阈值。
+ */
 const paramsGroups = {
-  text: sliderField('p-temperature', 'temperature', '0', '2', '0.1', '0.7')
-      + sliderField('p-maxtokens', 'max_tokens', '100', '8192', '100', '1024')
-      + sliderField('p-topp', 'top_p', '0', '1', '0.05', '0.9')
-      + '<label>上下文窗口(token) <input class="input" id="p-contextwindow" type="number" placeholder="如 1000000；空=未配置"></label>',
+  text: '<label>上下文窗口(token) <input class="input" id="p-contextwindow" type="number" placeholder="如 1000000；空=未配置"></label>'
+      + '<p class="test-hint">temperature / max_tokens / top_p 由调用方显式指定，网关不注入，故不在此配置。</p>',
   image: sliderField('p-nmin', '数量min', '1', '10', '1', '1')
        + sliderField('p-nmax', '数量max', '1', '10', '1', '4')
        + sliderField('p-ndefault', '数量默认', '1', '10', '1', '1')
@@ -843,7 +849,7 @@ function openRouteModal(route) {
         if (id === 'p-videodmax') { const mn = document.getElementById('p-videodmin'); if (mn && Number(mn.value) > Number(el.value)) mn.value = el.value; }
       });
     };
-    ['p-temperature', 'p-maxtokens', 'p-topp', 'p-nmin', 'p-nmax', 'p-ndefault', 'p-dmin', 'p-dmax', 'p-durationdefault',
+    ['p-nmin', 'p-nmax', 'p-ndefault', 'p-dmin', 'p-dmax', 'p-durationdefault',
      'p-refimagesmin', 'p-refimagesmax', 'p-refvideosmin', 'p-refvideosmax',
      'p-audiocountmin', 'p-audiocountmax', 'p-audiodmin', 'p-audiodmax', 'p-videodmin', 'p-videodmax',
      'p-maxtotalduration', 'p-maxtotalfiles', 'p-maxvideosize', 'p-maximagesize', 'p-maxaudiosize', 'p-maxbody', 'p-maxprompt']
@@ -933,9 +939,6 @@ async function loadModelParamsForEdit(modelName, type) {
       const span = $(id + '-val');
       if (span) span.textContent = v;
     };
-    set('p-temperature', mp.temperature);
-    set('p-maxtokens', mp.maxTokens);
-    set('p-topp', mp.topP);
     set('p-contextwindow', mp.contextWindow);
     set('p-nmin', mp.nMin);
     set('p-nmax', mp.nMax);
@@ -1058,9 +1061,8 @@ async function saveModelParams(modelName, type) {
   const req = { modelName, type };
   // isDefault 已随路由保存（PUT /admin/routes），此处不再重复
   if (type === 'text' || type === 'vision') {
-    req.temperature = val('p-temperature');
-    req.maxTokens = num('p-maxtokens');
-    req.topP = val('p-topp');
+    // temperature / max_tokens / top_p 不在这里提交：网关从不注入它们，
+    // 提交 null 反而会把历史值清掉；需要采样参数时由调用方在请求里显式给。
     req.contextWindow = num('p-contextwindow');
     // 本地/Ollama 扩展参数：仅「本地模型」开关勾选时落库；未勾选置空串清除历史值
     const localEl = $('#p-local');

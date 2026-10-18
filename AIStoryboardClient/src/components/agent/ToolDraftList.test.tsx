@@ -24,6 +24,16 @@ describe('ToolDraftList 工具输出', () => {
     expect(container.querySelector('[data-tool-draft-list]')).toBeNull();
   });
 
+  it('过滤 __fragment__ 流式占位草稿', () => {
+    render(<ToolDraftList drafts={{
+      fragment: draft({ name: '__fragment__', text: '', input: '' }),
+      real: draft(),
+    }} />);
+
+    expect(screen.getByText('工具调用（1）')).toBeDefined();
+    expect(screen.queryByText('__fragment__')).toBeNull();
+  });
+
   it('渲染工具名与状态，默认折叠输出、展开后显示 monospace 输出', () => {
     render(<ToolDraftList drafts={{ 'call-1': draft() }} />);
 

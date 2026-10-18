@@ -12,9 +12,12 @@ import com.moon.moonagent.ai.agent.sandbox.SandboxExecutionResult;
 import com.moon.moonagent.ai.agent.sandbox.SandboxOutputReconciler;
 import com.moon.moonagent.ai.agent.task.AgentTaskEventHub;
 import com.moon.moonagent.ai.agent.task.AgentTaskView;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.AssetRef;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PlotAssessment;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.PseudoShot;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.RoleKind;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.RoleProfile;
+import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.ShotReferenceResolution;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryBible;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryboardCommitMode;
@@ -189,12 +192,15 @@ class AgentScopeAsyncTaskServiceTest {
                 "run-1", "conversation-1", Stage.FINAL_REVIEW, 4,
                 "原始剧情", "修正剧情", "",
                 new PlotAssessment(false, List.of(), List.of(), "已修正", ""),
-                StoryBible.empty(), List.of(), List.of(), List.of(), List.of(shot), "");
+                StoryBible.empty(), List.of(),
+                List.of(new AssetRef("asset-1", "reference", "/api/files/images/hero.png",
+                        "角色｜林知夏：短发女性")),
+                List.of(), List.of(shot), "");
         StoryboardRunSnapshot completed = new StoryboardRunSnapshot(
                 "run-1", "conversation-1", Stage.COMPLETED, 5,
                 "原始剧情", "修正剧情", "",
-                finalReview.assessment(), StoryBible.empty(), List.of(), List.of(),
-                List.of(), List.of(shot), "");
+                finalReview.assessment(), StoryBible.empty(), List.of(),
+                finalReview.assets(), List.of(), List.of(shot), "");
         when(productionService.startAutoStoryboard(
                 any(StoryboardProductionRequest.class), any(StoryboardProgressListener.class)))
                 .thenReturn(finalReview);
@@ -203,6 +209,10 @@ class AgentScopeAsyncTaskServiceTest {
         when(storyboardClient.appendProjectScenes(eq("project-1"), any())).thenReturn(List.of("scene-1"));
         when(productionService.markCompleted(eq("run-1"), eq("user-1"), eq("project-1"), any()))
                 .thenReturn(completed);
+        // 伪分镜阶段绑定的资产，写库后必须挂到对应项目分镜上（此前整段丢失）
+        when(productionService.referenceAssetIds("run-1", "shot-1"))
+                .thenReturn(new ShotReferenceResolution(
+                        List.of("asset-1"), List.of("asset-1"), false, true, false));
 
         String taskId = service.startStoryboardTask(
                 conversation,
@@ -225,6 +235,16 @@ class AgentScopeAsyncTaskServiceTest {
         assertThat(service.getTask("user-1", "task-1").canFollowUp()).isFalse();
         verify(productionService).startAutoStoryboard(any(), any());
         verify(storyboardClient).appendProjectScenes(eq("project-1"), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> refs =
+                ArgumentCaptor.forClass(List.class);
+        verify(storyboardClient).linkSceneReferences(eq("scene-1"), refs.capture());
+        assertThat(refs.getValue()).hasSize(1);
+        assertThat(refs.getValue().getFirst())
+                .containsEntry("url", "/api/files/images/hero.png")
+                .containsEntry("type", "image")
+                .containsEntry("sourceType", "agent_asset")
+                .containsEntry("sourceId", "asset-1");
         verify(productionService).markCompleted(
                 eq("run-1"), eq("user-1"), eq("project-1"), eq(Map.of("shot-1", "scene-1")));
     }
@@ -307,7 +327,10 @@ class AgentScopeAsyncTaskServiceTest {
                 "run-plot", "conversation-1", Stage.PLOT_REVIEW, 1,
                 "原始需求", "优化后的完整剧情", "",
                 new PlotAssessment(false, List.of(), List.of(), "已优化", ""),
-                StoryBible.empty(), List.of(), List.of(), List.of(), List.of(), "");
+                StoryBible.empty(), List.of(), List.of(),
+                List.of(new PseudoShot("shot-1", "outline", 1, "", List.of(), "旧仓库", "夜", "",
+                        "主角推门进入仓库", "", List.of(), List.of(), List.of("asset-1"))),
+                List.of(), "");
         when(productionService.start(any(), any())).thenReturn(plotReview);
 
         service.startPlotReviewStoryboardTask(
@@ -321,9 +344,12 @@ class AgentScopeAsyncTaskServiceTest {
         awaitStatus(persisted, "completed");
         verify(productionService).start(any(), any());
         verify(productionService, never()).startAutoStoryboard(any(), any());
+        // 阶段 A 的审阅内容必须是「梗概 + 镜头大纲表 + run_id」：
+        // 前端「确认剧情」按钮靠这段文字里的 run_id 取 runId，缺了按钮就不出现；
+        // 用户也要能逐行看到每镜拍什么、带几张参考图，而不是盲批一段剧本。
         assertThat(message.getValue().getContent())
-                .contains("剧情稿", "优化后的完整剧情")
-                .doesNotContain("分镜诊断完成", "缺口", "风险", "run_id", "PLOT_REVIEW");
+                .contains("镜头大纲", "优化后的完整剧情", "主角推门进入仓库", "1 个", "run_id: `run-plot`")
+                .doesNotContain("分镜诊断完成", "缺口", "风险", "PLOT_REVIEW");
         assertThat(message.getValue().getMetadata())
                 .containsEntry("kind", "storyboard-review");
         assertThat(((Map<?, ?>) message.getValue().getMetadata().get("storyboardReview"))
@@ -1042,6 +1068,27 @@ class AgentScopeAsyncTaskServiceTest {
         // 竞态修复的接线点：任务收口前必须补扫一次 output/（只取新建，避免重复挂历史产物）。
         verify(reconciler).reconcileNew(conversation, "task-1");
         verify(publisher).publish(eq(conversation), eq("task-1"), any());
+    }
+
+    /**
+     * 模型的 referenceHints 会把「id + 用途说明」混在一起写。落库前必须还原成真实 id，
+     * 否则拿一串带中文的字符串去查 url，永远查不到（实测这三种写法都出现过）。
+     */
+    @Test
+    void normalizeAssetIdExtractsIdFromModelWrittenHints() {
+        String assetId = "27abfc164e8c4d169d6dfba7dd83348e";
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId(assetId)).isEqualTo(assetId);
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId(
+                assetId + "｜仅用于镜头4的背影站位构图关系参考")).isEqualTo(assetId);
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId(
+                "参考资产 " + assetId + "：仅用于锁定少年背影造型与身高比例")).isEqualTo(assetId);
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId(
+                "[asset:" + assetId + "] 参考神龙召唤的构图范式")).isEqualTo(assetId);
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId(
+                "550e8400-e29b-41d4-a716-446655440000"))
+                .isEqualTo("550e8400-e29b-41d4-a716-446655440000");
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId("")).isEmpty();
+        assertThat(AgentScopeAsyncTaskService.normalizeAssetId(null)).isEmpty();
     }
 
     private static void awaitStatus(AtomicReference<AgentAsyncTask> taskRef, String status)

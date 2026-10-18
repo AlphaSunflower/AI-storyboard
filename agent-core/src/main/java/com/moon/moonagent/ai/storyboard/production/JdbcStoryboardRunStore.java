@@ -14,8 +14,10 @@ import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Sh
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.Stage;
 import com.moon.moonagent.ai.storyboard.production.StoryboardProductionModels.StoryBible;
 import com.moon.moonagent.entity.StoryboardRunEntity;
+import com.moon.moonagent.entity.StoryboardShotChangeEntity;
 import com.moon.moonagent.entity.StoryboardShotRecordEntity;
 import com.moon.moonagent.mapper.StoryboardRunMapper;
+import com.moon.moonagent.mapper.StoryboardShotChangeMapper;
 import com.moon.moonagent.mapper.StoryboardShotRecordMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -30,6 +32,7 @@ public class JdbcStoryboardRunStore implements StoryboardRunStore {
 
     private final StoryboardRunMapper runMapper;
     private final StoryboardShotRecordMapper shotMapper;
+    private final StoryboardShotChangeMapper changeMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -101,6 +104,40 @@ public class JdbcStoryboardRunStore implements StoryboardRunStore {
         entity.setProjectSceneId(record.projectSceneId());
         if (existing == null) shotMapper.insert(entity);
         else shotMapper.updateById(entity);
+    }
+
+    @Override
+    public void appendChanges(List<StoryboardChangeLog.ShotChange> changes) {
+        if (changes == null || changes.isEmpty()) return;
+        // 一条一批地插，避免 MyBatis-Plus 单条 insert 在高频编辑下的 N 次往返
+        for (StoryboardChangeLog.ShotChange change : changes) {
+            StoryboardShotChangeEntity entity = new StoryboardShotChangeEntity();
+            entity.setRunId(change.runId());
+            entity.setShotId(change.shotId());
+            entity.setShotOrdinal(change.shotOrdinal());
+            entity.setKind(change.kind());
+            entity.setSource(change.source());
+            entity.setField(change.field());
+            entity.setBeforeValue(change.before());
+            entity.setAfterValue(change.after());
+            entity.setCreatedAt(change.at() == null ? OffsetDateTime.now() : change.at());
+            changeMapper.insert(entity);
+        }
+    }
+
+    @Override
+    public List<StoryboardChangeLog.ShotChange> listChanges(String runId) {
+        if (runId == null || runId.isBlank()) return List.of();
+        return changeMapper.selectList(new LambdaQueryWrapper<StoryboardShotChangeEntity>()
+                        .eq(StoryboardShotChangeEntity::getRunId, runId)
+                        .orderByAsc(StoryboardShotChangeEntity::getCreatedAt))
+                .stream()
+                .map(entity -> new StoryboardChangeLog.ShotChange(
+                        entity.getRunId(), entity.getShotId(),
+                        entity.getShotOrdinal() == null ? 0 : entity.getShotOrdinal(),
+                        entity.getKind(), entity.getSource(), entity.getField(),
+                        entity.getBeforeValue(), entity.getAfterValue(), entity.getCreatedAt()))
+                .toList();
     }
 
     @Override

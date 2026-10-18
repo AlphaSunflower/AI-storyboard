@@ -26,8 +26,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 分镜服务实现。
@@ -55,9 +57,25 @@ public class SceneServiceImpl implements SceneService {
     public List<SceneResponse> listByProject(String projectId) {
         List<Scene> scenes = sceneMapper.findByProjectIdOrdered(projectId);
         Map<String, ScenePrompt> prompts = loadPrompts(scenes);
+        // 媒体过期是派生状态：大纲被改过、且改的时间晚于出图/出视频，就标过期（读取时算，零写入）
+        Set<String> stale = new HashSet<>(sceneMapper.findStaleSceneIds(projectId));
         return scenes.stream()
-            .map(s -> toResponse(s, prompts.get(s.getId())))
+            .map(s -> {
+                SceneResponse response = toResponse(s, prompts.get(s.getId()));
+                return stale.contains(s.getId()) ? withStale(response) : response;
+            })
             .toList();
+    }
+
+    /** 复制一份把 stale 置 true（record 不可变）。 */
+    private static SceneResponse withStale(SceneResponse r) {
+        return new SceneResponse(
+            r.id(), r.projectId(), r.conversationId(), r.sceneNumber(), r.scriptContent(),
+            r.imagePrompt(), r.videoPrompt(), r.negativePrompt(), r.cameraMovement(), r.shotType(),
+            r.soundDesign(), r.aiModel(), r.videoResolution(), r.duration(), r.imageUrl(),
+            r.videoUrl(), r.imageStatus(), r.videoStatus(), r.videoTaskId(), r.imageUrls(),
+            r.imageModel(), r.imageSize(), r.imageQuality(), r.imageN(), r.videoModel(),
+            r.videoAspectRatio(), r.createdAt(), r.updatedAt(), true);
     }
 
     @Override
@@ -271,7 +289,7 @@ public class SceneServiceImpl implements SceneService {
             p != null ? p.getImageN() : null,
             p != null ? p.getVideoModel() : null,
             p != null ? p.getVideoAspectRatio() : null,
-            s.getCreatedAt(), s.getUpdatedAt()
+            s.getCreatedAt(), s.getUpdatedAt(), false
         );
     }
 

@@ -227,13 +227,36 @@ describe('ChatComposer project library drops', () => {
     expect(useAgentStore.getState().refImageUrls).toEqual(['/api/files/images/b.png']);
   });
 
-  it('offers interrupt-and-send while the agent is streaming', () => {
+  it('offers steer while the agent is streaming', () => {
     useAgentStore.setState({ streaming: true });
     render(<ChatComposer />);
 
-    const input = screen.getByPlaceholderText('可输入新指令打断当前生成…');
+    const input = screen.getByPlaceholderText('可输入新指令插入当前回合…');
     fireEvent.change(input, { target: { value: '改成新的方向' } });
 
+    expect(screen.getByRole('button', { name: '插入并继续' })).toBeTruthy();
+  });
+
+  it('falls back to stop-and-send when steering would drop an attachment', () => {
+    useAgentStore.setState({
+      streaming: true,
+      pendingAttachments: [{
+        url: '/api/files/images/a.png',
+        name: '角色参考.png',
+        mimeType: 'image/png',
+        kind: 'image',
+      }],
+      refImageUrls: [],
+      pendingPicUrls: [],
+      pickedAssetIds: [],
+      pendingReferences: [],
+    });
+    render(<ChatComposer />);
+
+    const input = screen.getByPlaceholderText('可输入新指令插入当前回合…');
+    fireEvent.change(input, { target: { value: '带附件发送' } });
+
+    // steer 只带正文；附件必须走「停止并发送」，不能静默丢上下文
     expect(screen.getByRole('button', { name: '停止并发送' })).toBeTruthy();
   });
 
@@ -1375,6 +1398,68 @@ describe('ChatComposer @ 引用资料', () => {
     expect((option as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(option);
     expect(useAgentStore.getState().pendingReferences).toEqual([]);
+  });
+
+  it('会话再多也只内联最近 8 个，其余折成一行说明（菜单不再被撑高）', async () => {
+    const now = Date.now();
+    useAgentStore.setState({
+      conversations: [
+        {
+          id: 'conversation-1', userId: 'user-1', projectId: 'p1', title: '当前对话',
+          status: 'active', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(),
+        },
+        ...Array.from({ length: 10 }, (_, index) => ({
+          id: `conversation-history-${index + 1}`, userId: 'user-1', projectId: 'p1',
+          title: `历史会话 ${index + 1}`, status: 'active', messageCount: index,
+          createdAt: new Date(now - (index + 1) * 1000).toISOString(),
+          updatedAt: new Date(now - (index + 1) * 1000).toISOString(),
+        })),
+      ] as never,
+    });
+    render(<ChatComposer />);
+    typeMention();
+
+    const menu = await screen.findByRole('listbox', { name: '引用资料' });
+    const conversationOptions = screen.getAllByRole('option')
+      .filter((option) => option.textContent?.includes('对话《'));
+    expect(conversationOptions).toHaveLength(8);
+    // 最近的排最前，第 9、10 个只出现在说明行里
+    expect(conversationOptions[0].textContent).toContain('历史会话 1');
+    expect(menu.textContent).toContain('还有 2 个会话未列出');
+    expect(menu.textContent).not.toContain('历史会话 9');
+  });
+
+  it('分镜再多也只内联 8 个，其余提示走「全部分镜…」选择器', async () => {
+    useProjectStore.setState({
+      currentProject: { id: 'p1', name: '测试项目' } as never,
+      scenes: Array.from({ length: 10 }, (_, index) => ({
+        id: `scene-${index + 1}`, sceneNumber: index + 1, scriptContent: `描述 ${index + 1}`,
+      })) as never,
+    });
+    render(<ChatComposer />);
+    typeMention();
+
+    const menu = await screen.findByRole('listbox', { name: '引用资料' });
+    const sceneOptions = screen.getAllByRole('option')
+      .filter((option) => /^分镜 \d+/.test(option.textContent ?? ''));
+    expect(sceneOptions).toHaveLength(8);
+    expect(menu.textContent).toContain('还有 2 个分镜未列出');
+  });
+
+  it('输入筛选词时不受 8 条内联上限影响：第 9 条以后的分镜仍能搜到', async () => {
+    useProjectStore.setState({
+      currentProject: { id: 'p1', name: '测试项目' } as never,
+      scenes: Array.from({ length: 10 }, (_, index) => ({
+        id: `scene-${index + 1}`, sceneNumber: index + 1, scriptContent: `描述 ${index + 1}`,
+      })) as never,
+    });
+    render(<ChatComposer />);
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: '@分镜9' } });
+
+    const menu = await screen.findByRole('listbox', { name: '引用资料' });
+    expect(screen.getByRole('option', { name: /分镜 9/ })).toBeTruthy();
+    expect(menu.textContent).not.toContain('未列出');
   });
 
   it('＋ → 上传分镜 也只插入标记，不再立即发送', async () => {

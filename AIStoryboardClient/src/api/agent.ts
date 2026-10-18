@@ -110,6 +110,22 @@ export interface ClearContextResult {
   title: string;
 }
 
+/** 分镜草稿的一次字段级改动（GET /agent/storyboards/runs/{id}/changes）。 */
+export interface StoryboardChange {
+  runId: string;
+  shotId: string;
+  shotOrdinal: number;
+  /** INSERT / UPDATE / DELETE */
+  kind: string;
+  /** user / agent / system —— 谁改的 */
+  source: string;
+  /** 中文字段名：画面 / 地点 / 时间 / 角色 / 资产 */
+  field: string;
+  before: string;
+  after: string;
+  at: string;
+}
+
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
 export interface AgentReasoning {
   summary: string;
@@ -261,6 +277,10 @@ export interface AgentMessageMetadata {
    * 命中的气泡不再被后续 delta 续写。
    */
   interrupted?: boolean;
+  /** 这条用户消息是在回合进行中插入的（steer），不是独立的新一轮。 */
+  steer?: boolean;
+  /** steer 的客户端幂等 ID，用于乐观气泡与服务端事件去重。 */
+  clientMessageId?: string;
   canvasRunId?: string;
   canvasId?: string;
   turnId?: string;
@@ -651,6 +671,9 @@ export interface AssetOption {
 
 export type AgentTurnEventType =
   | 'turn_started'
+  | 'USER_MESSAGE'
+  | 'SUBAGENT_STARTED'
+  | 'SUBAGENT_COMPLETED'
   | 'agent_event'
   | 'turn_paused'
   | 'turn_completed'
@@ -753,6 +776,9 @@ export interface MediaCritique {
 
 const AGENT_TURN_EVENT_TYPES = new Set<AgentTurnEventType>([
   'turn_started',
+  'USER_MESSAGE',
+  'SUBAGENT_STARTED',
+  'SUBAGENT_COMPLETED',
   'agent_event',
   'turn_paused',
   'turn_completed',
@@ -910,6 +936,23 @@ export interface StoryboardImageEnqueueItem {
 
 // ── 会话 ──────────────────────────────────────────────
 
+export interface SubagentRunView {
+  id: string;
+  graphId: string;
+  conversationId: string;
+  turnId?: string;
+  toolCallId?: string;
+  nodeId: string;
+  role: string;
+  status: string;
+  instruction?: string;
+  output?: string;
+  error?: string;
+  tokens?: number;
+  durationMs?: number;
+  createdAt?: string;
+}
+
 export const agentApi = {
   listConversations: (projectId: string) =>
     client.get<{ data: AgentConversation[] }>('/agent/conversations', { params: { projectId } }),
@@ -957,6 +1000,18 @@ export const agentApi = {
 
   getRunPlan: (runId: string) =>
     client.get<{ data: Record<string, unknown> }>(`/agent/runs/${runId}/plan`),
+
+  listSubagentRuns: (conversationId: string, graphId?: string, limit = 50) =>
+    client.get<{ data: SubagentRunView[] }>('/agent/subagent-runs', {
+      params: { conversationId, graphId: graphId || undefined, limit },
+    }),
+
+  retrySubagentRun: (runId: string, conversationId: string) =>
+    client.post<{ data: { conversationId: string; turnId: string; prompt: string; tool: string } }>(
+      `/agent/subagent-runs/${runId}/retry`,
+      undefined,
+      { params: { conversationId } },
+    ),
 
   getRunCritiques: (runId: string) =>
     client.get<{ data: MediaCritique[] }>(`/agent/runs/${runId}/critique`),
@@ -1100,6 +1155,10 @@ export const agentApi = {
   getStoryboardRun: (runId: string) =>
     client.get<{ data: AgentStoryboardRun }>(`/agent/storyboards/runs/${runId}`),
 
+  /** 分镜草稿改动日志（字段级 before/after）：刷新、换设备、审批之后都能追溯。 */
+  getStoryboardChanges: (runId: string) =>
+    client.get<{ data: StoryboardChange[] }>(`/agent/storyboards/runs/${runId}/changes`),
+
   saveStoryboardDraft: (
     runId: string,
     data: {
@@ -1181,6 +1240,16 @@ export const agentApi = {
   /** 会话级打断：turnId 还没下发（turn_started 未到）时的兜底入口。 */
   interruptConversation: (conversationId: string) =>
     client.post<{ data: boolean }>(`/agent/conversations/${conversationId}/interrupt`),
+
+  /**
+   * 回合中插入一条用户消息（steer）：不打断当前工具，在下一个模型步骤注入。
+   * 返回 not_running 表示回合已结束，调用方应改走普通发送。
+   */
+  steerTurn: (conversationId: string, turnId: string, content: string, clientMessageId: string) =>
+    client.post<{ data: { status: string; turnId: string; messageId: string | null } }>(
+      `/agent/conversations/${conversationId}/turns/${encodeURIComponent(turnId)}/steer`,
+      { content, clientMessageId },
+    ),
 };
 
 /**

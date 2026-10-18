@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatMentionMenu, mentionItemMatches, type MentionMenuItem } from './ChatMentionMenu';
+import { ChatMentionMenu, MENTION_MENU_MAX_HEIGHT, mentionItemMatches, type MentionMenuItem } from './ChatMentionMenu';
 
 afterEach(cleanup);
 
@@ -102,5 +102,67 @@ describe('ChatMentionMenu', () => {
   it('没有任何匹配项时不渲染浮层', () => {
     renderMenu(buildItems(), '完全无关');
     expect(screen.queryByRole('listbox', { name: '引用资料' })).toBeNull();
+  });
+
+  it('菜单高度有上限：可用空间再大也不铺满整屏，超出内部滚动', () => {
+    // 输入卡在页面底部（top=800），可用高度 784px：不夹上限时菜单会顶到视口顶部
+    const anchorRef = createRef<HTMLDivElement>();
+    const rect = {
+      top: 800, bottom: 900, left: 300, right: 620, width: 320, height: 100,
+      x: 300, y: 800, toJSON: () => ({}),
+    } as DOMRect;
+    render(
+      <div>
+        <div ref={(node) => {
+          if (!node) return;
+          node.getBoundingClientRect = () => rect;
+          (anchorRef as { current: HTMLDivElement | null }).current = node;
+        }} />
+        <ChatMentionMenu items={buildItems()} query="" onClose={vi.fn()} anchorRef={anchorRef} />
+      </div>,
+    );
+    const menu = screen.getByRole('listbox', { name: '引用资料' });
+    expect(menu.style.maxHeight).toBe(`${MENTION_MENU_MAX_HEIGHT}px`);
+    expect(menu.style.overflowY).toBe('auto');
+  });
+
+  it('可用高度不足上限时按实际空间夹取，不留白', () => {
+    const anchorRef = createRef<HTMLDivElement>();
+    const rect = {
+      top: 300, bottom: 400, left: 300, right: 620, width: 320, height: 100,
+      x: 300, y: 300, toJSON: () => ({}),
+    } as DOMRect;
+    render(
+      <div>
+        <div ref={(node) => {
+          if (!node) return;
+          node.getBoundingClientRect = () => rect;
+          (anchorRef as { current: HTMLDivElement | null }).current = node;
+        }} />
+        <ChatMentionMenu items={buildItems()} query="" onClose={vi.fn()} anchorRef={anchorRef} />
+      </div>,
+    );
+    // 上方只剩 300 - 8(间距) - 8(边距) = 284px
+    expect(screen.getByRole('listbox', { name: '引用资料' }).style.maxHeight).toBe('284px');
+  });
+
+  it('说明行不是候选项：不计入分组数量、不可选中', () => {
+    const items: MentionMenuItem[] = [
+      ...buildItems(),
+      {
+        id: 'conversation-more', group: 'conversation', icon: null, note: true,
+        title: '还有 3 个会话未列出，输入标题可筛选', run: vi.fn(),
+      },
+    ];
+    renderMenu(items);
+    const listbox = screen.getByRole('listbox', { name: '引用资料' });
+    expect(listbox.textContent).toContain('对话（1）');
+    expect(screen.getByText('还有 3 个会话未列出，输入标题可筛选')).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /还有 3 个会话/ })).toBeNull();
+    // 键盘选中项只落在真候选上
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    const selected = screen.getAllByRole('option').filter((option) => option.getAttribute('aria-selected') === 'true');
+    expect(selected).toHaveLength(1);
+    expect(selected[0].textContent).toContain('分镜 3');
   });
 });

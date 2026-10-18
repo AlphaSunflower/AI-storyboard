@@ -7,10 +7,12 @@ import com.moon.moonagent.dto.request.AgentApprovalModeUpdateRequest;
 import com.moon.moonagent.dto.request.AgentCreateConversationRequest;
 import com.moon.moonagent.dto.request.AgentFormSubmitRequest;
 import com.moon.moonagent.dto.request.AgentSendMessageRequest;
+import com.moon.moonagent.dto.request.AgentSteerRequest;
 import com.moon.moonagent.dto.request.AgentVideoPlanGenerateRequest;
 import com.moon.moonagent.dto.request.PromptOptimizeRequest;
 import com.moon.moonagent.dto.response.AgentConversationVO;
 import com.moon.moonagent.dto.response.AgentMessageVO;
+import com.moon.moonagent.dto.response.AgentSteerResponse;
 import com.moon.moonagent.dto.response.MessagePageVO;
 import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
@@ -71,6 +73,9 @@ public class AgentConversationController {
     private final AssetClient assetClient;
     private final ConversationAssetGroupService conversationAssetGroupService;
     private final com.moon.moonagent.ai.agent.agentscope.AgentCanvasSessionService canvasSessionService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.moon.moonagent.ai.agent.orchestration.SubagentRunQueryService subagentRunQueryService;
     private final TurnMediaCanonicalizer turnMediaCanonicalizer;
 
     /** 创建会话 */
@@ -381,6 +386,19 @@ public class AgentConversationController {
         return ApiResponse.ok(chatService.interrupt(auth.getName(), id));
     }
 
+    /**
+     * 回合中插入一条用户消息（steer）。回合已结束时返回 {@code not_running}，
+     * 前端据此改走普通发送（自动开新一轮）。
+     */
+    @PostMapping("/conversations/{id}/turns/{turnId}/steer")
+    public ApiResponse<AgentSteerResponse> steerTurn(Authentication auth,
+                                                     @PathVariable String id,
+                                                     @PathVariable String turnId,
+                                                     @RequestBody AgentSteerRequest request) {
+        return ApiResponse.ok(chatService.steerTurn(
+                auth.getName(), id, turnId, request.content(), request.clientMessageId()));
+    }
+
     /** Runtime health/session status for the AgentScope transport. */
     @GetMapping("/conversations/{id}/runtime")
     public ApiResponse<Map<String, Object>> runtimeStatus(Authentication auth,
@@ -417,6 +435,32 @@ public class AgentConversationController {
             @RequestParam(defaultValue = "0") int afterSeq) {
         return ApiResponse.ok(chatService.getTurnEvents(
                 auth.getName(), id, turnId, afterSeq));
+    }
+
+    /** 子智能体任务图的节点级审计查询。 */
+    /** 生成失败节点重跑提示词（不直接执行，避免绕过父级 HITL）。 */
+    @PostMapping("/subagent-runs/{runId}/retry")
+    public ApiResponse<Map<String, Object>> retrySubagentRun(
+            Authentication auth, @PathVariable String runId,
+            @RequestParam String conversationId) {
+        chatService.getOwnedConversation(auth.getName(), conversationId);
+        if (subagentRunQueryService == null) {
+            return ApiResponse.ok(Map.of("prompt", "", "conversationId", conversationId));
+        }
+        return ApiResponse.ok(subagentRunQueryService.retryPrompt(runId, conversationId));
+    }
+
+    @GetMapping("/subagent-runs")
+    public ApiResponse<List<com.moon.moonagent.dto.response.SubagentRunView>> subagentRuns(
+            Authentication auth,
+            @RequestParam String conversationId,
+            @RequestParam(required = false) String graphId,
+            @RequestParam(defaultValue = "50") int limit) {
+        chatService.getOwnedConversation(auth.getName(), conversationId);
+        if (subagentRunQueryService == null) {
+            return ApiResponse.ok(List.of());
+        }
+        return ApiResponse.ok(subagentRunQueryService.list(conversationId, graphId, limit));
     }
 
     /**

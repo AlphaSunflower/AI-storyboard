@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.agentscope;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.ai.agent.AgentApprovalMode;
+import com.moon.moonagent.ai.agent.turn.TurnEventSinkHolder;
 import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.AgentContextWindowResolver;
 import com.moon.moonagent.ai.agent.AgentConcurrencyGuard;
@@ -111,8 +112,6 @@ import java.util.function.Supplier;
 public class MoonAgentRuntime implements AgentRecoverySource {
 
     private static final Logger log = LoggerFactory.getLogger(MoonAgentRuntime.class);
-    /** 画布编辑模式不加载的技能：分镜生成属于画布之外的链路。 */
-    private static final String STORYBOARD_SKILL = "storyboard";
     private static final String COMPACTION_PROMPT = """
             Compress this AIGC conversation for continuation. Preserve only execution-critical
             facts and write "None" when a section has no data.
@@ -161,10 +160,24 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final CreativeModelRouter modelRouter;
     private final TurnCapabilityReporter turnCapabilityReporter;
     private final AgentConcurrencyGuard concurrencyGuard;
+    /** 在途回合的 steer 注册表；HTTP 线程写入、本运行时在 onReasoning 注入。 */
+    private final com.moon.moonagent.ai.agent.turn.TurnSteerRegistry steerRegistry;
 
     @Autowired(required = false)
     private com.moon.moonagent.ai.agent.agentscope.sandbox.MoonSandboxFilesystemSpec
             moonSandboxFilesystemSpec;
+
+    /** 溢出兜底落盘用；无沙箱时中间件自动放行，不退化成截断。 */
+    @Autowired(required = false)
+    private com.moon.moonagent.ai.agent.sandbox.MoonSandboxClient moonSandboxClient;
+
+    /** 项目级长期记忆；未接线时不注入。 */
+    @Autowired(required = false)
+    private com.moon.moonagent.ai.agent.memory.AgentMemoryService agentMemoryService;
+
+    /** 通用子智能体执行器；构建完父 Agent 后绑定模型与工具集。 */
+    @Autowired(required = false)
+    private SubagentAgentExecutor subagentAgentExecutor;
 
     @Autowired(required = false)
     private com.moon.moonagent.ai.agent.agentscope.sandbox.MoonArtifactDeliveryTarget
@@ -175,6 +188,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
 
     @Autowired(required = false)
     private FrameworkToolAuditMiddleware frameworkToolAuditMiddleware;
+
+    /**
+     * 上下文窗口解析（网关 model_params.context_window 优先）。
+     * 压缩阈值必须按真实窗口算，否则 1M 模型会在 64k 就被压缩掉。
+     */
+    @Autowired(required = false)
+    private com.moon.moonagent.ai.agent.AgentContextWindowResolver contextWindowResolver;
 
     @Value("${storyboard.asset-client.base-url:http://localhost:8085}")
     private String assetServiceBaseUrl;
@@ -217,10 +237,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             new TurnContextMiddleware(
                                     workflowService, creativeContext, constraintExtraction,
                                     documentService, turnCapabilityReporter, sceneReferenceService,
-                                    libraryReferenceAssetService),
+                                    libraryReferenceAssetService, agentMemoryService),
                             toolCallContentMiddleware != null
                                     ? toolCallContentMiddleware
                                     : new ToolCallContentMiddleware(),
+                            // 回合中插入的用户消息：在下一个模型步骤注入，不打断在途工具
+                            new SteerMiddleware(),
+                            // 每会话工具组合：移除本组合不允许但历史已激活的工具组
+                            new ToolCompositionMiddleware(),
+                            // 单条超大结果溢出兜底：只在超过窗口 90% 时落盘并给定位符
+                            new ContextOverflowMiddleware(moonSandboxClient),
                             new AgentTraceBridgeMiddleware()));
             // 速度两件事：① 每步耗时/token 埋点（只打日志）；② 画布结构性步骤压思考（只改模型选项）。
             // 都放在最外层：埋点要覆盖整次模型调用，压思考要作用在真正发出去的那次调用上。
@@ -300,9 +326,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 // 压缩阈值 = 模型真实窗口的一半（可配置比例），不再用固定 48k / 40 条：
                 // 固定阈值对"工具结果巨大的画布编排"会被反复误触发，压缩本身又是一次模型调用，
                 // 且会把刚建的 nodeId 摘要掉，逼模型重读整图 → token 再涨 → 再压缩（自激）。
-                int modelWindowTokens = model.getContextWindowSize() > 0
-                        ? model.getContextWindowSize()
-                        : AgentContextWindowResolver.DEFAULT_WINDOW_TOKENS;
+                // 窗口本身以网关 model_params.context_window 为准：AgentScope 自报的窗口
+                // 常常是 128k 一类默认值，会把 1M 模型的压缩点压到 64k（白白丢掉 90% 上下文）。
+                int agentScopeWindow = model.getContextWindowSize();
+                int modelWindowTokens = AgentContextWindowResolver.prefer(
+                        contextWindowResolver != null
+                                ? contextWindowResolver.resolve(model.getModelName()) : -1,
+                        agentScopeWindow);
                 CompactionPolicy.Thresholds thresholds = CompactionPolicy.resolve(
                         modelWindowTokens,
                         properties.getCompactionTriggerRatio(),
@@ -315,13 +345,16 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         .keepMessages(properties.getCompactionKeepMessages())
                         .keepTokens(properties.getCompactionKeepTokens())
                         .flushBeforeCompact(false)
+                        // offload 写的是宿主 workspace，沙箱里的 read_file 读不到；
+                        // 给模型一个死路径比不给更糟。完整历史以 agent_turn_events 为准。
                         .offloadBeforeCompact(false)
                         .summaryPrompt(COMPACTION_PROMPT)
                         .build());
-                log.info("[AgentScope] 压缩阈值 模型={} 窗口={} ratio={} floor={} → "
-                                + "triggerTokens={} triggerMessages={}{}",
+                log.info("[AgentScope] 压缩阈值 模型={} 窗口={}（网关/内置表解析，AgentScope自报={}） "
+                                + "ratio={} floor={} → triggerTokens={} triggerMessages={}{}",
                         model.getModelName(),
                         modelWindowTokens,
+                        agentScopeWindow,
                         properties.getCompactionTriggerRatio(),
                         properties.getCompactionTriggerTokensFloor(),
                         thresholds.triggerTokens(),
@@ -339,7 +372,19 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 builder.disableSubagents();
             }
             if (properties.isAsyncEnabled()) {
-                builder.asyncToolTimeout(properties.getAsyncToolTimeout());
+                Duration asyncTimeout = properties.getAsyncToolTimeout();
+                long graphBudgetMs = properties.getSubagentMaxDurationMs();
+                long requiredMs = graphBudgetMs > 0
+                        ? graphBudgetMs * (properties.getSubagentMaxRepairRounds() + 1L) + 60_000
+                        : 0;
+                if (requiredMs > 0 && asyncTimeout.toMillis() < requiredMs) {
+                    asyncTimeout = Duration.ofMillis(requiredMs);
+                    log.warn("[Subagent] async-tool-timeout={}s 不足以覆盖初跑+修复两段预算 {}ms，"
+                                    + "已提升到 {}s，避免 run_task_graph 被后台化后丢结果",
+                            properties.getAsyncToolTimeout().toSeconds(), graphBudgetMs,
+                            asyncTimeout.toSeconds());
+                }
+                builder.asyncToolTimeout(asyncTimeout);
             }
             agent = builder.build();
             // HarnessAgent.build() 对传入的 Toolkit 做构建期深拷贝（Toolkit.copy() 复制注册表），
@@ -347,6 +392,9 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             // Toolkit，否则 refreshCanvasTools() 写进的是原始对象，模型看到的永远是空工具组
             // （2026-10-15 实测：能力块宣称画布可用，每个 canvas_graph_* 调用都 Tool not found）。
             toolkitFactory.bindAgentToolkit(agent.getToolkit());
+            if (subagentAgentExecutor != null) {
+                subagentAgentExecutor.attach(agent);
+            }
             log.info("[AgentScope] Harness media runtime ready model={}", model.getModelName());
         } catch (Exception e) {
             throw new IllegalStateException("AgentScope media runtime initialization failed", e);
@@ -716,16 +764,20 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         AgentScopeTurnState turnState = new AgentScopeTurnState();
         boolean hasBoundAssetGroups = assetGroups.hasBoundGroups(conversation);
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
+        boolean canvasEdit = isCanvasEditTurn(request);
+        // 每会话组合：技能白名单 + 工具组白名单都由会话/模式推导，不看套餐或用户等级。
+        ToolCatalog.Profile toolProfile = ToolCatalog.profileFor(canvasEdit);
         RuntimeContext.Builder runtimeBuilder = RuntimeContext.builder()
                 .userId(conversation.getUserId())
                 .sessionId(conversation.getId())
                 .put(AgentScopeRunContext.class,
                         new AgentScopeRunContext(conversation, request, support, turnState,
-                                checkpointId, externalActions));
-        if (isCanvasEditTurn(request)) {
-            // 画布回合只保留画布链路与生图/生视频：分镜技能不在本回合加载。
-            runtimeBuilder.put(SkillFilter.class, SkillFilter.disable(STORYBOARD_SKILL));
-        }
+                                checkpointId, externalActions,
+                                steerRegistry.inboxFor(conversation.getId()), toolProfile,
+                                TurnEventSinkHolder.current()));
+        // 独立过滤器会替换 builder 上的基础 filter；画布回合因此天然没有 storyboard。
+        runtimeBuilder.put(SkillFilter.class,
+                SkillFilter.only(toolProfile.skills().toArray(String[]::new)));
         if (moonSandboxFilesystemSpec != null) {
             runtimeBuilder.put(SandboxContext.class,
                     moonSandboxFilesystemSpec.contextForConversation(conversation.getId()));
@@ -764,6 +816,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                 Math.round(Math.max(0.0, usage.getTime()) * 1000.0));
                     }
                 } else if (event instanceof ToolResultStartEvent toolStart) {
+                    if (AgentScopeOrchestrationTools.RUN_TASK_GRAPH.equals(toolStart.getToolCallName())
+                            || AgentScopeOrchestrationTools.RUN_WRITE_TASK_GRAPH
+                                    .equals(toolStart.getToolCallName())) {
+                        turnState.markSynchronousGraphCalled();
+                    }
                     trace.beginToolCall(toolStart.getToolCallId());
                 } else if (event instanceof ToolResultEndEvent toolEnd) {
                     trace.endToolCall(toolEnd.getToolCallId());
@@ -882,7 +939,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
             finalText.setLength(0);
             finalText.append(complete);
         }
-        if (!paused && claimGuard.hasClaim() && !turnState.hasTaskIds()) {
+        if (!paused && claimGuard.hasClaim() && !turnState.hasTaskIds()
+                && !turnState.hasSynchronousGraphCalled()) {
             String correction = runTaskClaimCorrection(conversation, request, trace, runtime, turnState);
             if (turnState.hasTaskIds()) {
                 String held = claimGuard.flushAll();
@@ -1041,6 +1099,11 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                                 Math.round(Math.max(0.0, usage.getTime()) * 1000.0));
                     }
                 } else if (event instanceof ToolResultStartEvent toolStart) {
+                    if (AgentScopeOrchestrationTools.RUN_TASK_GRAPH.equals(toolStart.getToolCallName())
+                            || AgentScopeOrchestrationTools.RUN_WRITE_TASK_GRAPH
+                                    .equals(toolStart.getToolCallName())) {
+                        turnState.markSynchronousGraphCalled();
+                    }
                     trace.beginToolCall(toolStart.getToolCallId());
                 } else if (event instanceof ToolResultEndEvent toolEnd) {
                     trace.endToolCall(toolEnd.getToolCallId());
@@ -1119,6 +1182,17 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         tool, null, PermissionBehavior.ALLOW, "MoonAgentRegisteredReadOnlyPolicy"));
             }
         }
+        // 单一真源：catalog 显式声明 readOnly 的工具自动放行。
+        // 这里只补 allow 规则，不改变任何写工具的审批；避免只读工具漏在下面的手工名单外。
+        for (ToolCatalog.Spec spec : ToolCatalog.specs()) {
+            if (spec.policy() != null && spec.policy().readOnly()) {
+                permissions.addAllowRule(spec.name(), new PermissionRule(
+                        spec.name(), null, PermissionBehavior.ALLOW, "ToolCatalogReadOnlyPolicy"));
+            }
+        }
+        // 兼容兜底：框架工具（task_*/agent_*/meta）与动态 canvas 工具没有 catalog 条目；
+        // Moon 自研只读工具已在上面的 ToolCatalogReadOnlyPolicy 中放行，这里的同名条目
+        // 是历史安全网，新增 Moon 只读工具不需要再往这张名单里加。
         for (String tool : List.of(
                 "list_session_assets",
                 "resolve_reference_assets",
@@ -1200,6 +1274,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "plan_enter",
                 "plan_write",
                 "plan_exit",
+                AgentScopeMemoryTools.REMEMBER_MEMORY,
+                AgentScopeMemoryTools.RECALL_MEMORY,
                 "request_human_input")) {
             permissions.addAllowRule(tool, new PermissionRule(
                     tool, null, PermissionBehavior.ALLOW, "MoonAgentAutoApprovePolicy"));
@@ -1231,6 +1307,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "merge_storyboard_videos",
                 "write_file",
                 "run_python_script",
+                "run_write_task_graph",
                 "task_cancel")) {
             boolean autoApproved = effective == AgentApprovalMode.PLAN_APPROVAL
                     && approved.contains(tool);
@@ -1438,7 +1515,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                         .keepMessages(keepMessages)  // 与自动压缩同一保留口径
                         .keepTokens(0)               // 0 = 按条数保留（>0 才走 token 口径）
                         .flushBeforeCompact(false)   // 本运行时已 disableMemoryHooks，不做长期记忆刷新
-                        .offloadBeforeCompact(false)
+                        .offloadBeforeCompact(false) // 宿主路径沙箱不可读，完整历史走 agent_turn_events
                         .summaryPrompt(COMPACTION_PROMPT)
                         .build();
                 ConversationCompactor compactor = new ConversationCompactor(

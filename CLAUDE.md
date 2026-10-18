@@ -43,6 +43,7 @@ AI-powered storyboard generation platform. Spring Boot 4 backend + React/TypeScr
 - 前端不得因重放、刷新、补偿事件或重复点击再次提交同一个 `formToken`；后端必须保持一次性消费和幂等终止。
 - **打断不丢字（2026-10-16）**：用户「停止生成」或「停止并发送」后，智能体已经流出的正文必须留在气泡里，末尾补「…」（`interruptedReplyText` / `interruptedReplyContent` 同一口径），并显式落库为一条 assistant 消息（`metadata.interrupted=true`）。禁止再用 `messages.filter(id !== pendingAssistantId)` 把气泡删掉：那会让刚生成的文字整段消失，刷新后也读不到。`turn_failed` 的 `code=40904` 是用户主动停止，不得弹错误条。
 - **打断与重发的时序（2026-10-16）**：`interruptAndSend` 必须是「先打断并等旧 turn 走到终态 → 再提交新 turn」，抢跑会撞会话锁（40901）；后端 `clearInterrupt` 只能在**拿到会话锁之后**调用（此时上一轮已终态），否则旧回合观察不到打断会一直跑到自然结束，用户看到「停止没反应」。
+- **生成中发送 = steer（2026-10-17）**：输入框在生成中按发送默认走 `/turns/{turnId}/steer`（插入当前回合，不打断工具）；`interruptAndSend` 只保留给显式停止后的兼容/测试路径。steer 消息落库为用户消息（`metadata.steer=true`），并走 `USER_MESSAGE` 事件；回合已结束时接口返回 `not_running`，前端改走普通发送。同一 `clientMessageId` 幂等；回合结束仍未消费的消息会带入下一轮开头（插在新 user 消息之前），不丢。
 
 ### 5. 沙箱与产物发布链路不可混用宿主机路径
 
@@ -417,6 +418,7 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
 | POST | `/api/agent/conversations/{id}/turns/stream` | 新建或编辑重发一轮；body 可带 `editMessageId` |
 | POST | `/api/agent/conversations/{id}/turns/{turnId}/resume/stream` | 通过 checkpoint `formToken` 恢复同一 turn |
 | POST | `/api/agent/conversations/{id}/turns/{turnId}/interrupt` | 中断指定 turn 所属会话 |
+| POST | `/api/agent/conversations/{id}/turns/{turnId}/steer` | 回合中插入用户消息（steer）：不打断在途工具，在下一个模型步骤注入；回合已结束返回 `not_running`，前端改走普通发送 |
 | GET | `/api/agent/conversations/{id}/runtime` | 运行时、Skill、Prompt、MCP 元数据状态 |
 | GET | `/api/agent/conversations/{id}/turns/{turnId}/events?afterSeq=N` | 按序号补偿重放 turn 事件 |
 | POST | `/api/agent/conversations/{id}/context/clear` | **清空上下文（真删除）**：删该会话全部上下文行（消息、`agent_turns`/`agent_turn_events`、checkpoint、画布会话与运行、文档索引、异步任务、时间线、评审、工作流、资产组绑定）+ 清 AgentScope 运行时上下文与沙箱、标题重置「新对话」、`agentscope_session_initialized_at` 置空；产出素材保留。前端斜杠命令「/清空上下文」= `/clear`（`/compact` = 压缩上下文） |
@@ -430,12 +432,22 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
 
 ### 通用创作智能层
 
+- 项目记忆（2026-10-18 P0）：`agent_memories` 表按 `user_id + project_id` 隔离，只存显式写入的事实
+  （goal/style/constraint/decision/feedback），同用户同项目内容哈希去重，可过期。工具
+  `remember_memory` / `recall_memory`；`TurnContextMiddleware` 每轮召回 top 5 注入
+  `<project-memories>`。接口 `GET /api/agent/memories`（当前用户全部）、
+  `PUT /api/agent/memories/{memoryId}`（改 kind/content/confidence/expiresAt）、
+  `DELETE /api/agent/memories/{memoryId}`，以及项目级 `GET/DELETE /projects/{projectId}/memories`；
+  V42 migration 已在本地 `newworkflow` / `ai_storyboard` 执行，其他环境仍需手动执行。
+  个人信息从弹窗改为独立路由 `/account`，账号信息、密码和记忆管理（查看/编辑/删除）都在该页。
+  不做自动灌对话、不使用 embedding（字段预留，后续接 pgvector）。
 - `project_creative_contexts` 保存项目级目标、创意方向、风格、参考、硬/软约束、反馈和模型偏好；
   不保存跨项目记忆，也不引入建筑等垂直领域字段。
 - 明确出现“必须/严格/保留/不能改”等词时进入 `STRICT`，命中约束通过
   `constraint_flagged` 事件下发；未识别到可验证硬约束时要求先澄清。
-- AgentScope 已启用 Plan Mode、任务列表、工具结果驱逐、四类创作子智能体、PostgreSQL
-  `DistributedStore` 和 OpenTelemetry；模型角色通过
+- AgentScope 已启用 Plan Mode、任务列表、压缩与四类创作子智能体、PostgreSQL
+  `DistributedStore` 和 OpenTelemetry；工具结果默认**不驱逐、不截断**（超长结果原样进入上下文），
+  需要恢复旧行为时显式设 `AGENTSCOPE_TOOL_RESULT_EVICTION_ENABLED=true`。模型角色通过
   `AGENTSCOPE_MODEL_PLAN/PROMPT/CRITIC/VISION/IMAGE/VIDEO` 覆盖。
 - 生成结果不做自动诊断（`visual-critic` 子智能体已下线）：自动视觉评审会对每次生图/生视频
   结果追加一次付费模型调用，且首图往往已经是用户想要的结果。生成后直接把结果交给用户，
@@ -462,6 +474,9 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 
 - 实时文本使用 `TEXT_BLOCK_DELTA` / `AGENT_RESULT`，思考使用 `THINKING_BLOCK_DELTA`，轨迹使用
   `AGENT_TRACE`。所有这些事件都必须经 `AgentTurnEventPublisher` 发布并保持连续 `seq`。
+- `USER_MESSAGE` 是 steer 插入的用户消息（`messageId/content/steer/createdAt`）：与其他事件走
+  同一 `seq` 通道，前端按 `messageId` 去重并插到当前助手气泡之前。回合已结束时接口返回
+  `not_running`，不得把 steer 事件写到已收尾的 turn 上。
 - 前端 `AgentTurnEventSequencer` 对每个 turn 持有缺口；如果后端绕开有序 publisher，前端不会
   “猜顺序”，而是等待缺失序号，表现为卡住。不要用缩短前端等待时间掩盖后端乱序。
 - `turn_completed.payload.metadata` 必须合并并保留实时阶段的 `reasoning`、`agentTrace`、
@@ -492,11 +507,139 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - Nacos 发布脚本：`scripts/nacos/publish_assets.py`；只支持 upload/review/release 生命周期，
   画布执行信箱（canvas 服务内）不进入共享 Nacos。
 
-## Historical pre-AgentScope notes (`/api/agent/**`) — 非当前协议，仅供迁移追溯
+### 工具元数据单一真源（2026-10-17）
 
-> 本节记录 2026-09 以前的编排器、SSE 和 HITL 实现。它们不是当前调用协议，不能让新代码按这里的 endpoint/event 名实现；当前唯一权威说明见上方的 `AgentScope 运行时` 与 `AgentScope / Sandbox 不可回归红线`。
+- `ToolCatalog` 是工具元数据的**唯一真源**：名称、中文标签、审计/审批策略、所属技能组、组→技能绑定都在这里登记一次。
+  `AgentScopeToolkitFactory` 的注册、`AgentScopeToolPipeline` 的 policy、`AgentScopeToolLabels` 的中文名全部从它派生。
+- **加/删工具 = 改一个 catalog 条目 + 工具实现**，不要再改 3 张权限清单 / 2 份标签 / 2 个 SKILL / 6 个测试的名单。
+  漏登记会在启动时按常驻兜底并打 `[ToolCatalog] 工具未登记` 警告；`ToolCatalogTest` 锁目录完整性。
+- 无 `groups` 的条目是常驻工具（技能激活前可见）；有 `groups` 的条目只在该组激活后可见。组与技能的绑定也只写在 catalog。
+- **每会话组合**：`ToolCatalog.profileFor(canvasEdit)` 给出该轮允许的技能与工具组；`SkillFilter.only(...)` 管技能，
+  `ToolCompositionMiddleware` 管工具组（只移除不允许的组，不清掉同模式内已激活的组）。组合按会话/模式推导，
+  **不看套餐、不看用户等级**；后续要加项目级差异，只改 `profileFor` 的入参与推导。
+- **超大工具结果兜底**：默认不截断；单次请求估算超过模型窗口 90% 时，`ContextOverflowMiddleware`
+  把最大的工具结果完整写入沙箱 `work/overflow/<toolCallId>.txt`，上下文替换为 `read_file`
+  定位符（最多 3 条）。无沙箱时直接放行，绝不退化成“截断后丢掉”。回归：`ContextOverflowMiddlewareTest`。
+- 回归：`ToolCatalogTest`、`ToolCatalogPermissionTest`、`ToolCompositionMiddlewareTest`、`SkillToolCatalogConsistencyTest`；
+  2026-10-17 真实联调（dev）覆盖 HITL resume steer → `STEER-OK`、canvas-edit turn steer → `CANVAS-STEER-OK`，
+  `USER_MESSAGE` seq 连续。
 
-### 数据库（V2 migration `V2__agent_conversation.sql`，3 张表，与分镜 scenes 无关）
+### 通用子智能体编排（2026-10-18）
+
+- `run_task_graph` 是主模型可调用的通用编排工具：提交 `{task, nodes[], maxConcurrency, failFast}`，
+  `SubagentGraphValidator` 校验（节点 ≤12、深度 ≤2、单节点下游 ≤6、无环），`SubagentOrchestrator` 分层并行调度。
+- 角色清单在 `MoonAgent/src/main/resources/agents/roles/*.json`（researcher / screenwriter /
+  visual-director / reviewer），由 `SubagentRoleCatalog` 加载；先不引注册中心，改角色 = 改文件 + 重启。
+- 动态角色包 P0：`agent_packages`（V43，已在本地 `newworkflow` / `ai_storyboard` 执行）存
+  kind=role 的 manifest JSON；启动时 `AgentRolePackageBootstrap` 把启用包合并进
+  `SubagentRoleCatalog`，同名覆盖内置角色，空/非法包跳过并告警，DB 不可用时保留内置。
+  校验：manifest name 必须等于包名、maxTurns 1–12、tools 必须已登记（或框架文件工具）。
+  `GET /api/agent/packages?kind=role` 只读目录；安装/启停暂不开放公网写接口。工具代码动态包未做。
+- 子 Agent 节点恢复：`run_task_graph` / `run_write_task_graph` 支持可选 `graphId`；重试时传同一个
+  `graphId`，`SubagentRunAuditService.completedForGraph` 会复用 `COMPLETED` 节点的输出，只重跑失败/
+  未完成节点，避免重复 token 和重复写入。V41 增加 `(graph_id, status)` 索引。
+- 写图审批：父级 HITL 卡片会逐条列出 `allowWrite` 节点、角色和声明的写工具，并渲染逐工具复选框；
+  用户取消勾选的工具通过 resume `params.approvedTools` 回传，`run_write_task_graph` 只保留获批写工具。
+  写节点一个获批写工具都没有时整图拒绝执行。子 Agent 中途暂停/恢复仍未实现，当前恢复是节点级
+  （同 `graphId` 复用 COMPLETED 输出）。
+- 子 Agent 默认**只读**：`SubagentAgentExecutor` 只从父 Toolkit 取「角色允许 + `ToolCatalog` 只读」的交集。
+  写任务必须走 `run_write_task_graph`：该工具在父级权限里是 `WRITE`/ASK，先弹 HITL；批准后才执行，
+  子节点 `allowWrite=true` 时以 `FULL_ACCESS` 运行，但 toolkit 仍只有角色声明的工具（writer 角色）。
+  `run_task_graph` 收到 `allowWrite=true` 节点会直接拒绝，防止绕过审批。reject 时工具不执行，无写入。
+- 子 Agent 独立上下文：只拿 `instruction + 直接依赖节点的结果`，不共享父对话；父级只读 `SubagentGraphResult`。
+  整图可通过 `run_task_graph.context` 注入一份**只读共享常量**（几何/参数/硬约束），
+  `SubagentAgentExecutor` 会把它放在每个子 Agent prompt 顶部；修复轮原样保留，不能改写。
+  `contextRef` 可从服务端 `docs/specs`（`subagent-context-root`）加载文件，避免让模型复制长 JSON；
+  `context` 非空时优先，`contextRef` 只允许受控目录、拒绝 `../` 与符号链接逃逸。
+- 子 Agent 的 `RuntimeContext` 由 `SubagentRunScope` 在 worker 线程内注入父级 `AgentScopeRunContext`，
+  工具（创作上下文/分镜读取）才能拿到 conversation/project。
+- 前端 `RunTaskGraphCard` 直接从 `run_task_graph` 工具事件的 `input`（任务图）与 `text`（结果）解析，
+  渲染节点、依赖和状态；不新增 SSE 协议，刷新/回放同一份数据也能画。
+- 逐节点进度：`SubagentGraphListener` 在 worker 线程通过 `AgentScopeRunContext.publisher()` 发
+  `SUBAGENT_STARTED` / `SUBAGENT_COMPLETED`（payload: `toolCallId/subagentId/role/status/output`），
+  与 turn 事件共用同一条 `seq` 通道；前端存进 `subagentProgress[toolCallId]`，卡片优先显示实时状态。
+- 审计：每个节点写 `agent_subagent_runs`（V40 migration，需手动执行），id=`graphId:nodeId`，
+  记录 role/status/instruction/output/error/tokens/duration；审计失败只告警，不影响任务图。
+- 预算：`ai.agent.agentscope.subagent-max-tokens`（默认 200000）、`subagent-max-duration-ms`
+  （默认 300000）；超预算取消剩余节点，`SubagentGraphResult.budgetExceeded=true`。
+- 单节点超时：`subagent-node-timeout`（默认 240s）。子 Agent 的 `blockLast` 用它，不用
+  AgentScope 默认；修复节点重写整稿时 180s 不够（2026-10-18 `script-fix` 恰好 180018ms 被砍）。
+  修复节点的 maxIters 压到 3、复核压到 2，避免修复轮无限分析。
+- 真取消：`SubagentAgentExecutor` 轮询取消 token，触发子 `ReActAgent.interrupt(userId, sessionId)`，
+  不等 `blockLast` 自然结束。
+- 有界修复：`run_task_graph` 默认 `repair=true`；review 输出含“不通过/未通过/FAIL”时，
+  `SubagentRepairPlanner` 自动生成 `script-fix` / `visual-fix` / `review-2`（visual-fix 依赖
+  script-fix），把 review 意见和上一轮产出回灌；最多自动修 `subagent-max-repair-rounds`
+  （默认 2）轮，仍不通过就如实返回，不无限重试。结果合并，`repairRounds` 返回给主模型。
+  修复轮使用独立预算；上一轮 wall-clock 超预算不会阻止下一轮，但总时长由工具 20m 硬顶兜住。
+  两轮后仍不通过就停：返回 `reviewPassed=false`、`stoppedReason=max_repair_rounds` 和
+  `parameterViolations`，由主模型如实汇报剩余冲突，不再自动重试。
+- 2026-10-18 连续三轮 review 不通过后的收口：**停止自动加轮**，改用 canonical 几何常量
+  `docs/specs/2026-10-18-hirai-canonical.json` + `docs/specs/2026-10-18-hirai-three-shot-canonical.md`。
+  脚本、视觉、review 都引用同一份常量；任何新冲突先改常量，不再让模型重写全文。
+  canonical 只把帧率/时长/画幅/镜头/门洞/立面/檐口等列为硬数字；Z/Y、占高、前景位置按范围和
+  容差推导（`validate_canonical.py`），review 不再追 0.05% 共线这类无效精度。
+- 参数表校验：`SubagentParameterValidator`。`outputSchema=parameter-table` 现在是**显式可选**，
+  不再对 screenwriter/visual 自动推断；节点给了非空 `parameters` 才校验，缺失不记 violation。
+  生成参数以 `contextRef` 的 canonical JSON 为真源。给了表时校验 fps/时长/画幅/色温一致、
+  镜1 推进距离闭合、`distanceM` 单调递增、焦段固定（除非 `zoomAllowed`）、升程与速度×时长一致、
+  总帧数/渲染帧数、`doorDistanceM` 与 `doorHeightRatio` 投影自洽、光圈范围；结果返回 `parameterViolations`。
+- 审计查询：`GET /api/agent/subagent-runs?conversationId=<cid>&graphId=<gid>`（graphId 可选），
+  返回节点级 role/status/tokens/duration/output，供前端或排障使用。
+- 可观测 UI P0：独立路由 `/observability`（AppHeader「运行观测」）。按当前项目选会话，拉
+  `/api/agent/subagent-runs`，按 graphId 分组展示节点 role/status/instruction/output/tokens/duration；
+  支持 graphId 筛选、失败节点计数与错误聚类、一键打开对应会话；无新 SSE 协议，只读审计数据。
+- 失败节点快照/重跑：V44 给 `agent_subagent_runs` 加 `task_json/graph_json/context_ref`（已在本地
+  `ai_storyboard` 执行；`newworkflow` 无该表）。`POST /api/agent/subagent-runs/{id}/retry` 返回可直接
+  发送的 `run_task_graph`/`run_write_task_graph` 提示词；观测页「重跑」会选中会话并自动发送，
+  发送未启动时回退为填入输入框。写节点重跑仍会重新弹审批。助手/HITL 消息 metadata 现在写
+  `turnId`，观测页「打开会话」会带 `turnId`，ChatPage 在消息加载后滚动到对应气泡
+  （历史消息无 turnId 时退化为打开会话）。V45 已按 `turn.checkpoint_id -> plan._hitlMessageId`
+  回填历史 HITL 卡片的 turnId；普通助手历史消息仍无 turnId。
+- 可观测失败聚类：前端 `classifySubagentError` 把错误归并为执行超时 / 审批未通过或拒绝 /
+  工具不可用 / 预算超限 / 输出格式错误 / 依赖失败 / 其他错误，避免同类失败按文本散开。
+- 同步任务图不参与异步任务声明校验：本轮调用过 `run_task_graph` / `run_write_task_graph` 时，
+  `AgentTaskClaimGuard` 不再把“已提交/已完成”判成无 taskId 的伪任务，避免成功后被追加
+  “任务未创建，请重试”和 `taskContractViolation`。
+- **两层超时都必须覆盖任务图预算**：
+  - AgentScope `ToolExecutor` 默认 5 分钟硬超时（`ExecutionConfig.TOOL_DEFAULTS`），
+    必须在 Toolkit 级用 `tool-execution-timeout`（默认 20m）覆盖；否则初跑+修复会直接
+    `Tool execution timeout after PT5M`（2026-10-18 实测事故）。
+  - `async-tool-timeout` 必须大于 tool execution timeout（默认 21m），否则 `AsyncToolMiddleware`
+    会把工具后台化，后台结果投递走 sandbox fs 并报 `No active sandbox`，模型看到“任务未创建”。
+  - Runtime 启动时会按“初跑 + N 轮修复”预算自动抬高这两个超时并 warn。
+- 回归：`SubagentGraphValidatorTest`、`SubagentOrchestratorTest`（含预算）、`SubagentRoleCatalogTest`
+  （含 writer）、`AgentScopeOrchestrationToolsTest`（含 context 透传 + 写图拒绝/批准）、
+  `SubagentAgentExecutorTest`（真 `ReActAgent` + fake model，含 sharedContext 注入）、
+  `SubagentRunAuditServiceTest`、`SubagentRunQueryServiceTest`、`SubagentRepairPlannerTest`、
+  `SubagentParameterValidatorTest`、`AgentScopePropertiesTest`、`RunTaskGraphCard.test.tsx`。
+
+### 真实轨迹 eval（2026-10-18）
+
+- `scripts/eval/run_eval.py`：用真实 HTTP/SSE 跑 golden case，断言终态、关键文案、工具序列、耗时、token；
+  每个 case 新建会话 → 发一轮 → 删会话，报告写 `scripts/eval/reports/eval-*.json`，失败退出码 1。
+- case 在 `scripts/eval/cases.jsonl`；**只锁结构/关键事实，不锁最终文案**（模型输出会变）。
+- 真实轨迹来源：`agent_turns` / `agent_turn_events`，挑真实回合把用户输入和工具序列抄成 case；
+  不要从零编造 prompt。
+- 用途：换模型 / 改提示词 / 加工具 / 改子智能体编排后，先跑一遍再发布；当前 **10/10 通过**
+  （identity、无工具问候、只读分镜、HITL reject、任务图只读、任务图 steer、画布只读、
+  创作记忆只读、素材只读、HITL approve）。
+- 真实轨迹捕获：`scripts/eval/capture_turn.py --conversation <cid> --turn <turnId> --name ...`
+  从 `agent_messages` + `agent_turn_events` 生成 case，不抄最终文案。
+- 覆盖能力：`hitl` 自动 reject/approve 续流、`steer` 在指定事件插入、`canvasContext` 画布回合；
+  画布 case 需要 `MOON_CANVAS_ID`，缺失时 skip。
+- 发布前检查：`scripts/eval/preflight.ps1` / `.sh`（单测 + 前端 build + eval）；
+  CI 工作流 `.github/workflows/moon-eval.yml`（手动 + 每天 02:00 UTC 定时），
+  Secrets 配 `MOON_EMAIL/MOON_PASSWORD/MOON_PROJECT_ID/MOON_CANVAS_ID/MOON_BASE_URL`。
+- `expectNoTools` 锁“闲聊不调工具”；`expectTools` 只断言“至少出现”，不禁止其他只读工具。
+- 不是单元测试：单元测试锁代码行为，eval 锁模型在真实工具链上的行为。
+
+## 历史协议与存量表（仅迁移追溯）
+
+> 2026-09 以前的 `AgentOrchestrator` / `IntentHandler` / `/messages/stream` / `/form/submit` 已退役（后者返回 410）。旧 SSE 事件名（`message` / `workflow` / `human_input` / `task_accepted` / `message_end` / `error`）不再是当前协议；当前唯一权威是上文「AgentScope 运行时」与「不可回归红线」。
+> 下表只记录仍存在的存量产品表，不代表旧编排链路仍可用。
+
+### 存量表（V2/V4 migration，与分镜 scenes 无关）
 
 | 表 | 关键字段 | 说明 |
 |----|---------|------|
@@ -508,58 +651,7 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 > **Migration 手动执行**：项目未引入 Flyway，`db/migration/V*.sql` 为留档，需 psql 手动应用。
 > AgentScope turn 协议依赖 **V39**：`agent_turns`、`agent_turn_events`、事件序号唯一约束和旧状态归档。
 
-### 端点（全部 JWT 鉴权，`/api/agent/**` 不在 SecurityConfig 白名单）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/agent/conversations` | 创建会话（校验 project.userId 归属） |
-| GET | `/api/agent/conversations?projectId=` | 会话列表（updated_at 倒序） |
-| GET/DELETE | `/api/agent/conversations/{id}` | 详情（含消息）/ 删除（DB CASCADE 删消息） |
-| GET/POST | `/api/agent/conversations/{id}/messages` | 消息列表 / 发送消息（编排回答） |
-| GET | `/api/agent/conversations/{id}/assets?page=&size=` | 资产列表（**分页**，page 默认 1 / size 默认 20 / 上限 50，返回 `{records, total, page, size}`） |
-| POST | `/api/agent/upload` | 传图（可选 conversationId，校验归属）→ 存 uploads + 落库 reference 资产 |
-| POST | `/api/agent/conversations/{id}/messages/stream` | SSE 流式发送消息（body `{content, picUrl?}`，`text/event-stream`） |
-| POST | `/api/agent/conversations/{id}/form/submit` | HITL 表单提交并续流（body `{formToken, taskId, action, content?}`，`content` 为 action=custom 自定义输入文本），SSE 返回；video 确认（action=generate_video）→ `task_accepted` 立即返回 |
-| GET | `/api/agent/tasks/{taskId}` | 视频异步任务状态（前端 5s 轮询：`{taskId, assetId, status(queued/running/completed/failed), url, error}`；归属校验，未归属/无权 40401） |
-| PATCH | `/api/agent/conversations/{id}` | 重命名 title / 归档（status: `active`\|`archived`） |
-| DELETE | `/api/agent/assets/{id}` | 删除资产（未归属资产拒绝 40401） |
-| POST | `/api/agent/stt` | ~~语音识别~~（已下线 2026-08-21：前端改为 **WebSocket 直连 vosk-server** `ws://localhost:2700`，见 `VITE_VOSK_WS_URL`，不经后端；生产内网部署 + 防火墙禁公网） |
-
-- 归属校验：`AgentChatService.getOwnedConversation(userId, id)`，所有端点复用；会话不存在与无权访问统一 40401 同文案（防 IDOR 枚举）
-- 校验错误用 `BusinessException`（40001/40301/40401），GlobalExceptionHandler 已映射对应 HTTP 状态码
-
-### SSE 事件协议（后端→前端）
-
-事件类型由 SSE `event` 字段承担（负载不含 `type` 键），后端编排（AgentOrchestrator）直接发射；流结束即 `emitter.complete()`：
-
-| event | 负载字段 | 说明 |
-|-------|----------|------|
-| `message` | `content` | 回答增量（前端逐段拼接打字机效果） |
-| `workflow` | `title`, `status` | 节点进度（`node_started` / `node_finished`） |
-||| `human_input` | `formToken`, `taskId`, `formContent`, `actions`（`[{id,title}]`）, `expirationTime` | HITL 暂停点；**收到后后端立即结束流**，前端渲染确认卡片并停止打字机。`actions` 可含 `{id:"custom", title:"✍ 自定义输入"}`——前端渲染内联输入框，提交时 `POST /form/submit` body 携带 `content` 为用户自定义文本 |
-|| `task_accepted` | `taskId`, `message` | 视频异步任务已受理（resume/generate_video 或图生视频确认后立即返回）；前端转 5s 轮询 `GET /api/agent/tasks/{taskId}` 取结果 |
-|| `message_end` | `messageId`, `sceneCount`, `content`, `title?` | 流正常结束；`sceneCount` 为当前项目 scenes 总数，供前端互斥判定；`title` 为首条消息异步 AI 重命名的新标题（**一次性**：仅重命名完成的那一轮携带，取走即删，不做轮询） |
-| `error` | `code`, `message` | 失败结束；`message` 已脱敏 |
-
-- `workflow` 事件仅发 `{title, status}`（node_started/node_finished），不携带节点 inputs/outputs
-
-### Spring AI 2.0 编排（2026-08-11 迁移，替代 Dify；2026-08-11 二次重构：策略注册 + HITL 模板）
-
-- **编排器**：`AgentOrchestratorImpl` 瘦身为**纯分发器**（策略模式注册）：`run()` = 意图识别（规则前置 → LLM + confidence → 阈值判断）→ 按 intentType 查 `Map<String, IntentHandler>` 分发；`resume()` = checkpoint 校验+一次性消费 → 按提交 action 查 handler 恢复。处理器注册表由 Spring 自动收集（`List<IntentHandler>` + `@PostConstruct buildRegistry`），**新增意图 = 新实现类 + @Component，核心零改动**。resume 分发前 `request.setAction(action)` 透传提交的选项 id；**动态选项卡片**（选项 id 由 LLM/场景生成，不进 byAction 注册表）按 checkpoint action 特判转对应 handler：`intent-clarify`（意图澄清）/ `clarify-option`（gate 澄清）/ `scene-mode`（分镜处理方式）/ `scene-regenerate`（分镜调整意见）
-- **处理器**（`ai/agent/handler/` 包）：`IntentHandler` 接口（intentType/resumeActions/handle/resume）+ `OrchestrationRequest` 上下文（含 per-request lastMessage，修复多会话并发互踩）+ `AgentOrchestratorSupport` 共享组件（SSE 发送/checkpoint 落库/LLM 调用/瞬态重试）+ 4 个实现：AisplitIntentHandler / PicIntentHandler / VideoIntentHandler / OtherIntentHandler
-- **HITLStage 通用模板**：`runHITLStage`（workflow → 方案消息 → checkpoint 落库 → human_input/video_plan 事件）+ `resumeStage`（workflow → 结果消息 → confirm_result → message_end）；三链只填「方案生成逻辑」与「执行工具」两个钩子（StagePlan record 承载差异），HITL/checkpoint/resume 全复用
-- **意图识别增强**：规则前置匹配（强关键词如「分镜/剧本」「生成视频」「生成图片」直接路由，免一次 LLM 调用，confidence=1.0）+ LLM 输出 JSON `{type, confidence}`；**低于 `ai.agent.intent-threshold`（默认 0.6）不硬路由，走澄清分支**；失败兜底 intent-other；LLM 调用瞬态失败（429/5xx/超时）重试 1 次（流式与 writeScenes 刻意不重试——非幂等/重复 delta）
-- **意图路由（决策 4，2026-08-11 全链实现）**：
-  - aisplit：**现有分镜检测（handle 入口一次，防重入死循环）**——项目已有分镜 → 卡片1「处理方式」（`scene-mode`：基于现有优化/全新创建/不生成）→ 剧本优化 gate（type=0 追问澄清/type=1 继续）→ 分镜方案 → 分镜 JSON（ScriptGenerationService）→ 方案确认卡片（checkpoint action 恒 `agree`，选项动态：**有现有分镜**→ [replace 覆盖导入][append 追加][disagree 不满意][cancel 不生成] + 覆盖警告文案；**无**→ [agree 满意][disagree 不满意]）→ resume 写库；**不满意（disagree）→ 调整意见卡片（`scene-regenerate`，选项=✍自定义输入）→ 意见+上一轮方案重走生成链（可循环）**，连续不满意达 `ai.agent.max-regenerate-rounds`（默认 3）后不再弹卡片，提示直接输入新需求（regenCount 内存计数，写库成功清零）；**澄清追问上限 `ai.agent.max-clarify-rounds`（默认 2）**——连续 type=0 达上限后不再追问，直接按原始需求出默认方案让用户选（内存计数，type=1/非 aisplit 轮清零）；写库策略：replace → `AgentTools.replaceScenes`（同事务清空+写入，中途失败不丢现有分镜）/ append → 追加（现状）/ cancel → 不写库 message_end（sceneCount=-1 不触发前端刷新）
-  - pic：有参考图 → `ImageRefinePromptService.buildRefinedPrompt`（视觉模型）→ HITL（generate_image/refine）→ resume 图改图；无图 → `callImagePrompt`（LLM）→ 直接文生图自动完成
-  - video：有参考图 → `VideoPlanService.buildVideoPlan`（视觉模型）→ video_plan 卡片；无图 → `callVideoPlan`（LLM 方案）→ 同样 video_plan 卡片；**「开始生成视频」统一走 `/form/submit`（action=generate_video → VideoIntentHandler.resume）→ `task_accepted` 立即返回，后台虚拟线程轮询 MiniMax（~2min）更新 agent_assets 行**，前端轮询 `GET /api/agent/tasks/{taskId}`（旧 `/video/plan/generate` 端点保留为兼容壳，同一异步路径）
-  - other：`AgentAnswerService` 主回答（ChatClient 拼历史，流式打字机）
-- **会话级互斥**：`ConversationLock`（Semaphore，无所有权跨线程安全）——同一 conversation 同时只允许一个活跃编排实例；streamMessage / submitFormAndResume / generateVideoFromPlan / sendMessage 四入口统一 tryAcquire，忙碌返回 40901（SSE error 事件 / blocking 抛 BusinessException，GlobalExceptionHandler 已映射 CONFLICT）；**complete 由调用方统一执行且先释放锁再 complete**（防前端收到 EOF 立即发下一条撞锁）
-- **工具面**：`AgentTools`（@Component 工具组件，不接口化）：writeScenes（复用 `AgentGenerationService.writeScript`）/ replaceScenes（复用 `replaceScript`，同事务清空+写入）/ refineImage / generateVideo；当前由编排（handler 链）直接调用，自动模式 `ChatClient.tools()` 工具循环为后续增强；**工具异常不向上抛**（LLM 消化为文本），业务错误须在 @Tool 内返回错误对象
-- **主回答**：`AgentAnswerService`（intent-other 闲聊）ChatClient 拼历史流式（打字机）；D3 定案流式（message 增量 + message_end 携完整文本）
-- **HITL checkpoint**（表 `agent_checkpoints`，V4 migration）：form_token 一次性消费（status pending→used 原子条件）、30 分钟过期、plan 存方案 JSON 文本（TEXT 列，实体 String 直插）；替代原内存 Map 快照（formSnapshots/videoPlanSnapshots 已删）
-- **事务语义**（沿用 I1）：user 消息 `TransactionTemplate` + `REQUIRES_NEW` 独立事务立即提交；编排失败 user 消息保留；编排成功后 `persistAssistant` 落库 assistant 消息
-- **LLM 配置**：复用 `spring.ai.openai.*`（网关），编排 ChatClient 超时 60-120s；`ai.agent.*` 为编排行为参数（intent-threshold / max-clarify-rounds / max-regenerate-rounds）
+## 智能体补充约定（当前有效）
 
 ### 首条消息异步 AI 重命名标题
 
@@ -583,14 +675,11 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - `ImageGenerationService.generateImage`：sceneId 为 null 时不查/不写 scene 表，只用局部变量 `localPath` 返回
 - `VideoGenerationService.createVideoTask`：同样支持 sceneId 为 null；`pollVideoTask` **双通道反查**——先按 `videoTaskId` 查 scene，查不到再按 `taskId` 查 agent_assets 并更新其 url/status/error（failed 分支先解析上游 message/error 再 setError）
 
-### 图改图/图生视频（编排链，2026-08-11 起）
-
-- **图改图**：`AgentTools.refineImage` 复用 `ImageRefinePromptService.buildRefinedPrompt`（视觉模型看图+诉求→refined_prompt）+ `AgentGenerationService.generateImage(mode=edit)`；源图=本轮 PicUrl（streamMessage 传入），诉求=用户消息；确认卡片「继续完善/满意完成」交互保留，`confirmImageDone` 清会话图片上下文
-- **图生视频**：`VideoPlanService.buildVideoPlan`（视觉模型）+ MiniMax 图生视频链路；`generateVideoFromPlan` 读 checkpoint（plan 存 `{message,duration,source}`，兼容 items 包裹），confirm_result 卡片保留
 ### 智能体窗口前端约定
 
 - **入口**：编辑器右下角悬浮球 ☾ → 右侧抽屉（62vw，minWidth 480）：左会话栏（180px，顶部为「☾ Moon 智能体」标题）+ 右对话区（顶部显示当前会话标题，无会话占位「未选择对话」；右侧 📁 产出素材 + 🧹 清除聊天记录按钮）
 - **底部输入栏**：可拖拽上下伸缩（min 90 / max 40vh，顶部 4px 把手 hover 变主色）；右侧为「发送」按钮（「✨ 优化」已取消）
+- **生成中发送（steer）**：按钮文案「插入并继续」，调用 `/turns/{turnId}/steer`；回合已结束时等本地流收尾后自动改走普通发送。steer 消息以用户气泡插在当前助手气泡之前（`metadata.steer=true`），不打断在途工具。
 - **命名**：用户可见文案统一「产出素材」（原「资产」，仅文案，store/字段名 assets/AgentAsset 不变）
 - **互斥规则**：`message_end.sceneCount` > 会话开始时 `scenes.length` → `agentGeneratedScenes = true`（仅内存态，刷新恢复）→ `LeftSidebar` 剧本输入禁用
 - **inputs 适配 Moon 工作流**：`{ currentProjectId, PicUrl }`（替换旧 `project_id`/`project_name`）
