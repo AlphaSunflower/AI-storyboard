@@ -294,8 +294,8 @@ function MessageAttachmentStrip({
               display: 'inline-flex', alignItems: 'center', gap: 6, flex: '0 0 auto',
               maxWidth: 220, height: 38,
               padding: attachment.kind === 'image' || attachment.kind === 'video' ? 3 : '0 9px',
-              border: '1px solid rgba(65,118,230,0.14)', borderRadius: 9,
-              background: 'rgba(255,255,255,0.72)', color: 'rgb(65,118,230)',
+              border: '1px solid color-mix(in srgb, var(--color-primary) 14%, transparent)', borderRadius: 9,
+              background: 'rgba(255,255,255,0.72)', color: 'var(--color-primary)',
               font: 'inherit', fontSize: 12, overflow: 'hidden',
               cursor: fileChip ? 'pointer' : 'default', textAlign: 'left',
             }}
@@ -511,6 +511,8 @@ function renderContent(
   importDisabled?: boolean,
   importing?: boolean,
   dragProjectId?: string,
+  /** 拖拽素材所属对话：落进项目库后归到对应「产出素材」文件夹 */
+  dragConversationId?: string,
   /** 本轮 `@` 引用标记：命中时渲染成品牌色，与输入框里的观感一致 */
   mentionTokens?: string[],
 ) {
@@ -534,6 +536,7 @@ function renderContent(
           importing={importing}
           dragPayload={dragProjectId ? {
             projectId: dragProjectId,
+            conversationId: dragConversationId,
             mediaType: 'IMAGE',
             url: imgMatch[2],
             name: imgMatch[1] || '对话图片',
@@ -558,6 +561,7 @@ function renderContent(
           importing={importing}
           dragPayload={dragProjectId ? {
             projectId: dragProjectId,
+            conversationId: dragConversationId,
             mediaType: 'VIDEO',
             url: videoMatch[0],
             name: '对话视频',
@@ -583,6 +587,7 @@ function renderContent(
           importing={importing}
           dragPayload={dragProjectId ? {
             projectId: dragProjectId,
+            conversationId: dragConversationId,
             mediaType: 'IMAGE',
             url: raw,
             name: '对话图片',
@@ -606,7 +611,7 @@ function renderContent(
           <span
             key={`mention-${j}`}
             data-mention="true"
-            style={{ color: 'rgb(65,118,230)', fontWeight: 500 }}
+            style={{ color: 'var(--color-primary)', fontWeight: 500 }}
           >
             {segment.text}
           </span>
@@ -662,6 +667,7 @@ function MarkdownContent({
   importDisabled,
   importing,
   dragProjectId,
+  dragConversationId,
   streaming = false,
 }: {
   content: string;
@@ -670,6 +676,7 @@ function MarkdownContent({
   importDisabled?: boolean;
   importing?: boolean;
   dragProjectId?: string;
+  dragConversationId?: string;
   streaming?: boolean;
 }) {
   const normalized = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
@@ -786,6 +793,7 @@ function MarkdownContent({
           importing={importing}
           dragPayload={dragProjectId ? {
             projectId: dragProjectId,
+            conversationId: dragConversationId,
             mediaType: 'VIDEO',
             url: videoMatch[0],
             name: '对话视频',
@@ -944,9 +952,9 @@ function SelectionActionToolbar({
           display: 'inline-flex', alignItems: 'center', gap: 6,
           border: 'none', background: 'transparent', cursor: 'pointer',
           padding: '6px 10px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-          color: 'rgb(15, 17, 21)', whiteSpace: 'nowrap',
+          color: 'var(--color-ink)', whiteSpace: 'nowrap',
         }}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65, 118, 230, 0.08)'; }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 8%, transparent)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >
         <MessageSquarePlus size={14} strokeWidth={1.9} />
@@ -962,9 +970,9 @@ function SelectionActionToolbar({
           display: 'inline-flex', alignItems: 'center', gap: 6,
           border: 'none', background: 'transparent', cursor: 'pointer',
           padding: '6px 10px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-          color: 'rgb(15, 17, 21)', whiteSpace: 'nowrap',
+          color: 'var(--color-ink)', whiteSpace: 'nowrap',
         }}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65, 118, 230, 0.08)'; }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 8%, transparent)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
       >
         <PanelRightOpen size={14} strokeWidth={1.9} />
@@ -1049,7 +1057,7 @@ function AnnotationEditor({
           style={{
             flex: 1, minWidth: 0, resize: 'none', border: 'none', outline: 'none',
             background: 'rgb(246,247,249)', borderRadius: 12, padding: '9px 12px',
-            fontSize: 14, lineHeight: 1.5, color: 'rgb(15,17,21)', fontFamily: 'inherit',
+            fontSize: 14, lineHeight: 1.5, color: 'var(--color-ink)', fontFamily: 'inherit',
           }}
         />
         {mode === 'create' && (
@@ -1059,7 +1067,7 @@ function AnnotationEditor({
             onClick={() => onSave(value)}
             style={{
               width: 36, height: 36, flexShrink: 0, borderRadius: 12, border: 'none',
-              background: 'rgb(15,17,21)', color: 'white', cursor: 'pointer',
+              background: 'var(--color-ink)', color: 'white', cursor: 'pointer',
               display: 'grid', placeItems: 'center',
             }}
           >
@@ -1093,7 +1101,7 @@ function AnnotationEditor({
               type="button"
               onClick={() => onSave(value)}
               style={{
-                borderRadius: 10, border: 'none', background: 'rgb(15,17,21)',
+                borderRadius: 10, border: 'none', background: 'var(--color-ink)',
                 color: 'white', fontSize: 13, padding: '7px 14px', cursor: 'pointer',
               }}
             >保存</button>
@@ -1116,9 +1124,9 @@ function QuotedAnnotationList({ items }: { items: AnnotationQuote[] }) {
         <div
           key={`${index}-${item.quote.slice(0, 16)}`}
           style={{
-            borderLeft: '3px solid var(--color-primary)',
+            border: '1px solid color-mix(in srgb, var(--color-primary) 22%, var(--color-hairline))',
             borderRadius: 8,
-            background: 'var(--color-surface-soft)',
+            background: 'var(--color-primary-tint)',
             padding: '6px 10px',
             fontSize: 13,
             lineHeight: 1.55,
@@ -1545,7 +1553,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     borderRadius: 'var(--rounded-md)',
     background: 'var(--color-canvas)',
     border: `1px solid ${editFocused ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-    boxShadow: editFocused ? '0 0 0 3px rgba(204, 120, 92, 0.14)' : 'none',
+    boxShadow: editFocused ? '0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent)' : 'none',
     color: 'var(--color-ink)',
     fontSize: 16,
     lineHeight: 1.55,
@@ -1617,6 +1625,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
       producer: 'moon-chat',
       url: item.url,
       mediaType: item.type,
+      conversationId,
       label: item.type === 'VIDEO' ? 'Moon 生成视频' : 'Moon 生成图片',
     })));
     setProjectImportState(results.every((result) => result.status === 'fulfilled') ? 'done' : 'error');
@@ -1730,16 +1739,16 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         onMouseUp={handleAnnotationSelection}
         onKeyUp={handleAnnotationSelection}
         style={ds
-          ? // DeepSeek 风格：用户=浅蓝 22px 圆角气泡(≤525px)；助手=无气泡纯文本
+          ? // 主聊天列：用户=暖色浅底气泡；助手=无气泡正文，宽度跟输入卡一致
             {
               position: 'relative',
-              maxWidth: isUser ? 'min(525px, 82%)' : '100%',
-              padding: isUser ? '10px 16px' : 0,
-              borderRadius: isUser ? 22 : 0,
-              background: isUser ? 'rgb(237, 243, 254)' : 'transparent',
-              color: 'rgb(15, 17, 21)',
-              fontSize: 16,
-              lineHeight: 1.6,
+              maxWidth: isUser ? 'min(560px, 86%)' : '100%',
+              padding: isUser ? '9px 14px' : 0,
+              borderRadius: isUser ? 16 : 0,
+              background: isUser ? 'var(--color-primary-soft)' : 'transparent',
+              color: 'var(--color-ink)',
+              fontSize: 15,
+              lineHeight: 1.72,
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
               textAlign: 'left',
@@ -1827,6 +1836,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                       importDisabled={importDisabled}
                       importing={projectImportState === 'importing'}
                       dragProjectId={currentProject?.id}
+                      dragConversationId={conversationId}
                       streaming={streaming}
                     />
                   )}
@@ -1839,7 +1849,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                     <div style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6,
                       marginBottom: 6, padding: '4px 8px', borderRadius: 8,
-                      background: 'rgba(65,118,230,0.07)', color: 'rgb(49,95,196)',
+                      background: 'color-mix(in srgb, var(--color-primary) 7%, transparent)', color: 'var(--color-primary-active)',
                       fontSize: 11, fontWeight: 580,
                     }}>
                       <MessageSquarePlus size={12} strokeWidth={1.9} />
@@ -1859,6 +1869,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                     importDisabled,
                     projectImportState === 'importing',
                     currentProject?.id,
+                    conversationId,
                     mentionTokens,
                   )}
                 </>
@@ -1873,17 +1884,17 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               width: 2, height: 16,
               marginLeft: 2,
               verticalAlign: 'text-bottom',
-              background: isUser ? (ds ? 'rgb(65, 118, 230)' : 'white') : (ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'),
+              background: isUser ? (ds ? 'var(--color-primary)' : 'white') : (ds ? 'var(--color-primary)' : 'var(--color-primary)'),
               animation: 'typeCursor 1s steps(1) infinite',
             }}
           />
         )}
         <style>{`@keyframes typeCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }`}</style>
         {annotationsVisible && (
-          <style>{`::highlight(${highlightName}) { background-color: rgba(65, 118, 230, 0.16); }`}</style>
+          <style>{`::highlight(${highlightName}) { background-color: color-mix(in srgb, var(--color-primary) 16%, transparent); }`}</style>
         )}
         {annotationEditable && selectionAction && (
-          <style>{`::highlight(${selectionHighlightName}) { background-color: rgba(65, 118, 230, 0.32); }`}</style>
+          <style>{`::highlight(${selectionHighlightName}) { background-color: color-mix(in srgb, var(--color-primary) 32%, transparent); }`}</style>
         )}
       </div>
       {/* 任务卡：带 parentToolCallId 的旅程任务已折到上方工具卡下，这里只渲染其余任务 */}
@@ -1904,13 +1915,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
             flexWrap: 'wrap', rowGap: 3,
           }}
         >
-          <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'rgb(162, 164, 166)' : 'var(--color-muted-soft)' }}>
+          <span style={{ fontSize: ds ? 12 : 11, color: ds ? 'var(--color-muted)' : 'var(--color-muted-soft)' }}>
             {formatTime(createdAt)}
           </span>
           <Tooltip label="复制内容">
             <button
               onClick={handleCopy}
-              onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(0,0,0,0.05)'; el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)'; }}
+              onMouseEnter={(e) => { const el = e.currentTarget; el.style.background = 'rgba(0,0,0,0.05)'; el.style.color = ds ? 'var(--color-primary)' : 'var(--color-primary)'; }}
               onMouseLeave={(e) => { const el = e.currentTarget; el.style.background = 'transparent'; el.style.color = ds ? 'rgb(162, 164, 166)' : 'var(--color-muted)'; }}
               style={{
                 border: 'none', background: 'transparent', cursor: 'pointer',
@@ -1926,7 +1937,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               onMouseEnter={(e) => {
                 const el = e.currentTarget;
                 el.style.background = 'rgba(0,0,0,0.05)';
-                el.style.color = ds ? 'rgb(65, 118, 230)' : 'var(--color-primary)';
+                el.style.color = ds ? 'var(--color-primary)' : 'var(--color-primary)';
               }}
               onMouseLeave={(e) => {
                 const el = e.currentTarget;
@@ -1975,9 +1986,9 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           top: Math.max(8, badgeAnchor.top - 10),
           left: badgeAnchor.right - 8,
           minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999,
-          border: '2px solid white', background: 'rgb(65, 118, 230)', color: 'white',
+          border: '2px solid white', background: 'var(--color-primary)', color: 'white',
           fontSize: 11, fontWeight: 700, lineHeight: 1, cursor: 'pointer',
-          boxShadow: '0 2px 8px rgba(65, 118, 230, 0.45)', zIndex: 2100,
+          boxShadow: '0 2px 8px color-mix(in srgb, var(--color-primary) 45%, transparent)', zIndex: 2100,
         }}
       >
         {annotationCount}

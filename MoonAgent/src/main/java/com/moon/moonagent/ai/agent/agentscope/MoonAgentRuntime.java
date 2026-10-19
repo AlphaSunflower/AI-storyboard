@@ -153,6 +153,7 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     private final ProjectCreativeContextService creativeContext;
     private final ConstraintExtractionService constraintExtraction;
     private final AgentDocumentService documentService;
+    private final ConversationReferenceService conversationReferenceService;
     private final com.moon.moonagent.ai.agent.scene.SceneReferenceService sceneReferenceService;
     /** 项目库文件 → 会话资产转存（`@项目库文档` 读得到正文的前提）。 */
     private final com.moon.moonagent.ai.agent.document.LibraryReferenceAssetService
@@ -237,7 +238,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                             new TurnContextMiddleware(
                                     workflowService, creativeContext, constraintExtraction,
                                     documentService, turnCapabilityReporter, sceneReferenceService,
-                                    libraryReferenceAssetService, agentMemoryService),
+                                    libraryReferenceAssetService, agentMemoryService,
+                                    conversationReferenceService),
                             toolCallContentMiddleware != null
                                     ? toolCallContentMiddleware
                                     : new ToolCallContentMiddleware(),

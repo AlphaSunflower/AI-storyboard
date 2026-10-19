@@ -134,21 +134,17 @@
 
 .conversation-item {
   transition:
-    background-color 180ms ease,
-    box-shadow 220ms ease,
-    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.conversation-item:hover {
-  transform: translateX(2px);
+    background-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .conversation-item.is-active {
-  animation: chat-conversation-select 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* 选中态由底色 + 字重表达；不再做位移动画，避免列表在点击时晃。 */
+  animation: none;
 }
 
 .chat-thread-stage {
-  animation: chat-thread-enter 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: chat-thread-enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .chat-live-text {
@@ -288,8 +284,11 @@
 
 .project-dropdown-item {
   opacity: 1;
-  animation: project-item-enter 260ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  animation-delay: calc(var(--item-index, 0) * 24ms);
+  transition: background-color 140ms ease;
+}
+
+.project-dropdown-item:hover {
+  background: var(--color-surface-subtle);
 }
 
 .chat-plus-trigger svg {
@@ -336,7 +335,7 @@
 }
 
 .chat-context-ring-anchor:focus-visible {
-  outline: 2px solid rgb(65, 118, 230);
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
   border-radius: 999px;
 }
@@ -374,7 +373,7 @@
   width: 100%;
   height: 100%;
   margin: 0;
-  border: 1px solid rgba(65, 118, 230, 0.16);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 16%, transparent);
   border-radius: 9px;
   background: white;
   overflow: hidden;
@@ -399,7 +398,7 @@
 
 .chat-reference-preview__open:hover,
 .chat-reference-preview__open:focus-visible {
-  border-color: rgba(65, 118, 230, 0.42);
+  border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
   box-shadow: 0 4px 12px rgba(36, 73, 149, 0.14);
   transform: translateY(-1px);
 }
@@ -449,7 +448,7 @@
   font-weight: 650;
   letter-spacing: 0;
   background:
-    linear-gradient(135deg, rgba(65, 118, 230, 0.1), rgba(65, 118, 230, 0.035)),
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 10%, transparent), color-mix(in srgb, var(--color-primary) 3.5%, transparent)),
     white;
   transition:
     border-color 150ms ease,
@@ -459,8 +458,8 @@
 
 .chat-reference-preview__overflow:hover,
 .chat-reference-preview__overflow:focus-visible {
-  border-color: rgba(65, 118, 230, 0.42);
-  color: rgb(65, 118, 230);
+  border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  color: var(--color-primary);
   transform: translateY(-1px);
 }
 
@@ -484,20 +483,20 @@
 
 .approval-mode-option:hover,
 .approval-mode-option:focus-visible {
-  background: rgba(65, 118, 230, 0.06);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
 }
 
 .approval-mode-option.is-selected {
-  background: rgba(65, 118, 230, 0.08);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 }
 
 .approval-mode-option.is-selected:hover,
 .approval-mode-option.is-selected:focus-visible {
-  background: rgba(65, 118, 230, 0.11);
+  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
 }
 
 .approval-mode-option:focus-visible {
-  outline: 2px solid rgba(65, 118, 230, 0.45);
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
   outline-offset: -2px;
 }
 
@@ -836,3 +835,6 @@
     opacity: 0;
   }
 }
+
+/* 顶栏应用入口：Tooltip 包裹层不能参与收缩，否则窄窗会把「项目库」挤成省略号 */
+.chat-app-actions > .warm-tooltip__trigger { flex: 0 0 auto; }

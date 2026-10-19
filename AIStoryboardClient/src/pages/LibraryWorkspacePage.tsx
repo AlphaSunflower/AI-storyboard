@@ -27,6 +27,7 @@ import {
   LayoutGrid,
   ListChecks,
   ListTree,
+  MessageSquare,
   Package,
   Pencil,
   Plus,
@@ -34,6 +35,7 @@ import {
   Scissors,
   Search,
   Sparkles,
+  SquareArrowOutUpRight,
   Trash2,
   Upload,
   X,
@@ -44,18 +46,33 @@ import {
   type AssetGroupSnapshot,
   type AssetScope,
   type AssetType,
+  type AssetColorLabel,
+  type AssetFlag,
+  type AssetUsage,
+  type DuplicateGroup,
   type ImportEntry,
   type LibraryAsset,
   type LibraryAssetDetail,
   type LibraryFolderNode,
   type LibraryGroupMediaItem,
+  type LibraryGroupInsight,
+  type LibrarySavedView,
   type LibraryTag,
   type MetadataState,
+  type OutputConversationSummary,
 } from '../api/library';
+import { agentApi, type ProjectAssetGroupBinding } from '../api/agent';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
-import { useLibraryTaskStore } from '../stores/libraryTaskStore';
+import { useAgentStore } from '../stores/agentStore';
+import { useLibraryTaskStore, type LibraryTask } from '../stores/libraryTaskStore';
 import { notify } from '../stores/toastStore';
 import { Tooltip } from '../components/common/Tooltip';
+import { LibraryTaskQueue } from '../components/library/LibraryTaskQueue';
+import { VirtualAssetGrid } from '../components/library/VirtualAssetGrid';
+import {
+  LibraryCommandPalette,
+  type LibraryCommandAction,
+} from '../components/library/LibraryCommandPalette';
 import {
   LibraryActionMenu,
   type LibraryActionItem,
@@ -67,6 +84,7 @@ import {
 } from '../components/library/LibraryTree';
 import {
   AuthenticatedPreviewImage,
+  GroupUsagePanel,
   LibraryInspector,
 } from '../components/library/LibraryInspector';
 import {
@@ -81,6 +99,7 @@ import {
 } from '../components/library/libraryTreeModel';
 import {
   buildLibraryQuery,
+  formatBytes,
   resolveLibraryProjectId,
   scopeFromQuery,
 } from '../lib/libraryFilters';
@@ -94,6 +113,7 @@ import {
 } from '../lib/projectLibraryDrag';
 import { importMediaToProjectLibrary } from '../lib/projectLibraryImport';
 import { assetUrl } from '../config';
+import { libraryThumbnailUrl } from '../lib/libraryMedia';
 import './LibraryWorkspacePage.css';
 
 const PAGE_SIZE = 100;
@@ -101,7 +121,21 @@ const PAGE_SIZE = 100;
 const AI_ENRICH_CONFIRM_THRESHOLD = 10;
 const INTERNAL_LIBRARY_DRAG_TYPE = 'application/x-moon-library-assets';
 const INTERNAL_FOLDER_DRAG_TYPE = 'application/x-moon-library-folder';
-type ScopeView = 'PROJECT' | 'GLOBAL' | 'OUTPUT' | 'TRASH';
+const SMART_COLORS = [
+  { hex: '#e05b4b', label: '红' },
+  { hex: '#e08a3c', label: '橙' },
+  { hex: '#e3b341', label: '黄' },
+  { hex: '#4f9d69', label: '绿' },
+  { hex: '#3f9c9c', label: '青' },
+  { hex: '#4b7fd1', label: '蓝' },
+  { hex: '#8d6bc9', label: '紫' },
+  { hex: '#d46a9e', label: '粉' },
+  { hex: '#2b3036', label: '黑' },
+  { hex: '#c9c3ba', label: '灰' },
+];
+/** 仅当前页面会话可用的重试文件；刷新后不保留，任务面板会提示重新选择。 */
+const libraryUploadRetryFiles = new Map<string, File>();
+type ScopeView = 'PROJECT' | 'GLOBAL' | 'OUTPUT' | 'DUPLICATES' | 'UNUSED' | 'TRASH';
 type LibraryViewMode = 'folders' | 'tree';
 const METADATA_LABEL: Record<MetadataState, string> = {
   NONE: '未分析',
@@ -110,6 +144,43 @@ const METADATA_LABEL: Record<MetadataState, string> = {
   AI_FAILED: 'AI 分析失败',
   EDITED: '已编辑',
 };
+
+/** 后端约定的「未归属任何对话」伪 conversationId。 */
+const UNASSIGNED_OUTPUT = 'UNASSIGNED';
+
+/** 产出对话卡上的时间：越近越口语，超过一周给具体日期。 */
+function formatOutputTime(value?: string | null): string {
+  if (!value) return '还没有生成时间';
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return '';
+  const diffMinutes = Math.floor((Date.now() - timestamp) / 60_000);
+  if (diffMinutes < 1) return '刚刚';
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} 小时前`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays} 天前`;
+  return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+}
+
+/** 对话标题来自 MoonAgent；对话已删除或还没加载到时给出可辨认的兜底名。 */
+function outputConversationTitle(
+  group: OutputConversationSummary,
+  titles: Record<string, { title: string; updatedAt?: string }>,
+): string {
+  if (!group.conversationId) return '未归属产出';
+  const known = titles[group.conversationId]?.title?.trim();
+  if (known) return known;
+  return `对话 · ${group.conversationId.slice(0, 8)}`;
+}
+
+function outputCountsLabel(group: OutputConversationSummary): string {
+  const parts: string[] = [`共 ${group.assetCount} 项`];
+  if (group.imageCount > 0) parts.push(`图片 ${group.imageCount}`);
+  if (group.videoCount > 0) parts.push(`视频 ${group.videoCount}`);
+  if (group.documentCount > 0) parts.push(`文档 ${group.documentCount}`);
+  return parts.join(' · ');
+}
 
 function editableAssetDescription(asset: LibraryAsset): string {
   return asset.metadataState === 'EDITED'
@@ -130,7 +201,8 @@ type PromptState =
     groupMedia: LibraryGroupMediaItem;
   }
   | { kind: 'create-group'; title: string; value: string }
-  | { kind: 'merge-group'; title: string; value: string; assetIds: string[] };
+  | { kind: 'merge-group'; title: string; value: string; assetIds: string[] }
+  | { kind: 'save-view'; title: string; value: string };
 
 /** 弹窗提交成功后的通知标题：按操作类型给一句中文确认 */
 function promptSuccessTitle(kind: PromptState['kind']): string {
@@ -139,6 +211,7 @@ function promptSuccessTitle(kind: PromptState['kind']): string {
     case 'rename-folder': return '已重命名目录';
     case 'create-group':
     case 'merge-group': return '已新建资产组';
+    case 'save-view': return '已保存视图';
     case 'rename-asset': return '已重命名素材';
     default: return '已保存素材信息';
   }
@@ -192,6 +265,14 @@ export function LibraryWorkspacePage() {
   const [folderTree, setFolderTree] = useState<LibraryFolderNode[]>([]);
   const [unfiledCount, setUnfiledCount] = useState(0);
   const [groups, setGroups] = useState<LibraryAsset[]>([]);
+  /** 资产组使用侧信息：groupId → 成员数 / 快照次数 / 最近快照时间。 */
+  const [groupInsights, setGroupInsights] = useState<Record<string, LibraryGroupInsight>>({});
+  /** 资产组被哪些对话绑定：groupId → 绑定行。 */
+  const [groupBindings, setGroupBindings] = useState<Record<string, ProjectAssetGroupBinding[]>>({});
+  const [groupBindingBusy, setGroupBindingBusy] = useState(false);
+  /** 资产组「绑定到所选对话」的目标；默认跟随 Moon 当前对话，也可在面板里改选。 */
+  const [bindingTargetConversationId, setBindingTargetConversationId] = useState('');
+  const activeConversationId = useAgentStore((state) => state.activeConversationId);
   const [groupItemsByGroup, setGroupItemsByGroup] = useState<Record<string, LibraryGroupMediaItem[]>>({});
   const [loadingGroupIds, setLoadingGroupIds] = useState<Set<string>>(new Set());
   const [assetsByFolder, setAssetsByFolder] = useState<Record<string, LibraryAsset[]>>({});
@@ -217,6 +298,48 @@ export function LibraryWorkspacePage() {
   const [outputAssets, setOutputAssets] = useState<LibraryAsset[]>([]);
   const [outputTotal, setOutputTotal] = useState(0);
   const [outputLoading, setOutputLoading] = useState(false);
+  /** 产出素材根视图：一个对话一张卡片（虚拟文件夹）。 */
+  const [outputConversations, setOutputConversations] = useState<OutputConversationSummary[]>([]);
+  const [outputConversationsLoading, setOutputConversationsLoading] = useState(false);
+  /** 当前打开的产出对话；UNASSIGNED 表示未归属对话的生成结果。 */
+  const [outputConversationId, setOutputConversationId] = useState<string | null>(
+    () => searchParams.get('conversationId') || null,
+  );
+  const [outputConversationTitles, setOutputConversationTitles] = useState<
+    Record<string, { title: string; updatedAt?: string }>
+  >({});
+  /** 重复素材：同一文件被多个素材引用的分组。 */
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [duplicateTotal, setDuplicateTotal] = useState(0);
+  const [duplicatesLoading, setDuplicatesLoading] = useState(false);
+  const [activeDuplicateGroup, setActiveDuplicateGroup] = useState<DuplicateGroup | null>(null);
+  const [duplicateSurvivorId, setDuplicateSurvivorId] = useState('');
+  const [duplicateSelectedIds, setDuplicateSelectedIds] = useState<string[]>([]);
+  const [duplicatesMerging, setDuplicatesMerging] = useState(false);
+  /** 未被分镜、资产组、画布引用的素材。 */
+  const [unusedAssets, setUnusedAssets] = useState<LibraryAsset[]>([]);
+  const [unusedTotal, setUnusedTotal] = useState(0);
+  const [unusedLoading, setUnusedLoading] = useState(false);
+  /** 产出素材的镜头版本组：同一对话 + 同一镜头的多次生成归为一组。 */
+  const [activeVersionStack, setActiveVersionStack] = useState<{
+    sceneId: string;
+    assets: LibraryAsset[];
+  } | null>(null);
+  const [stackSelectedIds, setStackSelectedIds] = useState<string[]>([]);
+  /** 挑片筛选。 */
+  const [minRating, setMinRating] = useState(0);
+  const [flagFilter, setFlagFilter] = useState<'' | AssetFlag>('');
+  const [colorFilter, setColorFilter] = useState<'' | AssetColorLabel>('');
+  const [savedViews, setSavedViews] = useState<LibrarySavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState('');
+  const [assetUsage, setAssetUsage] = useState<AssetUsage | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [smartMode, setSmartMode] = useState(false);
+  const [smartResults, setSmartResults] = useState<LibraryAsset[]>([]);
+  const [smartLoading, setSmartLoading] = useState(false);
+  const [smartColor, setSmartColor] = useState('');
+  const [similarAsset, setSimilarAsset] = useState<LibraryAsset | null>(null);
   const [globalTotal, setGlobalTotal] = useState(0);
   const [clipboardIds, setClipboardIds] = useState<string[]>([]);
   const [clipboardFolderIds, setClipboardFolderIds] = useState<string[]>([]);
@@ -237,6 +360,7 @@ export function LibraryWorkspacePage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const folderGridRef = useRef<HTMLElement>(null);
+  const treeScrollRef = useRef<HTMLDivElement>(null);
   const initializedProject = useRef(false);
   const selectionAnchor = useRef<string | null>(null);
   const selectionStart = useRef<{ x: number; y: number } | null>(null);
@@ -284,6 +408,9 @@ export function LibraryWorkspacePage() {
   const isTrash = scopeView === 'TRASH';
   const isGlobal = scopeView === 'GLOBAL';
   const isOutput = scopeView === 'OUTPUT';
+  const isOutputRoot = isOutput && !outputConversationId;
+  const isDuplicates = scopeView === 'DUPLICATES';
+  const isUnused = scopeView === 'UNUSED';
   const queryScope: AssetScope | undefined = isTrash ? undefined : isGlobal ? 'GLOBAL' : 'PROJECT';
   const includeGlobal = scopeView === 'PROJECT';
   const origin: 'GENERATED' | undefined = isOutput ? 'GENERATED' : undefined;
@@ -296,6 +423,26 @@ export function LibraryWorkspacePage() {
       const response = await libraryApi.listAssets({ deleted: true, page: 1, size: PAGE_SIZE });
       setTrashAssets(response.data.data.records || []);
       setLoading(false);
+      return;
+    }
+    if (isDuplicates) {
+      setLoading(false);
+      setError('');
+      setFolderTree([]);
+      setUnfiledCount(0);
+      setGroups([]);
+      setAssetsByFolder({});
+      setLoadedFolders(new Set());
+      return;
+    }
+    if (isUnused) {
+      setLoading(false);
+      setError('');
+      setFolderTree([]);
+      setUnfiledCount(0);
+      setGroups([]);
+      setAssetsByFolder({});
+      setLoadedFolders(new Set());
       return;
     }
     if (isOutput) {
@@ -345,7 +492,7 @@ export function LibraryWorkspacePage() {
     } finally {
       setLoading(false);
     }
-  }, [includeGlobal, isOutput, isTrash, projectForTree, queryScope]);
+  }, [includeGlobal, isDuplicates, isOutput, isTrash, isUnused, projectForTree, queryScope]);
 
   useEffect(() => {
     void reloadTree();
@@ -364,12 +511,15 @@ export function LibraryWorkspacePage() {
       origin,
     });
     if (isEmbedded) params.set('embedded', '1');
+    if (isOutput && outputConversationId) params.set('conversationId', outputConversationId);
     setSearchParams(params, { replace: true });
   }, [
     effectiveProjectId,
     includeGlobal,
     isEmbedded,
+    isOutput,
     origin,
+    outputConversationId,
     query,
     scopeView,
     selectedTagIds,
@@ -390,10 +540,41 @@ export function LibraryWorkspacePage() {
     setSelectedGroupMediaId(null);
     setInspectorDismissed(false);
     setDocumentPreview(null);
+    setActiveDuplicateGroup(null);
+    setDuplicateSurvivorId('');
+    setDuplicateSelectedIds([]);
   }, [effectiveProjectId, query, scopeView, selectedTagIds, type]);
 
-  const filteredMode = Boolean(query.trim() || type || selectedTagIds.length);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandOpen((current) => !current);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const filteredMode = Boolean(
+    query.trim() || type || selectedTagIds.length || minRating > 0 || flagFilter || colorFilter,
+  );
   const visibleTags = tagsExpanded ? tags : tags.slice(0, 10);
+  const visibleDuplicateGroups = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return duplicateGroups;
+    return duplicateGroups.filter((group) => group.assets.some((asset) => (
+      asset.name.toLowerCase().includes(term)
+      || (asset.description || '').toLowerCase().includes(term)
+    )));
+  }, [duplicateGroups, query]);
+  const duplicateReclaimableBytes = useMemo(
+    () => duplicateGroups.reduce(
+      (sum, group) => sum + group.sizeBytes * Math.max(0, group.assets.length - 1),
+      0,
+    ),
+    [duplicateGroups],
+  );
 
   const loadFolder = useCallback(async (folderId: string, page = 1, force = false) => {
     if (!force && page === 1 && loadedFolders.has(folderId) && !filteredMode) return;
@@ -407,6 +588,9 @@ export function LibraryWorkspacePage() {
       type: effectiveType,
       tagIds: selectedTagIds.length ? selectedTagIds : undefined,
       tagMode: 'ALL',
+      minRating: minRating > 0 ? minRating : undefined,
+      flag: flagFilter || undefined,
+      colorLabel: colorFilter || undefined,
       includeGlobal: globalBucket ? undefined : includeGlobal,
       page,
       size: PAGE_SIZE,
@@ -418,10 +602,13 @@ export function LibraryWorkspacePage() {
     }));
     setLoadedFolders((current) => new Set(current).add(folderId));
   }, [
+    colorFilter,
     effectiveType,
     filteredMode,
+    flagFilter,
     includeGlobal,
     loadedFolders,
+    minRating,
     projectForTree,
     query,
     queryScope,
@@ -429,7 +616,8 @@ export function LibraryWorkspacePage() {
   ]);
 
   const loadFilteredAssets = useCallback(async () => {
-    if (!filteredMode || isTrash) return;
+    // 产出素材走自己的对话聚合接口，不参与项目库的平铺筛选。
+    if (!filteredMode || isTrash || isOutput || isDuplicates || isUnused) return;
     const response = await libraryApi.listAssets({
       scope: queryScope,
       projectId: projectForTree,
@@ -437,6 +625,9 @@ export function LibraryWorkspacePage() {
       type: effectiveType,
       tagIds: selectedTagIds.length ? selectedTagIds : undefined,
       tagMode: 'ALL',
+      minRating: minRating > 0 ? minRating : undefined,
+      flag: flagFilter || undefined,
+      colorLabel: colorFilter || undefined,
       includeGlobal,
       page: 1,
       size: PAGE_SIZE,
@@ -461,11 +652,17 @@ export function LibraryWorkspacePage() {
       return nextExpanded;
     });
   }, [
+    colorFilter,
     effectiveType,
     filteredMode,
+    flagFilter,
     folderTree,
     includeGlobal,
+    isDuplicates,
+    isOutput,
     isTrash,
+    isUnused,
+    minRating,
     projectForTree,
     query,
     queryScope,
@@ -477,7 +674,7 @@ export function LibraryWorkspacePage() {
   }, [filteredMode, loadFilteredAssets]);
 
   const loadOutputAssets = useCallback(async (page = 1, append = false) => {
-    if (!effectiveProjectId) {
+    if (!effectiveProjectId || !outputConversationId) {
       setOutputAssets([]);
       setOutputTotal(0);
       return;
@@ -489,10 +686,14 @@ export function LibraryWorkspacePage() {
         scope: 'PROJECT',
         projectId: effectiveProjectId,
         origin: 'GENERATED',
+        conversationId: outputConversationId,
         q: query.trim() || undefined,
         type: effectiveType,
         tagIds: selectedTagIds.length ? selectedTagIds : undefined,
         tagMode: 'ALL',
+        minRating: minRating > 0 ? minRating : undefined,
+        flag: flagFilter || undefined,
+        colorLabel: colorFilter || undefined,
         page,
         size: PAGE_SIZE,
       });
@@ -504,12 +705,198 @@ export function LibraryWorkspacePage() {
     } finally {
       setOutputLoading(false);
     }
-  }, [effectiveProjectId, effectiveType, query, selectedTagIds]);
+  }, [colorFilter, effectiveProjectId, effectiveType, flagFilter, minRating, outputConversationId, query, selectedTagIds]);
+
+  /** 产出素材根视图：按对话聚合；搜索/筛选同时作用于卡片里的素材。 */
+  const loadOutputConversations = useCallback(async () => {
+    if (!effectiveProjectId) {
+      setOutputConversations([]);
+      return;
+    }
+    setOutputConversationsLoading(true);
+    setError('');
+    try {
+      const response = await libraryApi.listOutputConversations({
+        projectId: effectiveProjectId,
+        q: query.trim() || undefined,
+        type: effectiveType,
+        tagIds: selectedTagIds.length ? selectedTagIds : undefined,
+        tagMode: 'ALL',
+        minRating: minRating > 0 ? minRating : undefined,
+        flag: flagFilter || undefined,
+        colorLabel: colorFilter || undefined,
+      });
+      setOutputConversations(response.data.data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载产出对话失败');
+      setOutputConversations([]);
+    } finally {
+      setOutputConversationsLoading(false);
+    }
+  }, [colorFilter, effectiveProjectId, effectiveType, flagFilter, minRating, query, selectedTagIds]);
 
   useEffect(() => {
     if (!isOutput) return;
-    void loadOutputAssets(1, false);
-  }, [isOutput, loadOutputAssets]);
+    if (outputConversationId) {
+      void loadOutputAssets(1, false);
+    } else {
+      void loadOutputConversations();
+    }
+  }, [isOutput, outputConversationId, loadOutputAssets, loadOutputConversations]);
+
+  // 对话标题真源在 MoonAgent：项目库只按 conversationId 聚合，标题在渲染时合并。
+  // 不限于「产出素材」视图：主项目库的素材详情同样需要显示来源对话。
+  useEffect(() => {
+    if (!effectiveProjectId) return;
+    let cancelled = false;
+    void agentApi.listConversations(effectiveProjectId)
+      .then((response) => {
+        if (cancelled) return;
+        const next: Record<string, { title: string; updatedAt?: string }> = {};
+        (response.data.data || []).forEach((conversation) => {
+          next[conversation.id] = { title: conversation.title, updatedAt: conversation.updatedAt };
+        });
+        setOutputConversationTitles(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveProjectId]);
+
+  const loadDuplicates = useCallback(async (page = 1, append = false) => {
+    if (!effectiveProjectId) {
+      setDuplicateGroups([]);
+      setDuplicateTotal(0);
+      return;
+    }
+    setDuplicatesLoading(true);
+    setError('');
+    try {
+      const response = await libraryApi.listDuplicates({
+        projectId: effectiveProjectId,
+        page,
+        size: 20,
+      });
+      const records = response.data.data.records || [];
+      setDuplicateGroups((current) => {
+        if (!append) return records;
+        const known = new Set(current.map((group) => group.blobId));
+        return [...current, ...records.filter((group) => !known.has(group.blobId))];
+      });
+      setDuplicateTotal(response.data.data.total || 0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载重复素材失败');
+      setDuplicateGroups([]);
+    } finally {
+      setDuplicatesLoading(false);
+    }
+  }, [effectiveProjectId]);
+
+  useEffect(() => {
+    if (isDuplicates) void loadDuplicates(1, false);
+  }, [isDuplicates, loadDuplicates]);
+
+  const loadUnusedAssets = useCallback(async (page = 1, append = false) => {
+    if (!effectiveProjectId) {
+      setUnusedAssets([]);
+      setUnusedTotal(0);
+      return;
+    }
+    setUnusedLoading(true);
+    setError('');
+    try {
+      const response = await libraryApi.listUnusedAssets({
+        projectId: effectiveProjectId,
+        page,
+        size: 40,
+      });
+      const records = response.data.data.records || [];
+      setUnusedAssets((current) => {
+        if (!append) return records;
+        const known = new Set(current.map((asset) => asset.id));
+        return [...current, ...records.filter((asset) => !known.has(asset.id))];
+      });
+      setUnusedTotal(response.data.data.total || 0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载未使用素材失败');
+      setUnusedAssets([]);
+    } finally {
+      setUnusedLoading(false);
+    }
+  }, [effectiveProjectId]);
+
+  useEffect(() => {
+    if (isUnused) void loadUnusedAssets(1, false);
+  }, [isUnused, loadUnusedAssets]);
+
+  const trashUnusedSelection = async () => {
+    if (selectedIds.length === 0) return;
+    setBusy(true);
+    try {
+      await libraryApi.bulkTrash(selectedIds);
+      notify({
+        title: '已移入回收站',
+        description: `${selectedIds.length} 项未使用素材可在 3 天内恢复`,
+        variant: 'success',
+      });
+      setSelectedIds([]);
+      await loadUnusedAssets(1, false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '清理未使用素材失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openDuplicateGroup = (group: DuplicateGroup) => {
+    setActiveDuplicateGroup(group);
+    setDuplicateSurvivorId(group.assets[0]?.id || '');
+    setDuplicateSelectedIds(group.assets.slice(1).map((asset) => asset.id));
+  };
+
+  const openVersionStack = (stack: { sceneId: string; assets: LibraryAsset[] }) => {
+    setActiveVersionStack(stack);
+    setStackSelectedIds(stack.assets.slice(0, 2).map((asset) => asset.id));
+  };
+
+  const toggleStackVariant = (assetId: string) => {
+    setStackSelectedIds((current) => {
+      if (current.includes(assetId)) return current.filter((id) => id !== assetId);
+      if (current.length >= 2) return [current[current.length - 1], assetId];
+      return [...current, assetId];
+    });
+  };
+
+  const mergeActiveDuplicateGroup = async () => {
+    if (!activeDuplicateGroup || !duplicateSurvivorId) return;
+    const duplicateIds = duplicateSelectedIds.filter((id) => id !== duplicateSurvivorId);
+    if (duplicateIds.length === 0) {
+      setError('请至少勾选一份要合并的重复素材');
+      return;
+    }
+    setDuplicatesMerging(true);
+    setError('');
+    try {
+      await libraryApi.mergeDuplicates({
+        survivorAssetId: duplicateSurvivorId,
+        duplicateAssetIds: duplicateIds,
+      });
+      notify({
+        title: '已合并重复素材',
+        description: `保留 1 份，${duplicateIds.length} 份重复素材已移入回收站`,
+        variant: 'success',
+      });
+      setActiveDuplicateGroup(null);
+      setDuplicateSurvivorId('');
+      setDuplicateSelectedIds([]);
+      await loadDuplicates(1, false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '合并重复素材失败');
+    } finally {
+      setDuplicatesMerging(false);
+    }
+  };
 
   useEffect(() => {
     if (!includeGlobal) {
@@ -537,6 +924,56 @@ export function LibraryWorkspacePage() {
       .map((id) => allKnownAssets.get(id))
       .filter((asset): asset is LibraryAsset => Boolean(asset));
   }, [allKnownAssets, isTrash, selectedIds, trashAssets]);
+
+  const paletteAssets = useMemo(
+    () => Array.from(allKnownAssets.values()).filter((asset) => asset.type !== 'GROUP'),
+    [allKnownAssets],
+  );
+
+  const commandActions = useMemo<LibraryCommandAction[]>(() => [
+    { id: 'project', label: '去项目库', hint: '导航', run: () => setScopeView('PROJECT') },
+    { id: 'global', label: '去全局库', hint: '导航', run: () => setScopeView('GLOBAL') },
+    { id: 'output', label: '去产出素材', hint: '导航', run: () => setScopeView('OUTPUT') },
+    { id: 'duplicates', label: '去重复项', hint: '导航', run: () => setScopeView('DUPLICATES') },
+    { id: 'unused', label: '去未使用素材', hint: '导航', run: () => setScopeView('UNUSED') },
+    { id: 'trash', label: '去回收站', hint: '导航', run: () => setScopeView('TRASH') },
+    {
+      id: 'upload',
+      label: '上传素材',
+      hint: '动作',
+      run: () => fileInput.current?.click(),
+    },
+    {
+      id: 'new-folder',
+      label: '新建目录',
+      hint: '动作',
+      run: () => setPrompt({ kind: 'folder', title: '新建目录', value: '', parentId: null }),
+    },
+    {
+      id: 'new-group',
+      label: '新建资产组',
+      hint: '动作',
+      run: () => setPrompt({ kind: 'create-group', title: '新建资产组', value: '' }),
+    },
+    {
+      id: 'save-view',
+      label: '保存当前筛选为视图',
+      hint: '动作',
+      run: () => setPrompt({ kind: 'save-view', title: '保存当前筛选', value: '' }),
+    },
+    {
+      id: 'refresh',
+      label: '刷新项目库',
+      hint: '动作',
+      run: () => void reloadTree(),
+    },
+    {
+      id: 'open-chat',
+      label: '打开 Moon 对话',
+      hint: '跳转',
+      run: () => navigate('/chat'),
+    },
+  ], [fileInput, navigate, reloadTree]);
 
   const folderNodes = useMemo(
     () => buildFolderTree(folderTree).map((folder) => folderToTreeNode(
@@ -750,6 +1187,10 @@ export function LibraryWorkspacePage() {
 
   const openNode = async (node: LibraryTreeNodeDatum) => {
     setInspectorDismissed(false);
+    setSmartMode(false);
+    setSmartResults([]);
+    setSmartColor('');
+    setSimilarAsset(null);
     if (node.kind === 'folder') {
       const folderId = node.id.startsWith('folder:') ? node.id.slice('folder:'.length) : node.id;
       setActiveFolderId(folderId === 'unfiled' ? 'UNFILED' : folderId);
@@ -827,6 +1268,31 @@ export function LibraryWorkspacePage() {
     return (assetsByFolder[currentFolderId] || []).filter((asset) => asset.type !== 'GROUP');
   }, [assetsByFolder, currentFolderId, filteredMode, isOutput, outputAssets]);
 
+  /** 产出素材按来源镜头堆叠：同一对话 + 同一镜头的多次生成收成一张「N 版」卡片。 */
+  const outputSceneStacks = useMemo(() => {
+    if (!isOutput) return [];
+    const byScene = new Map<string, LibraryAsset[]>();
+    outputAssets.forEach((asset) => {
+      if (!asset.sceneId) return;
+      const group = byScene.get(asset.sceneId);
+      if (group) group.push(asset);
+      else byScene.set(asset.sceneId, [asset]);
+    });
+    return [...byScene.entries()]
+      .filter(([, assets]) => assets.length > 1)
+      .map(([sceneId, assets]) => ({
+        sceneId,
+        assets: [...assets].sort((first, second) => second.createdAt.localeCompare(first.createdAt)),
+      }))
+      .sort((first, second) => (
+        (second.assets[0]?.createdAt || '').localeCompare(first.assets[0]?.createdAt || '')
+      ));
+  }, [isOutput, outputAssets]);
+  const stackedAssetIds = useMemo(
+    () => new Set(outputSceneStacks.flatMap((stack) => stack.assets.map((asset) => asset.id))),
+    [outputSceneStacks],
+  );
+
   const visibleSelectableIds = useMemo(
     () => isTrash
       ? trashAssets.map((asset) => asset.id)
@@ -869,6 +1335,375 @@ export function LibraryWorkspacePage() {
     setSelectedFolderIds([]);
     setGroupMediaItems([]);
     setSelectedGroupMediaId(null);
+  };
+
+  /** 进入某个对话的产出文件夹：一个对话一个文件夹，后续列表只显示该对话的产出。 */
+  const enterOutputConversation = (conversationId: string) => {
+    setOutputConversationId(conversationId);
+    setDetail(null);
+    setSelectedIds([]);
+    setSelectedFolderIds([]);
+    setInspectorDismissed(true);
+  };
+
+  const leaveOutputConversation = () => {
+    setOutputConversationId(null);
+    setOutputAssets([]);
+    setOutputTotal(0);
+    setDetail(null);
+    setSelectedIds([]);
+    setSelectedFolderIds([]);
+  };
+
+  /** 从产出文件夹跳回 Moon 的对应对话。 */
+  const openConversationInChat = (conversationId: string) => {
+    if (!conversationId || conversationId === UNASSIGNED_OUTPUT) return;
+    navigate('/chat', { state: { conversationId } });
+  };
+
+  const currentOutputConversation = useMemo(
+    () => outputConversations.find(
+      (item) => (item.conversationId || UNASSIGNED_OUTPUT) === outputConversationId,
+    ) || null,
+    [outputConversationId, outputConversations],
+  );
+
+  const currentOutputConversationTitle = outputConversationId
+    ? (currentOutputConversation
+      ? outputConversationTitle(currentOutputConversation, outputConversationTitles)
+      : outputConversationId === UNASSIGNED_OUTPUT
+        ? '未归属产出'
+        : outputConversationTitles[outputConversationId]?.title || '产出素材')
+    : '产出素材';
+
+  /** 项目内可绑定的对话，按最近更新排序；Moon 里当前打开的对话排在选择器里标记「当前」。 */
+  const conversationOptions = useMemo(
+    () => Object.entries(outputConversationTitles)
+      .map(([id, value]) => ({
+        id,
+        title: value.title?.trim() || `对话 · ${id.slice(0, 8)}`,
+        updatedAt: value.updatedAt || '',
+      }))
+      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
+      .map(({ id, title }) => ({ id, title })),
+    [outputConversationTitles],
+  );
+  /** 目标对话失效（切项目 / 对话被删 / 还没加载完）时回落到当前对话或列表第一个。 */
+  useEffect(() => {
+    if (bindingTargetConversationId && outputConversationTitles[bindingTargetConversationId]) return;
+    const fallback = activeConversationId && outputConversationTitles[activeConversationId]
+      ? activeConversationId
+      : conversationOptions[0]?.id || '';
+    setBindingTargetConversationId(fallback);
+  }, [activeConversationId, bindingTargetConversationId, conversationOptions, outputConversationTitles]);
+  const canBindToSelectedConversation = Boolean(
+    bindingTargetConversationId && outputConversationTitles[bindingTargetConversationId],
+  );
+
+  /** 资产组使用情况（被哪些对话绑定 + 快照信息）是增强信息，读取失败不影响素材浏览。 */
+  const loadGroupUsage = useCallback(async () => {
+    if (!effectiveProjectId || isTrash || isOutput) {
+      setGroupInsights({});
+      setGroupBindings({});
+      return;
+    }
+    try {
+      const [insightResponse, bindingResponse] = await Promise.all([
+        libraryApi.listGroupInsights(effectiveProjectId),
+        agentApi.listProjectAssetGroupBindings(effectiveProjectId).catch(() => null),
+      ]);
+      const nextInsights: Record<string, LibraryGroupInsight> = {};
+      (insightResponse.data.data || []).forEach((item) => {
+        nextInsights[item.groupId] = item;
+      });
+      setGroupInsights(nextInsights);
+      const nextBindings: Record<string, ProjectAssetGroupBinding[]> = {};
+      (bindingResponse?.data.data || []).forEach((binding) => {
+        (nextBindings[binding.groupId] ||= []).push(binding);
+      });
+      setGroupBindings(nextBindings);
+    } catch {
+      // 使用情况读不到时保留空态，不打断项目库主流程
+    }
+  }, [effectiveProjectId, isOutput, isTrash]);
+
+  useEffect(() => {
+    void loadGroupUsage();
+  }, [loadGroupUsage]);
+
+  // 保存视图只在项目库/全局库使用；产出/重复项/回收站不显示。
+  useEffect(() => {
+    if (!effectiveProjectId || isTrash || isOutput || isDuplicates || isUnused) {
+      setSavedViews([]);
+      setActiveViewId('');
+      return;
+    }
+    let cancelled = false;
+    void libraryApi.listSavedViews(effectiveProjectId)
+      .then((response) => {
+        if (!cancelled) setSavedViews(response.data.data || []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveProjectId, isDuplicates, isOutput, isTrash, isUnused]);
+
+  // 素材详情打开时统计使用位置；切走或关闭详情即清空。
+  useEffect(() => {
+    const assetId = detail?.asset.id;
+    if (!assetId) {
+      setAssetUsage(null);
+      setUsageLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setUsageLoading(true);
+    void libraryApi.getAssetUsage(assetId)
+      .then((response) => {
+        if (!cancelled) setAssetUsage(response.data.data);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetUsage(null);
+      })
+      .finally(() => {
+        if (!cancelled) setUsageLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.asset.id]);
+
+  const runSmartSearch = useCallback(async (override?: {
+    q?: string;
+    color?: string;
+    similarTo?: string;
+  }) => {
+    if (!effectiveProjectId) return;
+    const text = (override?.q ?? query).trim();
+    const color = override?.color ?? smartColor;
+    const similarTo = override?.similarTo ?? similarAsset?.id;
+    if (!text && !color && !similarTo) {
+      setSmartResults([]);
+      return;
+    }
+    setSmartLoading(true);
+    setError('');
+    try {
+      const response = await libraryApi.searchAssets({
+        projectId: effectiveProjectId,
+        q: text || undefined,
+        color: color || undefined,
+        similarTo,
+        limit: 30,
+      });
+      setSmartResults(response.data.data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '智能搜索失败');
+      setSmartResults([]);
+    } finally {
+      setSmartLoading(false);
+    }
+  }, [effectiveProjectId, query, similarAsset?.id, smartColor]);
+
+  useEffect(() => {
+    if (!smartMode) return;
+    const timer = window.setTimeout(() => void runSmartSearch(), 320);
+    return () => window.clearTimeout(timer);
+  }, [runSmartSearch, smartMode]);
+
+  useEffect(() => {
+    if (scopeView === 'PROJECT') return;
+    setSmartMode(false);
+    setSmartResults([]);
+    setSmartColor('');
+    setSimilarAsset(null);
+  }, [scopeView]);
+
+  const exitSmartSearch = () => {
+    setSmartMode(false);
+    setSmartResults([]);
+    setSmartColor('');
+    setSimilarAsset(null);
+  };
+
+  const currentViewFilters = useCallback((): Record<string, unknown> => {    const filters: Record<string, unknown> = {};
+    if (query.trim()) filters.q = query.trim();
+    if (type) filters.type = type;
+    if (selectedTagIds.length > 0) filters.tagIds = selectedTagIds;
+    if (minRating > 0) filters.minRating = minRating;
+    if (flagFilter) filters.flag = flagFilter;
+    if (colorFilter) filters.colorLabel = colorFilter;
+    return filters;
+  }, [colorFilter, flagFilter, minRating, query, selectedTagIds, type]);
+
+  const clearAllFilters = () => {
+    setQuery('');
+    setType('');
+    setSelectedTagIds([]);
+    setMinRating(0);
+    setFlagFilter('');
+    setColorFilter('');
+    setActiveViewId('');
+    setActiveFolderId(null);
+    setActiveGroup(null);
+    setDetail(null);
+    setSelectedIds([]);
+  };
+
+  const applySavedView = (view: LibrarySavedView) => {
+    const filters = view.filters || {};
+    setQuery(typeof filters.q === 'string' ? filters.q : '');
+    setType(typeof filters.type === 'string' ? filters.type as AssetType : '');
+    setSelectedTagIds(Array.isArray(filters.tagIds)
+      ? filters.tagIds.map(String) : []);
+    setMinRating(typeof filters.minRating === 'number' ? filters.minRating : 0);
+    setFlagFilter(filters.flag === 'pick' || filters.flag === 'reject' ? filters.flag : '');
+    setColorFilter(typeof filters.colorLabel === 'string'
+      ? filters.colorLabel as AssetColorLabel : '');
+    setViewMode(view.viewMode === 'tree' ? 'tree' : 'folders');
+    setActiveViewId(view.id);
+  };
+
+  const toggleSavedViewPin = async (view: LibrarySavedView) => {
+    try {
+      const response = await libraryApi.updateSavedView(view.id, { pinned: !view.pinned });
+      setSavedViews((current) => current
+        .map((item) => (item.id === view.id ? response.data.data : item))
+        .sort((first, second) => Number(second.pinned) - Number(first.pinned)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新视图失败');
+    }
+  };
+
+  const deleteSavedView = async (view: LibrarySavedView) => {
+    try {
+      await libraryApi.deleteSavedView(view.id);
+      setSavedViews((current) => current.filter((item) => item.id !== view.id));
+      if (activeViewId === view.id) setActiveViewId('');
+      notify({ title: '已删除视图', description: `「${view.name}」` });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除视图失败');
+    }
+  };
+
+  const patchAssetEverywhere = useCallback((updated: LibraryAsset) => {
+    const patch = (list: LibraryAsset[]) => list.map((asset) => (
+      asset.id === updated.id ? { ...asset, ...updated } : asset
+    ));
+    setAssetsByFolder((current) => Object.fromEntries(
+      Object.entries(current).map(([key, list]) => [key, patch(list)]),
+    ));
+    setOutputAssets(patch);
+    setTrashAssets(patch);
+    setSmartResults(patch);
+    setDetail((current) => (
+      current && current.asset.id === updated.id
+        ? { ...current, asset: updated }
+        : current
+    ));
+  }, []);
+
+  const markAsset = async (asset: LibraryAsset, marks: {
+    rating?: number;
+    flag?: AssetFlag | null;
+    colorLabel?: AssetColorLabel | null;
+  }) => {
+    try {
+      const response = await libraryApi.markAsset(asset.id, marks);
+      patchAssetEverywhere(response.data.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '标记素材失败');
+    }
+  };
+
+  /** 键盘挑片：对当前选中的素材逐张保留各自的其他标记，只改目标字段。 */
+  const markSelectedAssets = useCallback(async (patch: {
+    rating?: number;
+    flag?: AssetFlag | null;
+  }) => {
+    if (selectedAssets.length === 0) return;
+    try {
+      await Promise.all(selectedAssets.map(async (asset) => {
+        const response = await libraryApi.markAsset(asset.id, {
+          rating: patch.rating ?? asset.rating ?? 0,
+          flag: patch.flag === undefined ? asset.flag ?? null : patch.flag,
+          colorLabel: asset.colorLabel ?? null,
+        });
+        patchAssetEverywhere(response.data.data);
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批量标记失败');
+    }
+  }, [patchAssetEverywhere, selectedAssets]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (selectedIds.length === 0) return;
+      const key = event.key.toLowerCase();
+      if (/^[0-5]$/.test(key)) {
+        event.preventDefault();
+        void markSelectedAssets({ rating: Number(key) });
+        return;
+      }
+      if (key === 'p') {
+        event.preventDefault();
+        void markSelectedAssets({ flag: 'pick' });
+      } else if (key === 'x') {
+        event.preventDefault();
+        void markSelectedAssets({ flag: 'reject' });
+      } else if (key === 'u') {
+        event.preventDefault();
+        void markSelectedAssets({ flag: null });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [markSelectedAssets, selectedIds.length]);
+
+  const bindGroupToConversation = async (group: LibraryAsset) => {
+    const conversationId = bindingTargetConversationId;
+    const title = conversationId ? outputConversationTitles[conversationId]?.title : undefined;
+    if (!canBindToSelectedConversation || !conversationId || !title) return;
+    setGroupBindingBusy(true);
+    try {
+      await agentApi.attachConversationAssetGroup(conversationId, group.id);
+      await loadGroupUsage();
+      notify({
+        title: '已绑定资产组',
+        description: `「${group.name}」已绑定到「${title}」`,
+        variant: 'success',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '绑定资产组失败');
+    } finally {
+      setGroupBindingBusy(false);
+    }
+  };
+
+  const unbindGroupFromConversation = async (
+    group: LibraryAsset,
+    conversationId: string,
+    title: string,
+  ) => {
+    setGroupBindingBusy(true);
+    try {
+      await agentApi.removeConversationAssetGroup(conversationId, group.id);
+      await loadGroupUsage();
+      notify({
+        title: '已解除绑定',
+        description: `「${group.name}」不再绑定「${title}」`,
+        variant: 'success',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '解除资产组绑定失败');
+    } finally {
+      setGroupBindingBusy(false);
+    }
   };
 
   const openAssetCard = (asset: LibraryAsset) => {
@@ -1138,6 +1973,22 @@ export function LibraryWorkspacePage() {
     let editedAssetId: string | null = null;
     let skipToast = false;
     try {
+      if (prompt.kind === 'save-view') {
+        if (!effectiveProjectId) throw new Error('请先选择项目');
+        const response = await libraryApi.createSavedView({
+          projectId: effectiveProjectId,
+          name: prompt.value.trim(),
+          filters: currentViewFilters(),
+          sort: {},
+          viewMode,
+          pinned: false,
+        });
+        setSavedViews((current) => [response.data.data, ...current]);
+        setActiveViewId(response.data.data.id);
+        notify({ title: '已保存视图', description: `「${prompt.value.trim()}」` });
+        setPrompt(null);
+        return;
+      }
       if (prompt.kind === 'folder') {
         const requestedName = prompt.value.trim();
         const response = await libraryApi.createFolder({
@@ -1746,7 +2597,7 @@ export function LibraryWorkspacePage() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return;
       const key = event.key.toLowerCase();
       const withCommand = event.ctrlKey || event.metaKey;
       if (!withCommand && event.key !== 'Delete') return;
@@ -1828,33 +2679,46 @@ export function LibraryWorkspacePage() {
     }
   };
 
+  const runDirectUpload = async (file: File, taskId: string, uploadedIds: string[]) => {
+    libraryUploadRetryFiles.set(taskId, file);
+    upsertTask({
+      id: taskId,
+      kind: 'upload',
+      label: file.name,
+      status: 'queued',
+      progress: 0,
+      retryProjectId: effectiveProjectId,
+    });
+    try {
+      const response = await libraryApi.uploadDirect(file, {
+        scope: queryScope || 'PROJECT',
+        projectId: projectForTree,
+        name: file.name.replace(/\.[^.]+$/, ''),
+      }, (progress) => updateTask(taskId, { status: 'uploading', progress }));
+      if (activeFolderId && projectForTree) {
+        await libraryApi.moveAssetsToFolder(activeFolderId, {
+          scope: 'PROJECT',
+          ownerProjectId: projectForTree,
+          assetIds: [response.data.data.id],
+        });
+      }
+      updateTask(taskId, { status: 'completed', progress: 100, assetId: response.data.data.id });
+      libraryUploadRetryFiles.delete(taskId);
+      if (response.data.data.type === 'IMAGE' || response.data.data.type === 'VIDEO'
+        || response.data.data.type === 'AUDIO') {
+        uploadedIds.push(response.data.data.id);
+      }
+    } catch (err) {
+      updateTask(taskId, { status: 'failed', error: err instanceof Error ? err.message : '上传失败' });
+    }
+  };
+
   const uploadDirectItems = async (items: ExternalUploadItem[]) => {
     if (items.length === 0) return;
     const uploadedIds: string[] = [];
     await Promise.all(items.map(async ({ file }) => {
       const taskId = `upload:${crypto.randomUUID()}`;
-      upsertTask({ id: taskId, kind: 'upload', label: file.name, status: 'queued', progress: 0 });
-      try {
-        const response = await libraryApi.uploadDirect(file, {
-          scope: queryScope || 'PROJECT',
-          projectId: projectForTree,
-          name: file.name.replace(/\.[^.]+$/, ''),
-        }, (progress) => updateTask(taskId, { status: 'uploading', progress }));
-        if (activeFolderId && projectForTree) {
-          await libraryApi.moveAssetsToFolder(activeFolderId, {
-            scope: 'PROJECT',
-            ownerProjectId: projectForTree,
-            assetIds: [response.data.data.id],
-          });
-        }
-        updateTask(taskId, { status: 'completed', progress: 100, assetId: response.data.data.id });
-        if (response.data.data.type === 'IMAGE' || response.data.data.type === 'VIDEO'
-          || response.data.data.type === 'AUDIO') {
-          uploadedIds.push(response.data.data.id);
-        }
-      } catch (err) {
-        updateTask(taskId, { status: 'failed', error: err instanceof Error ? err.message : '上传失败' });
-      }
+      await runDirectUpload(file, taskId, uploadedIds);
     }));
     if (activeGroup && uploadedIds.length > 0) {
       await appendAssetsToGroup(activeGroup, uploadedIds);
@@ -1894,7 +2758,15 @@ export function LibraryWorkspacePage() {
         const file = filesByPath.get(entry.relativePath);
         if (!file) return;
         const taskId = `tree-import:${scan.jobId}:${entry.itemKey}`;
-        upsertTask({ id: taskId, kind: 'import', label: entry.fileName, status: 'queued', progress: 0, jobId: scan.jobId });
+        upsertTask({
+          id: taskId,
+          kind: 'import',
+          label: entry.fileName,
+          status: 'queued',
+          progress: 0,
+          jobId: scan.jobId,
+          retryProjectId: effectiveProjectId,
+        });
         try {
           const response = await libraryApi.uploadImportItem(
             scan.jobId,
@@ -1914,6 +2786,76 @@ export function LibraryWorkspacePage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const retryLibraryTask = async (task: LibraryTask) => {
+    if (task.retryProjectId && task.retryProjectId !== effectiveProjectId) {
+      updateTask(task.id, {
+        status: 'failed',
+        error: '该任务属于另一个项目，请切换到原项目后重试',
+      });
+      return;
+    }
+    if (task.kind === 'analysis') {
+      if (!task.assetId) return;
+      updateTask(task.id, { status: 'processing', error: undefined, progress: 20 });
+      try {
+        await libraryApi.requestAnalysis([task.assetId]);
+        notify({ title: '已重新提交分析', description: task.label });
+      } catch (err) {
+        updateTask(task.id, {
+          status: 'failed',
+          error: err instanceof Error ? err.message : '重新提交分析失败',
+        });
+      }
+      return;
+    }
+    if (task.kind === 'import' && task.retryUrl && effectiveProjectId) {
+      updateTask(task.id, { status: 'processing', error: undefined, progress: 20 });
+      try {
+        const response = await libraryApi.registerGeneratedOutput({
+          producer: task.retryProducer ?? 'moon-chat',
+          projectId: task.retryProjectId ?? effectiveProjectId,
+          generationRecordId: `retry:${task.id}`,
+          resultIndex: 0,
+          resultUrl: task.retryUrl,
+          mediaType: task.retryMediaType ?? 'IMAGE',
+        });
+        updateTask(task.id, {
+          status: 'completed',
+          progress: 100,
+          assetId: response.data.data.id,
+          error: undefined,
+        });
+        await reloadTree();
+        notify({ title: '已重新导入', description: task.label });
+      } catch (err) {
+        updateTask(task.id, {
+          status: 'failed',
+          error: err instanceof Error ? err.message : '重新导入失败',
+        });
+      }
+      return;
+    }
+    if (task.kind === 'upload') {
+      const file = libraryUploadRetryFiles.get(task.id);
+      if (!file) {
+        updateTask(task.id, {
+          status: 'failed',
+          error: '刷新后原始文件已丢失，请重新选择文件上传',
+        });
+        return;
+      }
+      const uploadedIds: string[] = [];
+      await runDirectUpload(file, task.id, uploadedIds);
+      await reloadTree();
+      if (activeFolderId) await loadFolder(activeFolderId, 1, true);
+      return;
+    }
+    updateTask(task.id, {
+      status: 'failed',
+      error: '该任务需要重新选择文件或重新发起',
+    });
   };
 
   const handleDirectUpload = async (files: FileList | null) => {
@@ -1948,6 +2890,8 @@ export function LibraryWorkspacePage() {
   };
 
   const handleExternalDragEnter = (event: ReactDragEvent<HTMLElement>) => {
+    // 产出素材是生成结果的只读视图：素材归属由对话决定，不接受外部拖入。
+    if (isOutput) return;
     const hasFiles = event.dataTransfer.types.includes('Files');
     const hasChatMedia = event.dataTransfer.types.includes(CHAT_MEDIA_DRAG_MIME);
     const hasInternal = event.dataTransfer.types.includes(INTERNAL_LIBRARY_DRAG_TYPE)
@@ -1959,6 +2903,7 @@ export function LibraryWorkspacePage() {
   };
 
   const handleExternalDragOver = (event: ReactDragEvent<HTMLElement>) => {
+    if (isOutput) return;
     const hasFiles = event.dataTransfer.types.includes('Files');
     const hasChatMedia = event.dataTransfer.types.includes(CHAT_MEDIA_DRAG_MIME);
     const hasInternal = event.dataTransfer.types.includes(INTERNAL_LIBRARY_DRAG_TYPE)
@@ -1974,6 +2919,7 @@ export function LibraryWorkspacePage() {
   };
 
   const handleExternalDrop = async (event: ReactDragEvent<HTMLElement>) => {
+    if (isOutput) return;
     const chatMediaPayload = parseChatMediaDragPayload(
       event.dataTransfer.getData(CHAT_MEDIA_DRAG_MIME),
     );
@@ -2026,6 +2972,7 @@ export function LibraryWorkspacePage() {
         producer: 'moon-chat',
         url: payload.url,
         mediaType: payload.mediaType,
+        conversationId: payload.conversationId,
         label: payload.name,
       });
       if (folderId) {
@@ -2238,9 +3185,95 @@ export function LibraryWorkspacePage() {
         : inspectorFolder
           ? 'folder'
           : 'empty';
+  const activeGroupBindings = activeGroup ? groupBindings[activeGroup.id] || [] : [];
+  const activeGroupInsight = activeGroup ? groupInsights[activeGroup.id] : undefined;
+  const detailGroupAsset = detail?.asset.type === 'GROUP' ? detail.asset : null;
+  const detailGroupInsight = detailGroupAsset ? groupInsights[detailGroupAsset.id] : undefined;
+  const stackSelectedAssets = activeVersionStack
+    ? stackSelectedIds
+      .map((id) => activeVersionStack.assets.find((asset) => asset.id === id))
+      .filter((asset): asset is LibraryAsset => Boolean(asset))
+    : [];
+  const detailGroupUsage = detailGroupAsset ? {
+    insight: detailGroupInsight,
+    bindings: groupBindings[detailGroupAsset.id] || [],
+    lastSnapshotLabel: detailGroupInsight?.lastSnapshotAt
+      ? formatOutputTime(detailGroupInsight.lastSnapshotAt)
+      : undefined,
+    conversations: conversationOptions,
+    selectedConversationId: bindingTargetConversationId,
+    currentConversationId: activeConversationId || undefined,
+    busy: groupBindingBusy,
+    onSelectConversation: setBindingTargetConversationId,
+    onBind: () => void bindGroupToConversation(detailGroupAsset),
+    onUnbind: (conversationId: string, title: string) => void unbindGroupFromConversation(
+      detailGroupAsset,
+      conversationId,
+      title,
+    ),
+    onOpenConversation: openConversationInChat,
+  } : undefined;
   const showInspector = !detailLoading && inspectorMode !== 'empty' && !inspectorDismissed;
   const detailViewOpen = showInspector;
   const closeInspector = () => setInspectorDismissed(true);
+
+  const renderAssetCard = (asset: LibraryAsset) => (
+    <button
+      key={asset.id}
+      type="button"
+      className={`library-folder-grid__item is-asset${selectedIds.includes(asset.id) ? ' is-selected' : ''}${clipboardMode === 'cut' && clipboardIds.includes(asset.id) ? ' is-cut' : ''}`}
+      data-library-item-id={asset.id}
+      draggable
+      onDragStart={(event) => startAssetDrag(event, asset)}
+      onDragEnd={endAssetDrag}
+      onClick={(event) => {
+        if (event.shiftKey || event.ctrlKey || event.metaKey) return;
+        openAssetCard(asset);
+      }}
+      onDoubleClick={() => {
+        if (asset.type === 'DOCUMENT') void openDocumentPreview(asset);
+      }}
+      onMouseDown={(event) => handleSelectableMouseDown(event, asset.id)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setSelectedIds((current) => selectionForContextMenu(current, asset.id));
+        setSelectedFolderIds([]);
+        setMenu({
+          open: true,
+          x: event.clientX,
+          y: event.clientY,
+          surface: 'item',
+          node: {
+            id: `asset:${asset.id}`,
+            kind: 'asset',
+            name: asset.name,
+            meta: asset.type,
+            asset,
+          },
+        });
+      }}
+    >
+      <span className="library-folder-grid__asset-preview">
+        <AssetPreview asset={asset} />
+        {((asset.rating ?? 0) > 0 || asset.flag || asset.colorLabel) && (
+          <span className="library-asset-marks">
+            {asset.colorLabel && (
+              <i className={`is-${asset.colorLabel}`} aria-label={`色标 ${asset.colorLabel}`} />
+            )}
+            {asset.flag === 'pick' && <CheckCircle2 size={11} aria-label="已选" />}
+            {asset.flag === 'reject' && <X size={11} aria-label="已弃" />}
+            {(asset.rating ?? 0) > 0 && <em>{asset.rating}</em>}
+          </span>
+        )}
+      </span>
+      <strong title={asset.name}>{asset.name}</strong>
+      <small>
+        {asset.type}
+        {asset.metadataState === 'NONE' ? '' : ` · ${METADATA_LABEL[asset.metadataState]}`}
+        {' · '}v{asset.version}
+      </small>
+    </button>
+  );
 
   return (
     <div
@@ -2267,13 +3300,83 @@ export function LibraryWorkspacePage() {
               className={scopeView === item.id ? 'is-active' : ''}
               onClick={() => {
                 setScopeView(item.id);
+                setOutputConversationId(null);
                 if (item.id === 'TRASH') setType('');
+                if (item.id === 'OUTPUT' && type === 'GROUP') setType('');
+                if (item.id === 'DUPLICATES') setType('');
+                if (item.id === 'UNUSED') setType('');
+                if (item.id === 'UNUSED') {
+                  setQuery('');
+                  setSelectedTagIds([]);
+                  setMinRating(0);
+                  setFlagFilter('');
+                  setColorFilter('');
+                }
               }}
             >
               {item.icon}<span>{item.label}</span>
             </button>
           ))}
         </nav>
+        {!isTrash && !isOutput && !isDuplicates && !isUnused && (
+          <section className="library-saved-views" aria-label="我的视图">
+            <header>
+              <span>我的视图</span>
+              <Tooltip side="bottom" label="保存当前筛选">
+                <button
+                  type="button"
+                  aria-label="保存当前筛选"
+                  disabled={!effectiveProjectId}
+                  onClick={() => setPrompt({
+                    kind: 'save-view',
+                    title: '保存当前筛选',
+                    value: '',
+                  })}
+                >
+                  ＋
+                </button>
+              </Tooltip>
+            </header>
+            <button
+              type="button"
+              className={!activeViewId ? 'is-active' : ''}
+              onClick={clearAllFilters}
+            >
+              全部素材
+            </button>
+            {savedViews.map((view) => (
+              <div key={view.id} className="library-saved-views__row">
+                <button
+                  type="button"
+                  className={activeViewId === view.id ? 'is-active' : ''}
+                  title={view.name}
+                  onClick={() => applySavedView(view)}
+                >
+                  {view.pinned ? '★ ' : ''}{view.name}
+                </button>
+                <button
+                  type="button"
+                  className="is-icon"
+                  aria-label={`${view.pinned ? '取消固定' : '固定'} ${view.name}`}
+                  onClick={() => void toggleSavedViewPin(view)}
+                >
+                  {view.pinned ? '★' : '☆'}
+                </button>
+                <button
+                  type="button"
+                  className="is-icon"
+                  aria-label={`删除视图 ${view.name}`}
+                  onClick={() => void deleteSavedView(view)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            {savedViews.length === 0 && (
+              <small>保存当前筛选，下次一键恢复</small>
+            )}
+          </section>
+        )}
       </aside>
 
       <main className="library-workspace__main">
@@ -2287,7 +3390,7 @@ export function LibraryWorkspacePage() {
         <header className="library-workspace__header">
           <div>
             <span>MOON ASSET LIBRARY</span>
-            <h1>{isTrash ? '回收站' : isOutput ? '产出素材' : isGlobal ? '全局库' : '项目库'}</h1>
+            <h1>{isTrash ? '回收站' : isOutput ? '产出素材' : isDuplicates ? '重复项' : isUnused ? '未使用' : isGlobal ? '全局库' : '项目库'}</h1>
           </div>
           <div className="library-workspace__actions">
             <button onClick={() => setPanelOpen(!panelOpen)}>
@@ -2296,12 +3399,12 @@ export function LibraryWorkspacePage() {
                 ? ` ${tasks.filter((task) => task.status !== 'completed' && task.status !== 'failed').length}`
                 : ''}
             </button>
-            {!isTrash && !isOutput && activeGroup && (
+            {!isTrash && !isOutput && !isDuplicates && !isUnused && activeGroup && (
               <button className="is-primary" onClick={() => fileInput.current?.click()}>
                 <Upload size={15} /> 上传文件
               </button>
             )}
-            {!isTrash && !isOutput && !activeGroup && (
+            {!isTrash && !isOutput && !isDuplicates && !isUnused && !activeGroup && (
               <>
                 <button onClick={() => folderInput.current?.click()}><FolderPlus size={15} /> 上传文件夹</button>
                 <button onClick={() => setPrompt({ kind: 'folder', title: '新建目录', value: '', parentId: null })}>
@@ -2321,30 +3424,98 @@ export function LibraryWorkspacePage() {
 
         {!isTrash && (
           <section className="library-workspace__toolbar">
-            <label>
-              <Search size={15} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、标签、描述" />
-              {query && <button onClick={() => setQuery('')}><X size={13} /></button>}
-            </label>
+            {!isUnused && (
+              <label>
+                <Search size={15} />
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    if (similarAsset) setSimilarAsset(null);
+                  }}
+                  placeholder={isOutput ? '搜索产出素材（名称/标签/描述）' : '搜索名称、标签、描述'}
+                />
+                {query && <button onClick={() => setQuery('')}><X size={13} /></button>}
+              </label>
+            )}
+            {!isUnused && scopeView === 'PROJECT' && (
+              <Tooltip side="bottom" label="智能搜索：AI 描述模糊匹配 / 找相似">
+                <button
+                  type="button"
+                  className={`library-smart-toggle${smartMode ? ' is-active' : ''}`}
+                  aria-pressed={smartMode}
+                  onClick={() => {
+                    if (smartMode) {
+                      exitSmartSearch();
+                    } else {
+                      setSmartMode(true);
+                      setSimilarAsset(null);
+                    }
+                  }}
+                >
+                  <Sparkles size={14} /> 智能
+                </button>
+              </Tooltip>
+            )}
             {scopeView !== 'GLOBAL' && (
               <select value={effectiveProjectId} onChange={(event) => {
                 const projectId = event.target.value;
                 setSelectedProjectId(projectId);
+                setOutputConversationId(null);
                 if (projectId) void loadProject(projectId).catch(() => undefined);
               }}>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select>
             )}
-            <select value={type} onChange={(event) => setType(event.target.value as AssetType | '')}>
-              <option value="">全部类型</option>
-              <option value="IMAGE">图片</option>
-              <option value="VIDEO">视频</option>
-              <option value="AUDIO">音频</option>
-              <option value="DOCUMENT">文档</option>
-              <option value="OTHER">其他</option>
-              <option value="GROUP">资产组</option>
-            </select>
-            {!isOutput && (
+            {!isDuplicates && !isUnused && (
+              <select value={type} onChange={(event) => setType(event.target.value as AssetType | '')}>
+                <option value="">全部类型</option>
+                <option value="IMAGE">图片</option>
+                <option value="VIDEO">视频</option>
+                <option value="AUDIO">音频</option>
+                <option value="DOCUMENT">文档</option>
+                <option value="OTHER">其他</option>
+                {!isOutput && <option value="GROUP">资产组</option>}
+              </select>
+            )}
+            {!isDuplicates && !isUnused && (
+              <select
+                aria-label="按评分筛选"
+                value={minRating}
+                onChange={(event) => setMinRating(Number(event.target.value))}
+              >
+                <option value={0}>全部评分</option>
+                {[5, 4, 3, 2, 1].map((value) => (
+                  <option key={value} value={value}>{value} 星及以上</option>
+                ))}
+              </select>
+            )}
+            {!isDuplicates && !isUnused && (
+              <select
+                aria-label="按旗标筛选"
+                value={flagFilter}
+                onChange={(event) => setFlagFilter(event.target.value as '' | AssetFlag)}
+              >
+                <option value="">全部标记</option>
+                <option value="pick">已选</option>
+                <option value="reject">已弃</option>
+              </select>
+            )}
+            {!isDuplicates && !isUnused && (
+              <select
+                aria-label="按色标筛选"
+                value={colorFilter}
+                onChange={(event) => setColorFilter(event.target.value as '' | AssetColorLabel)}
+              >
+                <option value="">全部色标</option>
+                <option value="red">红色</option>
+                <option value="yellow">黄色</option>
+                <option value="green">绿色</option>
+                <option value="blue">蓝色</option>
+                <option value="purple">紫色</option>
+              </select>
+            )}
+            {!isOutput && !isDuplicates && !isUnused && (
               <div className="library-workspace__view-toggle" role="group" aria-label="显示方式">
                 <Tooltip side="bottom" label="文件夹视图">
                 <button
@@ -2373,7 +3544,42 @@ export function LibraryWorkspacePage() {
           </section>
         )}
 
-        {tags.length > 0 && !isTrash && (
+        {smartMode && (
+          <section className="library-smart-bar" aria-label="智能搜索条件">
+            <div className="library-smart-bar__colors">
+              {SMART_COLORS.map((color) => (
+                <button
+                  key={color.hex}
+                  type="button"
+                  className={smartColor === color.hex ? 'is-active' : ''}
+                  style={{ background: color.hex }}
+                  aria-label={`主色 ${color.label}`}
+                  title={color.label}
+                  onClick={() => {
+                    setSimilarAsset(null);
+                    setSmartColor(smartColor === color.hex ? '' : color.hex);
+                  }}
+                />
+              ))}
+            </div>
+            <span>{similarAsset ? `与「${similarAsset.name}」相似` : smartColor ? '按主色接近度排序' : '按名称 / AI 描述模糊匹配'}</span>
+            {similarAsset && (
+              <button type="button" onClick={() => setSimilarAsset(null)}>取消相似</button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setSmartColor('');
+                setSimilarAsset(null);
+              }}
+            >
+              清空条件
+            </button>
+          </section>
+        )}
+
+        {tags.length > 0 && !isTrash && !isDuplicates && !isUnused && (
           <section className="library-workspace__tags">
             <button className={selectedTagIds.length === 0 ? 'is-active' : ''} onClick={() => setSelectedTagIds([])}>全部标签</button>
             {visibleTags.map((tag) => (
@@ -2488,17 +3694,224 @@ export function LibraryWorkspacePage() {
               {!loading && trashAssets.length === 0 && <p className="library-workspace__empty"><Trash2 size={22} /> 回收站是空的</p>}
             </section>
           </section>
+        ) : isDuplicates ? (
+          <section className="library-duplicates">
+            <header className="library-duplicates__header">
+              <div>
+                <h1>重复项</h1>
+                <p>同一份文件被多个素材引用。合并会保留一份，并把标签、目录和资产组引用迁移过去。</p>
+              </div>
+              <div className="library-duplicates__summary">
+                <span><b>{duplicateTotal}</b> 组重复</span>
+                <span>约可回收 <b>{formatBytes(duplicateReclaimableBytes)}</b></span>
+                <button
+                  type="button"
+                  onClick={() => void loadDuplicates(1, false)}
+                  disabled={duplicatesLoading}
+                >
+                  {duplicatesLoading ? '刷新中…' : '刷新'}
+                </button>
+              </div>
+            </header>
+
+            {duplicatesLoading ? (
+              <div className="library-workspace__loading"><Sparkles size={20} /> 正在查找重复素材…</div>
+            ) : visibleDuplicateGroups.length === 0 ? (
+              <div className="library-duplicates__empty">
+                <span><Copy size={24} /></span>
+                <strong>{query.trim() ? '没有匹配的重复项' : '没有发现重复素材'}</strong>
+                <p>同一份文件被上传或生成多次时会自动归组；合并后重复项进入回收站保留 3 天。</p>
+              </div>
+            ) : (
+              <div className="library-duplicates__grid">
+                {visibleDuplicateGroups.map((group) => {
+                  const first = group.assets[0];
+                  return (
+                    <article
+                      key={group.blobId}
+                      className="library-duplicate-card"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${group.assets.length} 份重复，合并`}
+                      onClick={() => openDuplicateGroup(group)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openDuplicateGroup(group);
+                        }
+                      }}
+                    >
+                      <div className="library-duplicate-card__preview">
+                        {first?.coverUrl
+                          ? <img src={assetUrl(libraryThumbnailUrl(first.coverUrl))} alt="" loading="lazy" />
+                          : <Copy size={28} />}
+                        <span className="library-duplicate-card__count">{group.assets.length} 份</span>
+                      </div>
+                      <div className="library-duplicate-card__body">
+                        <strong>{group.assets.length} 份重复 · {formatBytes(group.sizeBytes)}</strong>
+                        <span>
+                          {group.assets.slice(0, 3).map((asset) => asset.name).join(' · ')}
+                          {group.assets.length > 3 ? ` 等 ${group.assets.length} 份` : ''}
+                        </span>
+                        <small>
+                          {group.assets[0]?.folderPath?.join(' / ') || '未归档'}
+                          {' · '}{group.mimeType || '文件'}
+                        </small>
+                      </div>
+                      <span className="library-duplicate-card__action">合并</span>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            {duplicateGroups.length < duplicateTotal && (
+              <div className="library-folder-browser__load-more">
+                <button
+                  type="button"
+                  disabled={duplicatesLoading}
+                  onClick={() => void loadDuplicates(Math.floor(duplicateGroups.length / 20) + 1, true)}
+                >
+                  {duplicatesLoading ? '加载中…' : `加载更多（${duplicateGroups.length}/${duplicateTotal}）`}
+                </button>
+              </div>
+            )}
+          </section>
+        ) : isUnused ? (
+          <section className="library-unused">
+            <header className="library-unused__header">
+              <div>
+                <h1>未使用素材</h1>
+                <p>没有被分镜、资产组或画布引用。清理后进入回收站，保留 3 天可恢复。</p>
+              </div>
+              <div className="library-unused__summary">
+                <span><b>{unusedTotal}</b> 项未使用</span>
+                <button
+                  type="button"
+                  className="is-danger"
+                  disabled={selectedIds.length === 0 || busy}
+                  onClick={() => void trashUnusedSelection()}
+                >
+                  <Trash2 size={14} /> 清理选中（{selectedIds.length}）
+                </button>
+                <button
+                  type="button"
+                  disabled={unusedLoading}
+                  onClick={() => void loadUnusedAssets(1, false)}
+                >
+                  {unusedLoading ? '刷新中…' : '刷新'}
+                </button>
+              </div>
+            </header>
+            {unusedLoading ? (
+              <div className="library-workspace__loading"><Sparkles size={20} /> 正在统计未使用素材…</div>
+            ) : unusedAssets.length === 0 ? (
+              <div className="library-unused__empty">
+                <span><CheckCircle2 size={24} /></span>
+                <strong>没有未使用的素材</strong>
+                <p>所有素材都已经在分镜、资产组或画布中使用。</p>
+              </div>
+            ) : (
+              <>
+                <div className="library-unused__grid">
+                  {unusedAssets.map((asset) => {
+                    const selected = selectedIds.includes(asset.id);
+                    return (
+                      <article
+                        key={asset.id}
+                        className={`library-unused-card${selected ? ' is-selected' : ''}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={selected}
+                        onClick={() => setSelectedIds((current) => (
+                          current.includes(asset.id)
+                            ? current.filter((id) => id !== asset.id)
+                            : [...current, asset.id]
+                        ))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            setSelectedIds((current) => (
+                              current.includes(asset.id)
+                                ? current.filter((id) => id !== asset.id)
+                                : [...current, asset.id]
+                            ));
+                          }
+                        }}
+                      >
+                        <div className="library-unused-card__preview">
+                          <AssetPreview asset={asset} />
+                          <span className="library-unused-card__check">
+                            {selected ? <CheckCircle2 size={14} /> : null}
+                          </span>
+                        </div>
+                        <strong title={asset.name}>{asset.name}</strong>
+                        <small>
+                          {asset.type} · {formatOutputTime(asset.updatedAt)}
+                        </small>
+                      </article>
+                    );
+                  })}
+                </div>
+                {unusedAssets.length < unusedTotal && (
+                  <div className="library-folder-browser__load-more">
+                    <button
+                      type="button"
+                      disabled={unusedLoading}
+                      onClick={() => void loadUnusedAssets(Math.floor(unusedAssets.length / 40) + 1, true)}
+                    >
+                      {unusedLoading ? '加载中…' : `加载更多（${unusedAssets.length}/${unusedTotal}）`}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        ) : smartMode ? (
+          <section className="library-smart">
+            <header>
+              <div>
+                <h2>
+                  {similarAsset
+                    ? `与「${similarAsset.name}」相似`
+                    : smartColor ? '按主色搜索' : '智能搜索'}
+                </h2>
+                <span>{smartLoading ? '搜索中…' : `${smartResults.length} 项`}</span>
+              </div>
+              <button type="button" onClick={exitSmartSearch}>退出智能搜索</button>
+            </header>
+            {smartLoading ? (
+              <div className="library-workspace__loading"><Sparkles size={20} /> 正在搜索…</div>
+            ) : smartResults.length === 0 ? (
+              <div className="library-smart__empty">
+                <Sparkles size={24} />
+                <strong>{smartColor ? '还没有足够的图片主色' : '没有匹配的素材'}</strong>
+                <p>
+                  {smartColor
+                    ? '主色由后台逐步补齐；先浏览一遍素材或稍后重试。'
+                    : '换一个关键词，或从素材检查器点「找相似」。'}
+                </p>
+              </div>
+            ) : (
+              <div className="library-folder-grid">
+                {smartResults.map(renderAssetCard)}
+              </div>
+            )}
+          </section>
         ) : loading ? (
           <div className="library-workspace__loading"><Sparkles size={20} /> 正在读取目录树...</div>
         ) : !effectiveProjectId ? (
           <div className="library-workspace__empty"><Package size={24} /> 暂无项目，请先在 Moon 中创建项目</div>
         ) : (
           <section className={`library-workspace__content${showInspector ? '' : ' is-inspector-empty'}${detailViewOpen ? ' is-detail-view' : ''}`}>
-            <div className={`library-workspace__tree${showFolders ? ' is-folders' : ''}`}>
+            <div
+              ref={treeScrollRef}
+              className={`library-workspace__tree${showFolders ? ' is-folders' : ''}`}
+            >
               {showFolders ? (
                 <div
                   className="library-folder-browser"
                   onContextMenu={(event) => {
+                    if (isOutput) return;
                     if ((event.target as HTMLElement).closest('button')) return;
                     event.preventDefault();
                     setMenu({
@@ -2526,6 +3939,27 @@ export function LibraryWorkspacePage() {
                         </div>
                         <small>{groupMediaItems.length} 个关联素材</small>
                       </div>
+
+                      {/* 资产组使用情况：被哪些对话绑定、快照是否过期、直接绑定当前对话 */}
+                      <GroupUsagePanel
+                        insight={activeGroupInsight}
+                        bindings={activeGroupBindings}
+                        lastSnapshotLabel={activeGroupInsight?.lastSnapshotAt
+                          ? formatOutputTime(activeGroupInsight.lastSnapshotAt)
+                          : undefined}
+                        conversations={conversationOptions}
+                        selectedConversationId={bindingTargetConversationId}
+                        currentConversationId={activeConversationId || undefined}
+                        busy={groupBindingBusy}
+                        onSelectConversation={setBindingTargetConversationId}
+                        onBind={() => void bindGroupToConversation(activeGroup)}
+                        onUnbind={(conversationId, title) => void unbindGroupFromConversation(
+                          activeGroup,
+                          conversationId,
+                          title,
+                        )}
+                        onOpenConversation={openConversationInChat}
+                      />
 
                       {detailLoading ? (
                         <div className="library-folder-browser__loading">
@@ -2595,21 +4029,142 @@ export function LibraryWorkspacePage() {
                         </div>
                       )}
                     </div>
+                  ) : isOutputRoot ? (
+                    <div className="library-output-browser">
+                      <div className="library-folder-browser__bar">
+                        <div className="library-folder-browser__breadcrumb">
+                          <button type="button" onClick={() => setScopeView('OUTPUT')}>产出素材</button>
+                          <span>
+                            <ChevronRight size={12} />
+                            <strong>按对话归档</strong>
+                          </span>
+                        </div>
+                        <small>
+                          {outputConversationsLoading
+                            ? '正在整理产出…'
+                            : `${outputConversations.length} 个对话 · ${outputConversations.reduce((sum, item) => sum + item.assetCount, 0)} 项素材`}
+                        </small>
+                      </div>
+
+                      {outputConversationsLoading ? (
+                        <div className="library-folder-browser__loading">
+                          <Sparkles size={18} /> 正在整理产出素材…
+                        </div>
+                      ) : outputConversations.length === 0 ? (
+                        filteredMode ? (
+                          <div className="library-output-empty">
+                            <span><Search size={24} /></span>
+                            <strong>没有符合条件的产出</strong>
+                            <p>当前搜索、类型或标签筛选下没有生成结果。</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuery('');
+                                setType('');
+                                setSelectedTagIds([]);
+                              }}
+                            >
+                              <X size={14} /> 清空筛选
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="library-output-empty">
+                            <span><Sparkles size={26} /></span>
+                            <strong>当前项目还没有产出素材</strong>
+                            <p>在 Moon 对话里生成的图片、视频和文件会自动归到该对话的文件夹。</p>
+                            <button type="button" onClick={() => navigate('/chat')}>
+                              <MessageSquare size={14} /> 去 Moon 生成
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <section className="library-output-grid" aria-label="产出素材对话列表">
+                          {outputConversations.map((group) => {
+                            const conversationKey = group.conversationId || UNASSIGNED_OUTPUT;
+                            const title = outputConversationTitle(group, outputConversationTitles);
+                            const previews = (group.previewUrls.length > 0
+                              ? group.previewUrls
+                              : group.coverUrl ? [group.coverUrl] : []).slice(0, 4);
+                            return (
+                              <article
+                                key={conversationKey}
+                                className="library-output-card"
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`${title}，${outputCountsLabel(group)}`}
+                                onClick={() => enterOutputConversation(conversationKey)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    enterOutputConversation(conversationKey);
+                                  }
+                                }}
+                              >
+                                <div className={`library-output-card__previews is-${Math.min(previews.length, 4)}`}>
+                                  {previews.length > 0 ? previews.map((url, index) => (
+                                    <span className="library-output-card__preview" key={`${conversationKey}-${index}`}>
+                                      <img
+                                        src={assetUrl(libraryThumbnailUrl(url))}
+                                        alt=""
+                                        loading="lazy"
+                                        draggable={false}
+                                      />
+                                    </span>
+                                  )) : (
+                                    <span className="library-output-card__placeholder"><Sparkles size={22} /></span>
+                                  )}
+                                </div>
+                                <div className="library-output-card__body">
+                                  <strong title={title}>{title}</strong>
+                                  <span>{outputCountsLabel(group)}</span>
+                                  <small>
+                                    {formatOutputTime(group.lastGeneratedAt)}
+                                    {group.lastAssetName ? ` · ${group.lastAssetName}` : ''}
+                                  </small>
+                                </div>
+                                {group.conversationId && (
+                                  <button
+                                    type="button"
+                                    className="library-output-card__open"
+                                    title="在 Moon 中打开该对话"
+                                    aria-label={`打开对话：${title}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openConversationInChat(group.conversationId!);
+                                    }}
+                                  >
+                                    <MessageSquare size={13} /> 打开对话
+                                  </button>
+                                )}
+                                <SquareArrowOutUpRight size={14} className="library-output-card__enter" aria-hidden="true" />
+                              </article>
+                            );
+                          })}
+                        </section>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <div className="library-folder-browser__bar">
                         <button
                           type="button"
-                          disabled={!activeFolderId || activeFolderId === 'UNFILED'}
+                          disabled={isOutput ? !outputConversationId : (!activeFolderId || activeFolderId === 'UNFILED')}
                           onClick={() => {
+                            if (isOutput) {
+                              leaveOutputConversation();
+                              return;
+                            }
                             const parentId = activeFolder?.parentId || null;
                             goToFolder(parentId);
                           }}
                         >
-                          <ChevronLeft size={14} /> 上一级
+                          <ChevronLeft size={14} /> {isOutput ? '全部对话' : '上一级'}
                         </button>
                         <div className="library-folder-browser__breadcrumb">
-                          <button type="button" onClick={() => goToFolder(null)}>
+                          <button
+                            type="button"
+                            onClick={() => (isOutput ? leaveOutputConversation() : goToFolder(null))}
+                          >
                             {isGlobal ? '全局库' : isOutput ? '产出素材' : '项目库'}
                           </button>
                           {currentFolderTrail.map((folder) => (
@@ -2626,7 +4181,22 @@ export function LibraryWorkspacePage() {
                               <strong>全局素材</strong>
                             </span>
                           )}
+                          {isOutput && outputConversationId && (
+                            <span>
+                              <ChevronRight size={12} />
+                              <strong title={currentOutputConversationTitle}>{currentOutputConversationTitle}</strong>
+                            </span>
+                          )}
                         </div>
+                        {isOutput && outputConversationId && outputConversationId !== UNASSIGNED_OUTPUT && (
+                          <button
+                            type="button"
+                            className="library-folder-browser__chat"
+                            onClick={() => openConversationInChat(outputConversationId)}
+                          >
+                            <MessageSquare size={13} /> 打开对话
+                          </button>
+                        )}
                         <small>
                           {activeFolderId === 'GLOBAL' || isOutput
                             ? `${currentFolderAssets.length} 项素材`
@@ -2715,7 +4285,10 @@ export function LibraryWorkspacePage() {
                               <small>{globalTotal} 项</small>
                             </button>
                           )}
-                          {visibleGroups.map((group) => (
+                          {visibleGroups.map((group) => {
+                            const bindings = groupBindings[group.id] || [];
+                            const insight = groupInsights[group.id];
+                            return (
                             <button
                               key={group.id}
                               type="button"
@@ -2778,60 +4351,60 @@ export function LibraryWorkspacePage() {
                             >
                               <span className="library-folder-grid__group-icon"><Boxes size={44} /></span>
                               <strong title={group.name}>{group.name}</strong>
-                              <small>资产组 · 单击查看，双击进入</small>
-                            </button>
-                          ))}
-                          {currentFolderAssets.map((asset) => (
-                            <button
-                              key={asset.id}
-                              type="button"
-                              className={`library-folder-grid__item is-asset${selectedIds.includes(asset.id) ? ' is-selected' : ''}${clipboardMode === 'cut' && clipboardIds.includes(asset.id) ? ' is-cut' : ''}`}
-                              data-library-item-id={asset.id}
-                              draggable
-                              onDragStart={(event) => startAssetDrag(event, asset)}
-                              onDragEnd={endAssetDrag}
-                              onClick={(event) => {
-                                if (event.shiftKey || event.ctrlKey || event.metaKey) return;
-                                openAssetCard(asset);
-                              }}
-                              onDoubleClick={() => {
-                                if (asset.type === 'DOCUMENT') void openDocumentPreview(asset);
-                              }}
-                              onMouseDown={(event) => handleSelectableMouseDown(event, asset.id)}
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                setSelectedIds((current) => selectionForContextMenu(current, asset.id));
-                                setSelectedFolderIds([]);
-                                setMenu({
-                                  open: true,
-                                  x: event.clientX,
-                                  y: event.clientY,
-                                  surface: 'item',
-                                  node: {
-                                    id: `asset:${asset.id}`,
-                                    kind: 'asset',
-                                    name: asset.name,
-                                    meta: asset.type,
-                                    asset,
-                                  },
-                                });
-                              }}
-                            >
-                              <span className="library-folder-grid__asset-preview"><AssetPreview asset={asset} /></span>
-                              <strong title={asset.name}>{asset.name}</strong>
                               <small>
-                                {asset.type}
-                                {asset.metadataState === 'NONE' ? '' : ` · ${METADATA_LABEL[asset.metadataState]}`}
-                                {' · '}v{asset.version}
+                                {bindings.length > 0 ? `${bindings.length} 个对话使用` : '未绑定对话'}
+                                {insight ? ` · ${insight.mediaCount} 项素材` : ''}
                               </small>
                             </button>
-                          ))}
+                            );
+                          })}
+                          {isOutput && outputSceneStacks.map((stack) => {
+                            const newest = stack.assets[0];
+                            if (!newest) return null;
+                            return (
+                              <button
+                                key={`stack:${stack.sceneId}`}
+                                type="button"
+                                className="library-folder-grid__item is-asset is-version-stack"
+                                title="同一镜头的多个生成版本，点击对比"
+                                onClick={() => openVersionStack(stack)}
+                              >
+                                <span className="library-folder-grid__asset-preview">
+                                  <AssetPreview asset={newest} />
+                                  <span className="library-version-stack__badge">
+                                    {stack.assets.length} 版
+                                  </span>
+                                </span>
+                                <strong>镜头组 · {stack.assets.length} 版</strong>
+                                <small>{formatOutputTime(newest.createdAt)} · {newest.name}</small>
+                              </button>
+                            );
+                          })}
+                          {(() => {
+                            const gridAssets = currentFolderAssets
+                              .filter((asset) => !stackedAssetIds.has(asset.id));
+                            const virtualize = gridAssets.length > 40
+                              && visibleFolders.length === 0
+                              && visibleGroups.length === 0
+                              && outputSceneStacks.length === 0;
+                            return virtualize ? (
+                              <VirtualAssetGrid
+                                items={gridAssets}
+                                scrollRef={treeScrollRef}
+                                renderItem={renderAssetCard}
+                              />
+                            ) : gridAssets.map(renderAssetCard);
+                          })()}
                           {visibleFolders.length === 0 && visibleGroups.length === 0 && currentFolderAssets.length === 0 && (
                             <div className="library-folder-grid__empty">
                               {isOutput ? <Sparkles size={24} /> : <Folder size={24} />}
                               <span>
                                 {isOutput
-                                  ? (outputLoading ? '正在读取产出素材…' : '当前项目还没有生成产出，去 Moon 里生成试试')
+                                  ? (outputLoading
+                                    ? '正在读取产出素材…'
+                                    : outputConversationId === UNASSIGNED_OUTPUT
+                                      ? '没有未归属对话的历史产出'
+                                      : '这个对话还没有产出素材，回到对话里生成试试')
                                   : filteredMode ? '没有符合条件的素材' : '这个文件夹还是空的'}
                               </span>
                             </div>
@@ -2978,6 +4551,20 @@ export function LibraryWorkspacePage() {
               }}
               onRequestAiEnrichment={(asset) => void requestAssetAiEnrichment(asset)}
               onRequestFolderAiEnrichment={requestFolderAiEnrichment}
+              conversationTitle={detail?.asset.conversationId
+                ? outputConversationTitles[detail.asset.conversationId]?.title
+                : undefined}
+              onOpenConversation={openConversationInChat}
+              groupUsage={activeGroup ? undefined : detailGroupUsage}
+              onMark={(asset, marks) => void markAsset(asset, marks)}
+              usage={assetUsage}
+              usageLoading={usageLoading}
+              onFindSimilar={(asset) => {
+                setQuery('');
+                setSmartColor('');
+                setSimilarAsset(asset);
+                setSmartMode(true);
+              }}
             />}
           </section>
         )}
@@ -3014,6 +4601,141 @@ export function LibraryWorkspacePage() {
         onAction={(action) => void handleMenuAction(action)}
         onClose={closeMenu}
       />
+
+      {activeVersionStack && (
+        <Modal
+          title={`镜头版本 · ${activeVersionStack.assets.length} 版`}
+          onClose={() => setActiveVersionStack(null)}
+        >
+          <div className="library-version-dialog">
+            <p>同一镜头由多次生成得到的版本。点选 1–2 个版本查看或并排对比。</p>
+            <div className="library-version-dialog__strip">
+              {activeVersionStack.assets.map((asset, index) => {
+                const selected = stackSelectedIds.includes(asset.id);
+                return (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    className={`library-version-dialog__variant${selected ? ' is-selected' : ''}`}
+                    title="最多同时选择两个版本进行对比"
+                    onClick={() => toggleStackVariant(asset.id)}
+                  >
+                    <span className="library-version-dialog__thumb">
+                      {asset.type === 'VIDEO'
+                        ? <video src={assetUrl(asset.coverUrl || '')} muted preload="metadata" />
+                        : asset.coverUrl
+                          ? <img src={assetUrl(libraryThumbnailUrl(asset.coverUrl))} alt="" loading="lazy" />
+                          : <Copy size={16} />}
+                    </span>
+                    <strong>v{activeVersionStack.assets.length - index}</strong>
+                    <small>{formatOutputTime(asset.createdAt)}</small>
+                  </button>
+                );
+              })}
+            </div>
+            <div className={`library-version-dialog__compare${stackSelectedIds.length > 1 ? ' is-split' : ''}`}>
+              {stackSelectedAssets.length === 0 ? (
+                <p className="library-version-dialog__hint">选择 1–2 个版本查看</p>
+              ) : stackSelectedAssets.map((asset) => (
+                <VersionAssetPane key={asset.id} asset={asset} />
+              ))}
+            </div>
+            <footer>
+              <small>已选 {stackSelectedIds.length} / 2 · 再点一次取消选择</small>
+              <button type="button" onClick={() => setActiveVersionStack(null)}>关闭</button>
+            </footer>
+          </div>
+        </Modal>
+      )}
+
+      {activeDuplicateGroup && (
+        <Modal
+          title="合并重复素材"
+          onClose={() => {
+            if (!duplicatesMerging) setActiveDuplicateGroup(null);
+          }}
+        >
+          <div className="library-duplicate-dialog">
+            <p>
+              保留一份作为主素材；其余素材的标签、目录和资产组引用会迁移过去，然后进入回收站。
+            </p>
+            <div className="library-duplicate-dialog__list">
+              {activeDuplicateGroup.assets.map((asset) => {
+                const isSurvivor = duplicateSurvivorId === asset.id;
+                const selected = duplicateSelectedIds.includes(asset.id);
+                return (
+                  <label
+                    key={asset.id}
+                    className={`library-duplicate-dialog__row${isSurvivor ? ' is-survivor' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="duplicate-survivor"
+                      checked={isSurvivor}
+                      aria-label={`保留 ${asset.name}`}
+                      onChange={() => {
+                        setDuplicateSurvivorId(asset.id);
+                        setDuplicateSelectedIds((current) => current.filter((id) => id !== asset.id));
+                      }}
+                    />
+                    <span className="library-duplicate-dialog__preview">
+                      {asset.coverUrl
+                        ? <img src={assetUrl(libraryThumbnailUrl(asset.coverUrl))} alt="" loading="lazy" />
+                        : <Copy size={16} />}
+                    </span>
+                    <div className="library-duplicate-dialog__info">
+                      <strong title={asset.name}>{asset.name}</strong>
+                      <small>
+                        {asset.folderPath?.join(' / ') || '未归档'}
+                        {' · '}{asset.type}
+                        {' · '}v{asset.version}
+                      </small>
+                    </div>
+                    <span className="library-duplicate-dialog__tag">
+                      {isSurvivor ? '保留这份' : '合并'}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={isSurvivor}
+                      aria-label={`合并 ${asset.name}`}
+                      onChange={(event) => {
+                        setDuplicateSelectedIds((current) => (
+                          event.target.checked
+                            ? [...current, asset.id]
+                            : current.filter((id) => id !== asset.id)
+                        ));
+                      }}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+            <footer>
+              <small>
+                将合并 {duplicateSelectedIds.filter((id) => id !== duplicateSurvivorId).length} 份，
+                其余进入回收站
+              </small>
+              <button
+                type="button"
+                onClick={() => setActiveDuplicateGroup(null)}
+                disabled={duplicatesMerging}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="is-primary"
+                onClick={() => void mergeActiveDuplicateGroup()}
+                disabled={duplicatesMerging
+                  || duplicateSelectedIds.filter((id) => id !== duplicateSurvivorId).length === 0}
+              >
+                {duplicatesMerging ? '合并中…' : '合并并移入回收站'}
+              </button>
+            </footer>
+          </div>
+        </Modal>
+      )}
 
       {confirmation && (
         <Modal title={confirmation.title} onClose={() => !busy && setConfirmation(null)}>
@@ -3115,6 +4837,18 @@ export function LibraryWorkspacePage() {
         onClose={() => setDocumentPreview(null)}
       />
 
+      <LibraryTaskQueue onRetry={(task) => void retryLibraryTask(task)} />
+
+      <LibraryCommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        actions={commandActions}
+        assets={paletteAssets}
+        views={savedViews}
+        onOpenAsset={openAssetCard}
+        onApplyView={applySavedView}
+      />
+
     </div>
   );
 }
@@ -3123,6 +4857,8 @@ const NAV_ITEMS: Array<{ id: ScopeView; label: string; icon: ReactNode }> = [
   { id: 'PROJECT', label: '项目库', icon: <Boxes size={16} /> },
   { id: 'GLOBAL', label: '全局库', icon: <Globe2 size={16} /> },
   { id: 'OUTPUT', label: '产出素材', icon: <Sparkles size={16} /> },
+  { id: 'DUPLICATES', label: '重复项', icon: <Copy size={16} /> },
+  { id: 'UNUSED', label: '未使用', icon: <CircleAlert size={16} /> },
   { id: 'TRASH', label: '回收站', icon: <Trash2 size={16} /> },
 ];
 
@@ -3240,6 +4976,29 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
   );
 }
 
+function VersionAssetPane({ asset }: { asset: LibraryAsset }) {
+  const src = asset.coverUrl ? assetUrl(asset.coverUrl) : '';
+  return (
+    <figure className="library-version-pane">
+      <div className="library-version-pane__media">
+        {asset.type === 'VIDEO' ? (
+          <video src={src} controls preload="metadata" />
+        ) : asset.type === 'AUDIO' ? (
+          <audio src={src} controls preload="metadata" />
+        ) : asset.coverUrl ? (
+          <img src={src} alt={asset.name} />
+        ) : (
+          <Copy size={28} />
+        )}
+      </div>
+      <figcaption>
+        <strong title={asset.name}>{asset.name}</strong>
+        <small>{formatOutputTime(asset.createdAt)} · {asset.type}</small>
+      </figcaption>
+    </figure>
+  );
+}
+
 function AssetPreview({ asset }: { asset: LibraryAsset }) {
   if (asset.coverUrl && asset.type === 'VIDEO') {
     return <video src={assetUrl(asset.coverUrl)} muted preload="metadata" draggable={false} />;
@@ -3248,7 +5007,7 @@ function AssetPreview({ asset }: { asset: LibraryAsset }) {
     return <span><AssetIcon type={asset.type} /></span>;
   }
   if (asset.coverUrl) {
-    return <img src={assetUrl(asset.coverUrl)} alt="" loading="lazy" draggable={false} />;
+    return <img src={assetUrl(libraryThumbnailUrl(asset.coverUrl))} alt="" loading="lazy" draggable={false} />;
   }
   return <span><Package size={20} /></span>;
 }

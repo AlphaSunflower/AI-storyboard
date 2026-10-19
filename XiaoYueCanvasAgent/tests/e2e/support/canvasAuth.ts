@@ -33,7 +33,7 @@ export const mockCanvasBackendFallback = async (page: Page) => {
   // 后端 id 形如 32 位十六进制，画布 App 用它判断"是否已迁移到后端项目"。
   const backendId = (seq: number) => seq.toString(16).padStart(32, '0');
 
-  await page.route('**/api/canvas/**', (route) => {
+  await page.route((url) => url.pathname.startsWith('/api/canvas/'), (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname.replace('/api/canvas', '');
     const method = request.method();
@@ -156,7 +156,9 @@ export const prepareCanvasApp = async (page: Page) => {
  * 必须最先注册（Playwright 后注册的路由优先），具体用例的 mock 依然会覆盖它。
  */
 export const mockApiFallback = async (page: Page) => {
-  await page.route('**/api/**', (route) => route.fulfill({ json: {} }));
+  // 只匹配真正打到后端网关的 /api/**；不能用 '**/api/**' ——它会把 Vite 的
+  // /src/api/*.ts 源码模块也拦成 JSON，导致模块加载失败、画布连线渲染不出来。
+  await page.route((url) => url.pathname.startsWith('/api/'), (route) => route.fulfill({ json: {} }));
 };
 
 /** 画布素材/上传文件的读取端点：给一张 1x1 PNG，避免请求漏到宿主网关。 */
@@ -165,7 +167,7 @@ export const mockCanvasFiles = async (page: Page) => {
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64',
   );
-  await page.route('**/api/files/**', (route) => route.fulfill({
+  await page.route((url) => url.pathname.startsWith('/api/files/'), (route) => route.fulfill({
     status: 200,
     contentType: 'image/png',
     body: onePixelPng,

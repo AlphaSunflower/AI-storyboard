@@ -4,7 +4,7 @@
 .chat-message-rail {
   --rail-width: 44px;
   --rail-tick: rgba(15, 17, 21, 0.18);
-  --rail-accent: rgb(65, 118, 230);
+  --rail-accent: var(--color-primary);
   --rail-marker-length: 22px;
   --item-gap: 12px;
 

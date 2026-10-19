@@ -21,25 +21,26 @@ const creationTypes = [
   { value: 'custom', label: '自定义' },
 ];
 
-const expandedWidth = 280;
-const collapsedWidth = 36;
+const collapsedWidth = 40;
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
-  fontSize: 12,
+  fontSize: 11.5,
+  fontWeight: 500,
   color: 'var(--color-muted)',
-  marginBottom: 4,
-  font: 'var(--text-caption-upper)',
+  marginBottom: 6,
+  lineHeight: 1.35,
 };
 
 const sharedInputStyle: React.CSSProperties = {
   width: '100%',
-  padding: '8px 10px',
+  height: 36,
+  padding: '0 10px',
   borderRadius: 'var(--rounded-md)',
   border: '1px solid var(--color-hairline)',
   fontSize: 13,
   background: 'white',
-  color: 'var(--color-body)',
+  color: 'var(--color-ink)',
   outline: 'none',
 };
 
@@ -205,11 +206,16 @@ export function LeftSidebar() {
   // ── Collapsed state: vertical tab ──
   if (collapsed) {
     return (
-      <div
+      <button
+        type="button"
+        aria-label="展开剧本输入"
         onClick={() => setCollapsed(false)}
         style={{
           width: collapsedWidth,
           minWidth: collapsedWidth,
+          borderTop: 0,
+          borderBottom: 0,
+          borderLeft: 0,
           borderRight: '1px solid var(--color-hairline)',
           background: 'var(--color-canvas)',
           display: 'flex',
@@ -222,57 +228,32 @@ export function LeftSidebar() {
         <span
           style={{
             writingMode: 'vertical-rl',
-            fontSize: 13,
+            fontSize: 11.5,
+            fontWeight: 500,
             color: 'var(--color-muted)',
-            letterSpacing: 2,
+            letterSpacing: '0.16em',
           }}
         >
-          菜单 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          剧本 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </span>
-      </div>
+      </button>
     );
   }
 
   return (
-    <div
-      style={{
-        width: expandedWidth,
-        minWidth: expandedWidth,
-        height: '100%',
-        borderRight: '1px solid var(--color-hairline)',
-        background: 'var(--color-canvas)',
-        padding: '24px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 18,
-        overflowY: 'auto',
-      }}
-    >
+    <div className="editor-sidebar">
       {/* Section title with collapse button */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2
-          style={{
-            font: 'var(--text-title-sm)',
-            color: 'var(--color-ink)',
-            margin: 0,
-          }}
-        >
-          剧本输入
-        </h2>
-          <button
-            onClick={() => setCollapsed(true)}
-            style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: 14,
-            color: 'var(--color-muted)',
-            padding: '2px 6px',
-            borderRadius: 'var(--rounded-sm)',
-            lineHeight: 1,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-soft)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+      <div className="editor-sidebar__head">
+        <div>
+          <h2 className="editor-sidebar__title">剧本输入</h2>
+          <p className="editor-sidebar__subtitle">写一段描述，生成可逐镜编辑的分镜</p>
+        </div>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="收起剧本输入"
+          onClick={() => setCollapsed(true)}
+          style={{ width: 28, height: 28, marginTop: -2 }}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
@@ -281,7 +262,7 @@ export function LeftSidebar() {
       {/* ═══════════ 剧本输入区域 ═══════════ */}
 
       {/* Creation type */}
-      <div style={{ flexShrink: 0 }}>
+      <div className="editor-sidebar__section">
         <label style={labelStyle}>创作类型</label>
         <Select value={creationType} onValueChange={(v) => v && setCreationType(v)}>
           <SelectTrigger style={{ ...sharedInputStyle, cursor: 'pointer', width: '100%' }}><SelectValue>{(v) => creationTypes.find((t) => t.value === v)?.label ?? v}</SelectValue></SelectTrigger>
@@ -306,55 +287,41 @@ export function LeftSidebar() {
       )}
 
       {/* Script textarea */}
-      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         <label style={labelStyle}>剧本 / 描述</label>
         <textarea
+          className="editor-textarea"
           value={scriptText}
           onChange={(e) => setScriptText(e.target.value)}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(204,120,92,0.12)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.boxShadow = 'none'; }}
           disabled={agentGeneratedScenes}
-          placeholder={agentGeneratedScenes ? '分镜已由智能体生成，如需手动生成请刷新页面' : '输入剧本或创作描述，AI 将自动拆解为分镜...'}
-          style={{
-            ...sharedInputStyle,
-            minHeight: 170,
-            resize: 'vertical',
-            lineHeight: 1.55,
-            background: agentGeneratedScenes ? 'var(--color-primary-disabled)' : 'white',
-            cursor: agentGeneratedScenes ? 'not-allowed' : 'text',
-          }}
+          placeholder={agentGeneratedScenes ? '分镜已由智能体生成，如需手动生成请刷新页面' : '输入剧本或创作描述，AI 将自动拆解为分镜…'}
         />
       </div>
 
       {/* Reference image multi-upload（理解模型看图输入） */}
-      <div style={{ flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <div style={{
-            flex: '1 1 190px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 10px', borderRadius: 'var(--rounded-md)',
-            border: '1px dashed var(--color-hairline)', cursor: 'pointer',
-            background: 'var(--color-canvas)',
-          }} onClick={() => fileInputRef.current?.click()}>
-            <span style={{ fontSize: 11, color: 'var(--color-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg> 上传参考图（可选，最多 {maxCount} 张 / 单张 ≤{maxSizeMB}MB）
-            </span>
-          </div>
+      <div className="editor-sidebar__section">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <button
             type="button"
+            className="editor-upload"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="10" cy="10" r="8.5"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/></svg>
+            <span style={{ display: 'grid', gap: 1 }}>
+              <span style={{ color: 'var(--color-body)', fontSize: 12, fontWeight: 500 }}>上传参考图</span>
+              <span style={{ color: 'var(--color-muted-soft)', fontSize: 10.5 }}>可选 · 最多 {maxCount} 张 · 单张 ≤{maxSizeMB}MB</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="btn btn--outline btn--sm"
             aria-label="从项目库选择参考图"
             disabled={remainingRefSlots === 0 || preparingLibraryRefs}
             onClick={() => setLibraryPickerOpen(true)}
-            style={{
-              flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '8px 10px', borderRadius: 'var(--rounded-md)',
-              border: '1px solid var(--color-primary)', background: 'white',
-              color: 'var(--color-primary)', fontSize: 11, fontWeight: 600,
-              cursor: remainingRefSlots === 0 || preparingLibraryRefs ? 'not-allowed' : 'pointer',
-              opacity: remainingRefSlots === 0 || preparingLibraryRefs ? 0.55 : 1,
-            }}
+            style={{ width: '100%' }}
           >
-            {preparingLibraryRefs ? <LoaderCircle size={14} className="is-spinning" /> : <FolderOpen size={14} />}
-            项目库素材
+            {preparingLibraryRefs ? <LoaderCircle size={13} className="is-spinning" /> : <FolderOpen size={13} />}
+            从项目库选择
           </button>
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleRefImages} />
@@ -367,27 +334,32 @@ export function LeftSidebar() {
               <div key={i} style={{ position: 'relative' }}>
                 <img
                   src={uri}
+                  alt={`参考图 ${i + 1}`}
                   style={{
-                    width: 56,
-                    height: 56,
+                    width: 54,
+                    height: 54,
                     objectFit: 'contain',
                     borderRadius: 'var(--rounded-sm)',
                     background: 'var(--color-surface-soft)',
                     border: '1px solid var(--color-hairline)',
                   }}
                 />
-                <span
+                <button
+                  type="button"
+                  aria-label={`移除参考图 ${i + 1}`}
                   onClick={() => removeRefImage(i)}
                   style={{
                     position: 'absolute', top: -5, right: -5,
+                    width: 16, height: 16, padding: 0,
                     background: 'var(--color-error)', color: 'white',
-                    borderRadius: '50%', width: 16, height: 16, fontSize: 11,
+                    border: '2px solid var(--color-canvas)',
+                    borderRadius: '50%', fontSize: 10, lineHeight: 1,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer',
                   }}
                 >
                   ×
-                </span>
+                </button>
               </div>
             ))}
           </div>
@@ -407,58 +379,46 @@ export function LeftSidebar() {
 
       {/* Generate button */}
       <button
+        className="editor-generate"
         onClick={handleGenerate}
         disabled={isLoading || !scriptText.trim() || agentGeneratedScenes}
-        style={{
-          flexShrink: 0,
-          width: '100%',
-          padding: '10px',
-          height: 40,
-          borderRadius: 'var(--rounded-md)',
-          border: 'none',
-          background:
-            isLoading || !scriptText.trim() || agentGeneratedScenes
-              ? 'var(--color-primary-disabled)'
-              : 'var(--color-primary)',
-          color: 'var(--color-on-primary)',
-          fontSize: 14,
-          fontWeight: 500,
-          cursor: isLoading || !scriptText.trim() || agentGeneratedScenes ? 'not-allowed' : 'pointer',
-        }}
-        onMouseEnter={(e) => { if (!isLoading && scriptText.trim() && !agentGeneratedScenes) e.currentTarget.style.background = 'var(--color-primary-active)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = isLoading || !scriptText.trim() || agentGeneratedScenes ? 'var(--color-primary-disabled)' : 'var(--color-primary)'; }}
       >
-        {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中...' : '生成分镜脚本'}
+        {agentGeneratedScenes ? '已由智能体生成' : isLoading ? '生成中…' : '生成分镜脚本'}
       </button>
 
       {/* 项目库（独立于剧本输入，侧栏内嵌） */}
-      <div style={{ borderTop: '1px solid var(--color-hairline)', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10, flex: '1 1 auto', minHeight: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
-            <Puzzle size={13} strokeWidth={1.8} /> 项目库
+      <div className="editor-library">
+        <div className="editor-library__head">
+          <span className="editor-library__title">
+            <Puzzle size={13} strokeWidth={1.8} /> 项目素材
           </span>
           <button
+            type="button"
+            className="btn btn--ghost btn--sm"
             onClick={() => currentProject && navigate(`/library?projectId=${encodeURIComponent(currentProject.id)}`)}
             disabled={!currentProject}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--color-primary)', background: 'transparent', color: 'var(--color-primary)', fontSize: 12, padding: '4px 10px', borderRadius: 'var(--rounded-sm)', cursor: currentProject ? 'pointer' : 'not-allowed', opacity: currentProject ? 1 : 0.5 }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; e.currentTarget.style.color = 'white'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-primary)'; }}
-          ><Plus size={13} strokeWidth={1.8} /> 管理</button>
+            style={{ height: 26, padding: '0 6px' }}
+          >
+            <Plus size={13} strokeWidth={1.8} /> 管理
+          </button>
         </div>
         {libraryAssetsLoading ? (
-          <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>加载中…</div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-muted)' }}>加载中…</div>
         ) : libraryAssets.length === 0 ? (
-          <div style={{ fontSize: 12, color: 'var(--color-muted-soft)' }}>项目库暂无素材，点击「管理」上传</div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-muted-soft)', lineHeight: 1.6 }}>
+            项目库暂无素材。上传后可在这里一键引用为参考图。
+          </div>
         ) : (
-          <div data-testid="project-library-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="editor-library__grid" data-testid="project-library-list">
             {libraryAssets.map(({ asset, previewUrl }) => (
-              <div key={asset.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 'var(--rounded-sm)', background: 'white', border: '1px solid var(--color-hairline)' }}>
+              <div key={asset.id} className="editor-library__card">
                 {previewUrl
-                  ? <img src={assetUrl(previewUrl)} alt={asset.name} style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 'var(--rounded-sm)', flexShrink: 0 }} />
-                  : <div style={{ width: 34, height: 34, borderRadius: 'var(--rounded-sm)', background: 'var(--color-surface-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--color-muted)', flexShrink: 0 }}>无图</div>}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{asset.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{asset.type === 'IMAGE' ? '图片' : asset.type === 'VIDEO' ? '视频' : asset.type === 'AUDIO' ? '音频' : '素材'}{asset.scope === 'GLOBAL' ? ' · 全局' : ''}</div>
+                  ? <img src={assetUrl(previewUrl)} alt={asset.name} className="editor-library__thumb" />
+                  : <div className="editor-library__thumb">无图</div>}
+                <div className="editor-library__name" title={asset.name}>{asset.name}</div>
+                <div className="editor-library__meta">
+                  {asset.type === 'IMAGE' ? '图片' : asset.type === 'VIDEO' ? '视频' : asset.type === 'AUDIO' ? '音频' : '素材'}
+                  {asset.scope === 'GLOBAL' ? ' · 全局' : ''}
                 </div>
               </div>
             ))}

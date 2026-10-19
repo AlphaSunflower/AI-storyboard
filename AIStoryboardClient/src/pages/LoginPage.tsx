@@ -100,7 +100,7 @@ export function LoginPage() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <MoonLogo size={26} />
+          <MoonLogo size={26} animated />
           <span
             style={{
               color: 'var(--color-on-dark)',

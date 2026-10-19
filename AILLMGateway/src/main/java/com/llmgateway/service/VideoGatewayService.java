@@ -17,6 +17,12 @@ public interface VideoGatewayService {
     VideoResult create(String requestBody);
 
     /**
+     * 创建视频任务并强制指定渠道（仅管理后台测试单条路由用）。
+     * 普通创建按 model 选第一个启用渠道，测不出「这条路由绑定的渠道」。
+     */
+    VideoResult create(String requestBody, String forcedChannelId);
+
+    /**
      * 轮询视频状态。taskId 反查渠道：查 call_log 最新一条该 model 的记录不够精确，
      * 改为按 taskId 前缀存 channel 标识：简化方案——轮询时遍历该 model 的路由渠道逐个尝试，
      * 命中 200 即返回。

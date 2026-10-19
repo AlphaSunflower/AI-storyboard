@@ -5,7 +5,7 @@ import {
   Background, BackgroundVariant, ConnectionLineType, ControlButton, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, SelectionMode,
   useReactFlow, useStore, useStoreApi, type Connection, type NodeProps, type Viewport,
 } from '@xyflow/react';
-import { Check, ChevronDown, Copy, Eye, EyeOff, FileArchive, FolderOpen, History, Layers, LoaderCircle, Map, Maximize2, Minimize2, MoreHorizontal, Network, Pencil, Plus, Scissors, Search, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Copy, Eye, EyeOff, FileArchive, FolderOpen, Frame, History, Keyboard, Layers, LoaderCircle, Map, Maximize2, Minimize2, MoreHorizontal, Network, Pencil, Plus, Scissors, Search, Trash2 } from 'lucide-react';
 import { getAsset, saveAsset, saveAssets, saveAssetToLibrary } from '../services/projectStorage';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
@@ -21,8 +21,11 @@ import { AssetDrawer, ASSET_DRAG_MIME, LIBRARY_ASSET_DRAG_MIME } from './AssetDr
 import { MediaNode } from './MediaNode';
 import { VideoNode } from './VideoNode';
 import { CanvasToolRail } from './CanvasToolRail';
+import { CanvasFrameLayer } from './CanvasFrameLayer';
 import { GenerationRecordsPanel } from './GenerationRecordsPanel';
 import { TaskQueuePanel } from './TaskQueuePanel';
+import { CanvasShortcutHelp } from './CanvasShortcutHelp';
+import { isEditableShortcutTarget, matchCanvasShortcut } from '../canvas/canvasShortcuts';
 import { CanvasUiProvider } from '../canvas/CanvasUiContext';
 import { CanvasNodeDisplayProvider, shouldCompactNodeKind, useCanvasNodeDisplay, type NodeDisplayMode } from '../canvas/CanvasNodeDisplayContext';
 import { TEXT_EDIT_NODE_KINDS, type CanvasNodeKind } from '../canvas/graphContracts';
@@ -30,6 +33,8 @@ import { filterEdgesForDisplay } from '../canvas/edgeVisibility';
 import { cacheCanvasAssetBlob, createPersistedCanvasAsset, persistExistingCanvasAsset } from '../services/canvasMedia';
 import { importCanvasLibraryAsset, importCanvasLibraryGroup } from '../services/canvasProjectLibrary';
 import { canvasCommandService } from '../canvas/canvasCommandService';
+import { startGraphExecution } from '../canvas/graphExecutionService';
+import { collapsedGroupNodeIds, collectCanvasGroups, groupMemberNodes } from '../canvas/groups';
 import { usePresence } from '../hooks/usePresence';
 
 const COMPACT_NODE_WIDTH = 156;
@@ -98,11 +103,12 @@ const imageBlobForClipboard = async (blob: Blob) => {
   }
 };
 
-function CanvasSelectionToolbar({ nodes, onCopy, onCut, onDelete }: {
+function CanvasSelectionToolbar({ nodes, onCopy, onCut, onDelete, onGroup }: {
   nodes: CanvasNode[];
   onCopy: () => void;
   onCut: () => void;
   onDelete: () => void;
+  onGroup: () => void;
 }) {
   const transform = useStore((state) => state.transform);
   if (nodes.length < 2) return null;
@@ -129,6 +135,7 @@ function CanvasSelectionToolbar({ nodes, onCopy, onCut, onDelete }: {
     <div className="canvas-selection-actions nodrag nopan" role="toolbar" aria-label="多选节点操作" onPointerDown={(event) => event.stopPropagation()}>
       <button onClick={onCopy} aria-label="复制" title="复制 Ctrl+C"><Copy size={14} /></button>
       <button onClick={onCut} aria-label="剪切" title="剪切 Ctrl+X"><Scissors size={14} /></button>
+      <button onClick={onGroup} aria-label="创建分组" title="创建分组 Ctrl+G"><Frame size={14} /></button>
       <button className="is-danger" onClick={onDelete} aria-label="删除" title="删除 Ctrl+D"><Trash2 size={14} /></button>
     </div>
   </div>;
@@ -158,6 +165,8 @@ interface CanvasWorkspaceProps {
   onOpenInspector: () => void;
   onExportProject: () => void;
   isExporting: boolean;
+  /** 隐藏 / 显示右侧 Moon 智能体与节点属性面板（快捷键 B 由 App 执行） */
+  onToggleSidePanel?: () => void;
   onNotify?: (message: string) => void;
   canvasModeLocked?: boolean;
   canvasInteractionLocked?: boolean;
@@ -166,8 +175,10 @@ interface CanvasWorkspaceProps {
 const saveLabel: Record<SaveStatus, string> = { idle: '本地项目', saving: '保存中…', saved: '已保存到本地', error: '保存失败' };
 
 function CanvasInner(props: CanvasWorkspaceProps) {
-  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onRenameCanvas, onDeleteCanvas, onDeleteProject, onRenameProjectById, onDeleteProjectById, onOpenInspector, onExportProject, isExporting, onNotify, canvasModeLocked = false, canvasInteractionLocked = false } = props;
+  const { projectId, projectTitle, canvasId, canvasTitle, canvases, projects, saveStatus, initialViewport, onProjectTitleChange, onViewportChange, onOpenHome, onCreateProject, onSwitchProject, onSwitchCanvas, onNewCanvas, onRenameCanvas, onDeleteCanvas, onDeleteProject, onRenameProjectById, onDeleteProjectById, onOpenInspector, onExportProject, isExporting, onToggleSidePanel, onNotify, canvasModeLocked = false, canvasInteractionLocked = false } = props;
   const [showRecords, setShowRecords] = useState(false);
+  const [showTaskQueue, setShowTaskQueue] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [showMinimap, setShowMinimap] = useState(false);
   // 「显示 / 隐藏连线」。和 showMinimap 一样是纯视图状态：不写进画布图，刷新回到默认的显示连线。
   const [showEdges, setShowEdges] = useState(true);
@@ -228,16 +239,22 @@ function CanvasInner(props: CanvasWorkspaceProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nodes = useCanvasStore((state) => state.nodes);
   const emptyHint = usePresence(nodes.length === 0);
+  // 折叠分组：成员节点（含嵌套子分组）不渲染，但仍在 store 里，可被执行。
+  const canvasGroups = useMemo(() => collectCanvasGroups(nodes), [nodes]);
+  const collapsedNodeIds = useMemo(() => collapsedGroupNodeIds(canvasGroups), [canvasGroups]);
   const flowNodes = useMemo(
     () => nodes.map((node) => {
       // 不再强制 dragHandle：节点正文默认就是拖动面（图片 / 视频 / 生成节点的预览框都能直接按下拖），
       // 只有需要保持自身交互的控件才用 .nodrag 退出拖动。
       // 例外：正文本身就是编辑器的节点（storyboard 的 .storyboard-editor、各生成节点的
       // 提示词/参数面板）整块挂在 .nodrag 下，这些节点仍然只能拖标题条。
-      if (!shouldCompactNodeKind(node.data.kind) || nodeDisplayMode === 'expanded' || expandedNodeIds.has(node.id)) return node;
-      return { ...node, width: COMPACT_NODE_WIDTH, height: COMPACT_NODE_HEIGHT };
+      const hidden = collapsedNodeIds.has(node.id);
+      if (!shouldCompactNodeKind(node.data.kind) || nodeDisplayMode === 'expanded' || expandedNodeIds.has(node.id)) {
+        return { ...node, hidden };
+      }
+      return { ...node, width: COMPACT_NODE_WIDTH, height: COMPACT_NODE_HEIGHT, hidden };
     }),
-    [expandedNodeIds, nodeDisplayMode, nodes],
+    [collapsedNodeIds, expandedNodeIds, nodeDisplayMode, nodes],
   );
   const selectedNodes = useMemo(() => nodes.filter((node) => node.selected), [nodes]);
   const edges = useCanvasStore((state) => state.edges);
@@ -246,19 +263,25 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     () => selectedNodes.map((node) => node.id).sort().join(','),
     [selectedNodes],
   );
-  const flowEdges = useMemo(
-    () => filterEdgesForDisplay(edges, {
+  const flowEdges = useMemo(() => {
+    const filtered = filterEdgesForDisplay(edges, {
       edgesHidden: !showEdges,
       revealedNodeIds: selectedIdKey ? new Set(selectedIdKey.split(',')) : EMPTY_ID_SET,
-    }),
-    [edges, selectedIdKey, showEdges],
-  );
+    });
+    if (!collapsedNodeIds.size) return filtered;
+    return filtered.map((edge) => collapsedNodeIds.has(edge.source) || collapsedNodeIds.has(edge.target)
+      ? { ...edge, hidden: true }
+      : edge);
+  }, [collapsedNodeIds, edges, selectedIdKey, showEdges]);
   const onNodesChange = useCanvasStore((state) => state.onNodesChange);
   const onEdgesChange = useCanvasStore((state) => state.onEdgesChange);
   const beginNodeDrag = useCanvasStore((state) => state.beginNodeDrag);
   const endNodeDrag = useCanvasStore((state) => state.endNodeDrag);
   const connect = useCanvasStore((state) => state.connect);
   const selectNode = useCanvasStore((state) => state.selectNode);
+  const selectNodes = useCanvasStore((state) => state.selectNodes);
+  const groupNodes = useCanvasStore((state) => state.groupNodes);
+  const ungroupNodes = useCanvasStore((state) => state.ungroupNodes);
   const selectAll = useCanvasStore((state) => state.selectAll);
   const addNode = useCanvasStore((state) => state.addNode);
   const addImportedImages = useCanvasStore((state) => state.addImportedImages);
@@ -330,6 +353,64 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 1800);
   }, [onNotify]);
+  const createGroupFromSelection = useCallback(() => {
+    const ids = selectedNodes.map((node) => node.id);
+    if (ids.length < 2) {
+      notify('先选中至少 2 个节点再分组');
+      return;
+    }
+    const created = groupNodes(ids);
+    if (created) notify(`已创建「${created.title}」（${ids.length} 个节点）`);
+  }, [groupNodes, notify, selectedNodes]);
+
+  const ungroupSelectedGroups = useCallback(() => {
+    const groupIds = new Set(selectedNodes
+      .map((node) => typeof node.data.groupId === 'string' ? node.data.groupId : '')
+      .filter(Boolean));
+    if (!groupIds.size) {
+      notify('选中的节点不在任何分组里');
+      return;
+    }
+    groupIds.forEach((groupId) => ungroupNodes(groupId));
+    notify(`已解散 ${groupIds.size} 个分组，节点保留`);
+  }, [notify, selectedNodes, ungroupNodes]);
+
+  const selectGroupById = useCallback((groupId: string) => {
+    const groups = collectCanvasGroups(useCanvasStore.getState().nodes);
+    const ids = groupMemberNodes(groups, groupId).map((node) => node.id);
+    if (ids.length) selectNodes(ids);
+  }, [selectNodes]);
+
+  /**
+   * 执行分组：复用既有的图执行计划（会自动把分组外的上游依赖纳入），
+   * 但只从分组成员（含嵌套子分组）里发起，不会把下游节点一起跑掉。
+   * 并发固定为 1：按依赖顺序逐个跑完，用户能清楚看到「第几个节点」在生成。
+   */
+  const runGroup = useCallback((groupId: string) => {
+    const groups = collectCanvasGroups(useCanvasStore.getState().nodes);
+    const members = groupMemberNodes(groups, groupId);
+    if (!members.length) {
+      notify('分组不存在或已被解散');
+      return;
+    }
+    const group = groups.find((candidate) => candidate.id === groupId);
+    const title = group?.title ?? '分组';
+    const memberIds = members.map((node) => node.id);
+    const memberIdSet = new Set(memberIds);
+    const alreadyRunning = useCanvasStore.getState().executions.some((execution) =>
+      execution.status === 'running' && execution.nodeIds.some((nodeId) => memberIdSet.has(nodeId)));
+    if (alreadyRunning) {
+      notify(`「${title}」正在执行中，请等当前批次结束`);
+      return;
+    }
+    try {
+      startGraphExecution(projectId, memberIds, {}, 1);
+      notify(`已按节点顺序开始执行「${title}」（${memberIds.length} 个节点）`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '执行分组失败');
+    }
+  }, [notify, projectId]);
+
   const minimizeNode = useCallback((nodeId: string) => {
     setExpandedNodeIds((current) => {
       if (!current.has(nodeId)) return current;
@@ -665,6 +746,11 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         return;
       }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); deleteSelected(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'g') {
+        event.preventDefault();
+        event.shiftKey ? ungroupSelectedGroups() : createGroupFromSelection();
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); deleteSelected(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'x') {
         event.preventDefault();
@@ -682,7 +768,85 @@ function CanvasInner(props: CanvasWorkspaceProps) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
     };
     addEventListener('keydown', onKeyDown, true); return () => removeEventListener('keydown', onKeyDown, true);
-  }, [closeContextMenu, contextTarget, copySelection, cutSelection, deleteSelected, notify, pasteClipboard, redo, selectAll, undo]);
+  }, [closeContextMenu, contextTarget, copySelection, createGroupFromSelection, cutSelection, deleteSelected, notify, pasteClipboard, redo, selectAll, undo, ungroupSelectedGroups]);
+
+  /**
+   * 画布键盘快捷键：节点 1–9，视图/工具单字母（U/L/M/B/O/E/H/G/Q），? 帮助。
+   *
+   * <p>键位表在 `canvasShortcuts` 里与左栏工具岛、帮助面板共用。单键只在非输入焦点、
+   * 没有遮挡弹窗时生效；面板打开时只允许它自己的开关，避免「在生成记录里按 U 触发上传」。
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isEditableShortcutTarget(event.target)) return;
+      const match = matchCanvasShortcut(event);
+      if (!match) return;
+
+      if (match.type === 'action' && match.id === 'help') {
+        event.preventDefault();
+        setShortcutHelpOpen((value) => !value);
+        return;
+      }
+
+      if (shortcutHelpOpen) return;
+      if (showRecords && !(match.type === 'action' && match.id === 'records')) return;
+      if (assetDrawerOpen && !(match.type === 'action' && match.id === 'library')) return;
+      if (showTaskQueue && !(match.type === 'action' && match.id === 'queue')) return;
+      if (document.querySelector('[role="dialog"][data-state="open"], [role="menu"][data-state="open"]')) return;
+
+      if (match.type === 'node') {
+        event.preventDefault();
+        addNodeAtViewportCenter(match.kind);
+        return;
+      }
+
+      event.preventDefault();
+      switch (match.id) {
+        case 'upload':
+          fileInputRef.current?.click();
+          break;
+        case 'library':
+          toggleAssetDrawer();
+          break;
+        case 'map':
+          setShowMinimap((value) => !value);
+          break;
+        case 'sidebar':
+          onToggleSidePanel?.();
+          break;
+        case 'layout':
+          void runCurrentLayout();
+          break;
+        case 'edges':
+          setShowEdges((value) => !value);
+          break;
+        case 'nodes':
+          toggleNodeDisplayMode();
+          break;
+        case 'records':
+          toggleRecords();
+          break;
+        case 'queue':
+          setShowTaskQueue((value) => !value);
+          break;
+        default:
+          break;
+      }
+    };
+    addEventListener('keydown', onKeyDown, true);
+    return () => removeEventListener('keydown', onKeyDown, true);
+  }, [
+    addNodeAtViewportCenter,
+    assetDrawerOpen,
+    onToggleSidePanel,
+    runCurrentLayout,
+    shortcutHelpOpen,
+    showRecords,
+    showTaskQueue,
+    toggleAssetDrawer,
+    toggleNodeDisplayMode,
+    toggleRecords,
+  ]);
 
   useEffect(() => {
     if (!workspaceMenuOpen && !projectSwitcherOpen && !canvasSwitcherOpen) return;
@@ -788,7 +952,9 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         {/* 点阵随缩放一起放大/拉疏（React Flow 的 pattern 会乘上 zoom）*/}
         {/* 点阵常显：网格开关已下架，画布始终保留点阵底纹 */}
         <Background variant={BackgroundVariant.Dots} gap={28} size={2} color="rgba(244,244,245,.16)" />
-        <CanvasSelectionToolbar nodes={selectedNodes} onCopy={copySelection} onCut={cutSelection} onDelete={deleteSelected} />
+        {/* 分组框画在节点/连线下面：只提供组织与整组拖动，不参与执行。 */}
+        <CanvasFrameLayer nodes={flowNodes} onNotify={notify} onRunGroup={runGroup} />
+        <CanvasSelectionToolbar nodes={selectedNodes} onCopy={copySelection} onCut={cutSelection} onDelete={deleteSelected} onGroup={createGroupFromSelection} />
         {showMinimap && <MiniMap
           className="canvas-minimap"
           position="bottom-left"
@@ -941,16 +1107,22 @@ function CanvasInner(props: CanvasWorkspaceProps) {
           onToggleAssets={toggleAssetDrawer}
           assetsActive={assetDrawerOpen}
         />
-        {/* 右上角并排：生成记录入口 + 任务队列。生成记录不再藏在工具岛或队列面板里 */}
+        {/* 右上角并排：生成记录入口 + 任务队列 + 快捷键表。生成记录不再藏在工具岛或队列面板里 */}
         <Panel className="canvas-quick-actions" position="top-right">
+          <button
+            className="canvas-quick-action"
+            onClick={() => setShortcutHelpOpen(true)}
+            aria-label="键盘快捷键"
+            title="键盘快捷键（?）"
+          ><Keyboard size={18} /></button>
           <button
             className={`canvas-quick-action generation-records-trigger${showRecords ? ' is-active' : ''}`}
             onClick={toggleRecords}
             aria-label="生成记录"
             aria-pressed={showRecords}
-            title="生成记录"
+            title="生成记录（G）"
           ><History size={18} /></button>
-          <TaskQueuePanel />
+          <TaskQueuePanel open={showTaskQueue} onOpenChange={setShowTaskQueue} />
         </Panel>
         <Controls
           className="canvas-controls canvas-view-bar"
@@ -963,7 +1135,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
           fitViewOptions={{ padding: .22, duration: 300 }}
           aria-label="画布控制"
         >
-          <ControlButton className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap((value) => !value)} aria-label="小地图" title="小地图"><Map size={16} /></ControlButton>
+          <ControlButton className={showMinimap ? 'is-active' : ''} onClick={() => setShowMinimap((value) => !value)} aria-label="小地图" title="小地图（M）"><Map size={16} /></ControlButton>
           {/* 显示 / 隐藏连线。和同排的展开-收起一样，图标表示「点下去会发生什么」，
               is-active 标出「隐藏连线」这个非默认模式已经打开。 */}
           <ControlButton
@@ -971,7 +1143,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             onClick={() => setShowEdges((value) => !value)}
             aria-label={showEdges ? '隐藏连线' : '显示连线'}
             aria-pressed={!showEdges}
-            title={showEdges ? '隐藏连线' : '显示连线（点节点可单独看它的连线）'}
+            title={showEdges ? '隐藏连线（E）' : '显示连线（E，点节点可单独看它的连线）'}
           >
             {showEdges ? <EyeOff size={16} /> : <Eye size={16} />}
           </ControlButton>
@@ -979,7 +1151,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             className={nodeDisplayMode === 'compact' ? 'is-active' : ''}
             onClick={toggleNodeDisplayMode}
             aria-label={nodeDisplayMode === 'compact' ? '展开全部节点' : '收起全部节点'}
-            title={nodeDisplayMode === 'compact' ? '展开全部节点' : '收起全部节点'}
+            title={nodeDisplayMode === 'compact' ? '展开全部节点（H）' : '收起全部节点（H）'}
           >
             {nodeDisplayMode === 'compact' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
           </ControlButton>
@@ -989,7 +1161,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
             onClick={() => void runCurrentLayout()}
             aria-label="整理编排"
             aria-busy={isLayingOut}
-            title={selectedNodes.length > 1 ? '整理所选节点' : selectedNodes.length === 1 ? '整理当前连通编排' : '整理整张画布'}
+            title={selectedNodes.length > 1 ? '整理所选节点（O）' : selectedNodes.length === 1 ? '整理当前连通编排（O）' : '整理整张画布（O）'}
           >
             {isLayingOut ? <LoaderCircle className="is-spinning" size={16} /> : <Network size={16} />}
           </ControlButton>
@@ -1130,6 +1302,10 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         }}
         onPaste={() => { const created = pasteClipboard(contextTarget.flowPosition); if (created.length) notify(`已粘贴 ${created.length} 个节点`); }}
         onDuplicate={() => { const created = duplicateSelected(); if (created.length) notify(`已创建 ${created.length} 个副本`); }}
+        onCreateGroup={createGroupFromSelection}
+        onSelectGroup={selectGroupById}
+        onUngroupGroup={(groupId) => { ungroupNodes(groupId); notify('已解散分组，节点保留'); }}
+        onRunGroup={runGroup}
         onDelete={deleteSelected}
         onSaveToLibrary={saveContextAsset}
         onFlattenHistory={flattenContextAsset}
@@ -1137,6 +1313,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
         onCopyImage={copyContextImage}
       />}
       <ConnectionNodeMenu />
+      <CanvasShortcutHelp open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
     </main>
   );
 }

@@ -1,14 +1,18 @@
 package com.storyboard.asset.service.impl;
 
+import com.storyboard.asset.client.AssetContracts.AssetMarkRequest;
 import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
+import com.storyboard.asset.client.AssetContracts.BulkMarkRequest;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
 import com.storyboard.asset.client.AssetContracts.MediaRole;
 import com.storyboard.asset.client.AssetContracts.MediaType;
 import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
+import com.storyboard.asset.client.AssetContracts.LibraryGroupInsight;
+import com.storyboard.asset.client.AssetContracts.OutputConversationSummary;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.config.StorageProperties;
@@ -42,16 +46,69 @@ class AssetCatalogServiceImplTest {
 
     private LibraryRepository repository;
     private ProjectAccessPort projectAccess;
+    private FileAccessUrlSigner fileAccessUrlSigner;
     private AssetCatalogServiceImpl service;
 
     @BeforeEach
     void setUp() {
         repository = mock(LibraryRepository.class);
         projectAccess = mock(ProjectAccessPort.class);
+        fileAccessUrlSigner = mock(FileAccessUrlSigner.class);
+        when(fileAccessUrlSigner.signIfLocal(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         service = new AssetCatalogServiceImpl(
-                repository, projectAccess, mock(MediaUrlSigner.class), mock(FileAccessUrlSigner.class),
+                repository, projectAccess, mock(MediaUrlSigner.class), fileAccessUrlSigner,
                 new AssetPurgeService(repository),
                 new StorageProperties(null, null, null, null, null, 0, 0, 0, 3, false, 6, 24));
+    }
+
+    @Test
+    void listOutputConversationsGroupsOutputByConversation() {
+        when(repository.listOutputConversations(
+                eq("u1"), eq("p1"), nullable(String.class), nullable(AssetType.class),
+                any(), eq(TagMode.ALL), nullable(Integer.class), nullable(String.class),
+                nullable(String.class)))
+                .thenReturn(List.of(
+                        new OutputConversationSummary(
+                                "conv-1", 3, 2, 1, 0,
+                                "/api/files/images/a.png",
+                                List.of("/api/files/images/a.png", "/api/files/images/b.png"),
+                                "主视觉", OffsetDateTime.parse("2026-10-18T10:00:00+08:00")),
+                        new OutputConversationSummary(
+                                null, 1, 1, 0, 0, null, List.of(),
+                                "历史产出", OffsetDateTime.parse("2026-10-17T10:00:00+08:00"))));
+
+        List<OutputConversationSummary> groups = service.listOutputConversations(
+                "u1", "p1", null, null, null, TagMode.ALL);
+
+        verify(projectAccess).requireOwned("u1", "p1");
+        assertThat(groups).hasSize(2);
+        assertThat(groups.get(0).conversationId()).isEqualTo("conv-1");
+        assertThat(groups.get(0).assetCount()).isEqualTo(3);
+        assertThat(groups.get(0).previewUrls())
+                .containsExactly("/api/files/images/a.png", "/api/files/images/b.png");
+        assertThat(groups.get(1).conversationId()).isNull();
+    }
+
+    @Test
+    void listOutputConversationsRequiresProject() {
+        assertThatThrownBy(() -> service.listOutputConversations(
+                "u1", "", null, null, null, TagMode.ALL))
+                .hasMessageContaining("请先选择项目");
+    }
+
+    @Test
+    void listGroupInsightsRequiresOwnershipAndDelegates() {        when(repository.listGroupInsights("u1", "p1")).thenReturn(List.of(
+                new LibraryGroupInsight("g1", 3, 2, 1,
+                        OffsetDateTime.parse("2026-10-18T10:00:00+08:00"))));
+
+        List<LibraryGroupInsight> insights = service.listGroupInsights("u1", "p1");
+
+        verify(projectAccess).requireOwned("u1", "p1");
+        assertThat(insights).hasSize(1);
+        assertThat(insights.getFirst().groupId()).isEqualTo("g1");
+        assertThat(insights.getFirst().mediaCount()).isEqualTo(2);
+        assertThat(insights.getFirst().lastSnapshotAt()).isNotNull();
     }
 
     @Test
@@ -126,7 +183,8 @@ class AssetCatalogServiceImplTest {
                 .thenReturn("m1");
         when(repository.insertAsset(
                 anyString(), any(), nullable(String.class), any(), nullable(com.storyboard.asset.client.AssetContracts.AiAssetKind.class),
-                anyString(), nullable(String.class), nullable(String.class), nullable(String.class)))
+                anyString(), nullable(String.class), nullable(String.class), nullable(String.class),
+                nullable(String.class), nullable(String.class)))
                 .thenReturn("a1");
 
         service.registerMedia("u1", new AssetCatalogService.MediaRegistration(
@@ -254,6 +312,109 @@ class AssetCatalogServiceImplTest {
         MediaRef media = catalog.getMedia("u1", "m1");
 
         assertThat(media.contentUrl()).isEqualTo("/api/library/media/m1/content?token=123.fresh");
+    }
+
+    @Test
+    void markNormalizesRatingAndClearsBlankFlags() {
+        when(repository.updateMarks("u1", "a1", 5, null, null)).thenReturn(true);
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset("a1")));
+
+        AssetSummary marked = service.mark("u1", "a1", new AssetMarkRequest(5, " ", ""));
+
+        assertThat(marked.id()).isEqualTo("a1");
+        verify(repository).updateMarks("u1", "a1", 5, null, null);
+    }
+
+    @Test
+    void bulkMarkReportsUpdatedAndSkippedAssets() {
+        when(repository.updateMarks(eq("u1"), eq("a1"), eq(3), eq("pick"), nullable(String.class)))
+                .thenReturn(true);
+        when(repository.updateMarks(eq("u1"), eq("missing"), eq(3), eq("pick"), nullable(String.class)))
+                .thenReturn(false);
+
+        var result = service.bulkMark(
+                "u1", new BulkMarkRequest(List.of("a1", "missing"), 3, "pick", null));
+
+        assertThat(result.updatedIds()).containsExactly("a1");
+        assertThat(result.skipped()).hasSize(1);
+        assertThat(result.skipped().getFirst().assetId()).isEqualTo("missing");
+    }
+
+    @Test
+    void getUsageReturnsRepositoryUsageForOwnedAsset() {
+        AssetSummary asset = asset("a1");
+        when(repository.findAsset("u1", "a1")).thenReturn(Optional.of(asset));
+        when(repository.findAssetUsage(asset)).thenReturn(new com.storyboard.asset.client.AssetContracts.AssetUsage(
+                "a1", 2,
+                List.of(new com.storyboard.asset.client.AssetContracts.UsageRef("s1", "分镜 1", "项目")),
+                List.of(new com.storyboard.asset.client.AssetContracts.UsageRef("c1", "对话", null)),
+                List.of(), List.of()));
+
+        var usage = service.getUsage("u1", "a1");
+
+        assertThat(usage.total()).isEqualTo(2);
+        assertThat(usage.scenes()).hasSize(1);
+        assertThat(usage.conversations().getFirst().title()).isEqualTo("对话");
+    }
+
+    @Test
+    void listUnusedRequiresProjectOwnership() {
+        when(repository.searchUnusedAssets("u1", "p1", 1, 40))
+                .thenReturn(new PageResponse<>(List.of(asset("a1")), 1, 1, 40));
+
+        var result = service.listUnused("u1", "p1", 1, 40);
+
+        verify(projectAccess).requireOwned("u1", "p1");
+        assertThat(result.total()).isEqualTo(1);
+    }
+
+    @Test
+    void searchByTextUsesRepositoryRanking() {
+        when(repository.searchAssetsByText("u1", "p1", "室内", null, null, 10))
+                .thenReturn(List.of(asset("a1")));
+
+        var results = service.search("u1", "p1", "室内", null, null, 10);
+
+        verify(projectAccess).requireOwned("u1", "p1");
+        assertThat(results).extracting(AssetSummary::id).containsExactly("a1");
+    }
+
+    @Test
+    void searchBySimilarityRanksCandidatesInService() {
+        AssetSummary source = namedAsset("source", "红色人物");
+        AssetSummary close = namedAsset("close", "红色人物立绘");
+        AssetSummary far = namedAsset("far", "蓝色风景");
+        when(repository.findAsset("u1", "source")).thenReturn(Optional.of(source));
+        when(repository.listSearchCandidates("u1", "p1", "IMAGE", "source", 400))
+                .thenReturn(List.of(far, close));
+
+        var results = service.search("u1", "p1", null, null, "source", 10);
+
+        assertThat(results).isNotEmpty();
+        assertThat(results.getFirst().id()).isEqualTo("close");
+    }
+
+    @Test
+    void searchByColorRanksNearestFirst() {
+        when(repository.listColorCandidates("u1", "p1", 500)).thenReturn(List.of(
+                new com.storyboard.asset.repository.LibraryRepository.ColorCandidate(
+                        asset("red"), "#ff0000"),
+                new com.storyboard.asset.repository.LibraryRepository.ColorCandidate(
+                        asset("blue"), "#0000ff")));
+
+        var results = service.search("u1", "p1", null, "#fe0000", null, 10);
+
+        assertThat(results).extracting(AssetSummary::id).containsExactly("red", "blue");
+    }
+
+    private static AssetSummary namedAsset(String id, String name) {
+        return new AssetSummary(
+                id, "u1", AssetScope.PROJECT, "p1", AssetType.IMAGE, null,
+                name, null, null, false,
+                com.storyboard.asset.client.AssetContracts.MetadataState.NONE,
+                com.storyboard.asset.client.AssetContracts.AssetStatus.ACTIVE,
+                null, 1, List.of(), List.of(), "upload", null,
+                OffsetDateTime.now(), OffsetDateTime.now());
     }
 
     private static AssetSummary asset(String id) {

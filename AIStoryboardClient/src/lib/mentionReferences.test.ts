@@ -8,6 +8,7 @@ import {
   insertMention,
   mentionRanges,
   mentionSegmentAt,
+  parseConversationDragPayload,
   referenceQuotaExceeded,
   removeMentionSegment,
   resolveMentionQuery,
@@ -169,5 +170,13 @@ describe('引用构造', () => {
   it('标题里已含书名号时不重复包裹', () => {
     const reference = conversationReference({ id: 'c-1', title: '《已包裹》' }, []);
     expect(reference.token).toBe('@对话《已包裹》');
+  });
+
+  it('解析左侧会话拖拽负载，坏数据返回 null', () => {
+    expect(parseConversationDragPayload(JSON.stringify({
+      id: 'c-1', title: '分镜重做', messageCount: 3,
+    }))).toEqual({ id: 'c-1', title: '分镜重做', messageCount: 3, summaryStatus: undefined });
+    expect(parseConversationDragPayload('not-json')).toBeNull();
+    expect(parseConversationDragPayload(JSON.stringify({ title: '缺 id' }))).toBeNull();
   });
 });

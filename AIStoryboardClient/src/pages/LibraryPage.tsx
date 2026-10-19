@@ -124,7 +124,8 @@ export function LibraryPage() {
   const loadProjects = useProjectStore((state) => state.loadProjects);
   const initialScope = scopeFromQuery(searchParams.get('scope'));
   const [scopeView, setScopeView] = useState<ScopeView>(
-    initialScope === 'OUTPUT' ? 'PROJECT' : initialScope,
+    initialScope === 'OUTPUT' || initialScope === 'DUPLICATES' || initialScope === 'UNUSED'
+      ? 'PROJECT' : initialScope,
   );
   const [selectedProjectId, setSelectedProjectId] = useState(searchParams.get('projectId') || '');
   const [type, setType] = useState<AssetType | ''>((searchParams.get('type') as AssetType) || '');

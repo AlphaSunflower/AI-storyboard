@@ -33,9 +33,9 @@ export function statusTone(status: string | undefined): StatusTone {
 }
 
 const TONE_COLOR: Record<StatusTone, string> = {
-  ok: '#22a06b',
-  run: '#c47b16',
-  fail: '#d14b4b',
+  ok: 'var(--color-success)',
+  run: 'var(--color-warning)',
+  fail: 'var(--color-error)',
   idle: 'var(--color-muted-soft)',
 };
 
@@ -45,13 +45,10 @@ function StatusDot({ label, status }: { label: string; status: string | undefine
     <span
       title={`${label}：${status || '未生成'}`}
       aria-label={`${label}状态`}
+      className="scene-row__dot"
       style={{
-        width: 7,
-        height: 7,
-        borderRadius: '50%',
         background: TONE_COLOR[tone],
-        display: 'inline-block',
-        opacity: tone === 'idle' ? 0.5 : 1,
+        opacity: tone === 'idle' ? 0.45 : 1,
       }}
     />
   );
@@ -81,97 +78,27 @@ export function SceneOutlineRow({
       onClick={onSelect}
       aria-current={isSelected ? 'true' : undefined}
       aria-label={`分镜 ${scene.sceneNumber}: ${sceneSummary(scene)}`}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '22px 34px minmax(0, 1fr) auto',
-        gap: 8,
-        alignItems: 'center',
-        width: '100%',
-        padding: '6px 8px',
-        marginBottom: 4,
-        border: isSelected ? '1px solid var(--color-primary)' : '1px solid transparent',
-        borderLeft: `3px solid ${isSelected ? 'var(--color-primary)' : 'transparent'}`,
-        borderRadius: 'var(--rounded-sm)',
-        background: isSelected ? 'var(--color-surface-card)' : 'transparent',
-        opacity: dragging ? 0.5 : 1,
-        cursor: 'pointer',
-        textAlign: 'left',
-        font: 'inherit',
-        color: 'inherit',
-        transition: 'background 0.15s, border-color 0.15s',
-      }}
-      onMouseEnter={(event) => {
-        if (!isSelected) event.currentTarget.style.background = 'var(--color-surface-soft)';
-      }}
-      onMouseLeave={(event) => {
-        if (!isSelected) event.currentTarget.style.background = 'transparent';
-      }}
+      className={`scene-row${isSelected ? ' is-selected' : ''}${dragging ? ' is-dragging' : ''}`}
+      style={{ opacity: dragging ? 0.55 : 1 }}
     >
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--color-muted)',
-          fontVariantNumeric: 'tabular-nums',
-          textAlign: 'right',
-        }}
-      >
-        {scene.sceneNumber}
-      </span>
+      <span className="scene-row__index">{scene.sceneNumber}</span>
 
-      <span
-        style={{
-          width: 34,
-          height: 24,
-          borderRadius: 4,
-          overflow: 'hidden',
-          background: 'var(--color-hairline)',
-          display: 'grid',
-          placeItems: 'center',
-          flexShrink: 0,
-        }}
-      >
+      <span className="scene-row__thumb">
         {scene.imageUrl ? (
-          <img
-            src={scene.imageUrl}
-            alt=""
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
+          <img src={scene.imageUrl} alt="" />
         ) : (
-          <span style={{ fontSize: 9, color: 'var(--color-muted-soft)' }}>无图</span>
+          '无图'
         )}
       </span>
 
-      <span style={{ display: 'grid', gap: 1, minWidth: 0 }}>
-        <span
-          style={{
-            fontSize: 12,
-            color: 'var(--color-ink)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {sceneSummary(scene)}
-        </span>
-        {paramLine && (
-          <span style={{ fontSize: 10, color: 'var(--color-muted-soft)' }}>{paramLine}</span>
-        )}
+      <span className="scene-row__body">
+        <span className="scene-row__title">{sceneSummary(scene)}</span>
+        {paramLine && <span className="scene-row__meta">{paramLine}</span>}
       </span>
 
-      <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+      <span className="scene-row__status">
         {scene.stale && (
-          <span
-            title="画面在这镜出图/出视频之后被改过，媒体可能已过期"
-            style={{
-              fontSize: 9,
-              lineHeight: 1.4,
-              padding: '0 3px',
-              borderRadius: 3,
-              border: '1px solid color-mix(in srgb, #c47b16 45%, transparent)',
-              color: '#c47b16',
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <span className="scene-row__stale" title="画面在这镜出图/出视频之后被改过，媒体可能已过期">
             过期
           </span>
         )}

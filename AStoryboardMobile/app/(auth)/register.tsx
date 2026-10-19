@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,7 +25,7 @@ export default function RegisterScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={s.innerContent}>
-        <Text style={s.logo}>☾</Text>
+        <Image source={require('../../assets/moon-mark.png')} style={s.logo} resizeMode="contain" />
         <Text style={s.title}>创建账户</Text>
 
         <View style={s.form}>
@@ -85,7 +85,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: tokens.colors.canvas },
   inner: { flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
   innerContent: { width: '100%' },
-  logo: { fontSize: 48, color: tokens.colors.primary, textAlign: 'center', marginBottom: 8 },
+  logo: { width: 64, height: 64, alignSelf: 'center', marginBottom: 10 },
   title: {
     fontSize: tokens.fontSize.xxl,
     fontWeight: tokens.fontWeight.bold,

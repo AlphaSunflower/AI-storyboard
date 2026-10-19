@@ -145,7 +145,8 @@ class DefaultModelConsistencyTest {
                 null, null, null, null,
                 null, null, null,
                 null, null,
-                null, null);
+                null, null,
+                null);
     }
 
     private static ModelRoute route(String id, String model, String type, boolean isDefault) {

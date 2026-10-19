@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, FlatList, StyleSheet, Modal, TextInput, Alert, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, Modal, TextInput, Alert, Linking, Image } from 'react-native';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -113,7 +113,10 @@ export function SidebarDrawer({
       <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={onClose}>
         <View style={s.drawer} onStartShouldSetResponder={() => true}>
           <View style={s.drawerHeader}>
-            <Text style={s.drawerTitle}>☾ Moon 智能体</Text>
+            <View style={s.drawerTitle}>
+              <Image source={require('../../../assets/moon-mark.png')} style={s.drawerLogo} resizeMode="contain" />
+              <Text style={s.drawerTitleText}>Moon 智能体</Text>
+            </View>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={18} color={tokens.colors.textSecondary} />
             </TouchableOpacity>
@@ -297,7 +300,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: tokens.colors.hairline,
   },
-  drawerTitle: { fontSize: tokens.fontSize.md, fontWeight: tokens.fontWeight.bold, color: tokens.colors.ink },
+  drawerTitle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  drawerLogo: { width: 20, height: 20 },
+  drawerTitleText: { fontSize: tokens.fontSize.md, fontWeight: tokens.fontWeight.bold, color: tokens.colors.ink },
   closeBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
   section: { paddingHorizontal: 12, paddingTop: 10 },
   projectBtn: {

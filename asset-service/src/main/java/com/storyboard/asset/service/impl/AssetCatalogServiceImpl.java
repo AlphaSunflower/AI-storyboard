@@ -1,6 +1,7 @@
 package com.storyboard.asset.service.impl;
 
 import com.storyboard.asset.client.AssetContracts.AssetDetail;
+import com.storyboard.asset.client.AssetContracts.AssetMarkRequest;
 import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
@@ -8,12 +9,16 @@ import com.storyboard.asset.client.AssetContracts.AiAssetKind;
 import com.storyboard.asset.client.AssetContracts.CreateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.DuplicateAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.LibraryOrigin;
+import com.storyboard.asset.client.AssetContracts.LibraryGroupInsight;
 import com.storyboard.asset.client.AssetContracts.MediaRef;
+import com.storyboard.asset.client.AssetContracts.OutputConversationSummary;
 import com.storyboard.asset.client.AssetContracts.PageResponse;
 import com.storyboard.asset.client.AssetContracts.TagMode;
 import com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
 import com.storyboard.asset.client.AssetContracts.AssetStatus;
+import com.storyboard.asset.client.AssetContracts.AssetUsage;
 import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
+import com.storyboard.asset.client.AssetContracts.BulkMarkRequest;
 import com.storyboard.asset.config.StorageProperties;
 import com.storyboard.asset.domain.AssetStatePolicy;
 import com.storyboard.asset.domain.AssetSearchText;
@@ -77,14 +82,79 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
             Collection<String> tagIds, TagMode tagMode, boolean deleted, boolean includeGlobal,
             LibraryOrigin origin, int page, int size
     ) {
+        return list(userId, scope, projectId, folderId, query, type, tagIds, tagMode, deleted,
+                includeGlobal, origin, null, page, size);
+    }
+
+    @Override
+    public PageResponse<AssetSummary> list(
+            String userId, AssetScope scope, String projectId, String folderId, String query, AssetType type,
+            Collection<String> tagIds, TagMode tagMode, boolean deleted, boolean includeGlobal,
+            LibraryOrigin origin, String conversationId, int page, int size
+    ) {
+        return list(userId, scope, projectId, folderId, query, type, tagIds, tagMode, deleted,
+                includeGlobal, origin, conversationId, null, null, null, page, size);
+    }
+
+    @Override
+    public PageResponse<AssetSummary> list(
+            String userId, AssetScope scope, String projectId, String folderId, String query, AssetType type,
+            Collection<String> tagIds, TagMode tagMode, boolean deleted, boolean includeGlobal,
+            LibraryOrigin origin, String conversationId, Integer minRating, String flag,
+            String colorLabel, int page, int size
+    ) {
         if (scope == AssetScope.PROJECT && projectId != null && !projectId.isBlank()) {
             projectAccess.requireOwned(userId, projectId);
         }
-        PageResponse<AssetSummary> result = repository.searchAssets(userId, scope, projectId, folderId, query, type,
-                tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, includeGlobal, origin, page, size);
+        PageResponse<AssetSummary> result;
+        boolean hasMarks = (minRating != null && minRating > 0)
+                || (flag != null && !flag.isBlank())
+                || (colorLabel != null && !colorLabel.isBlank());
+        if (hasMarks) {
+            result = repository.searchAssets(userId, scope, projectId, folderId, query, type,
+                    tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, includeGlobal, origin,
+                    conversationId, minRating, flag, colorLabel, page, size);
+        } else if (conversationId == null || conversationId.isBlank()) {
+            result = repository.searchAssets(userId, scope, projectId, folderId, query, type,
+                    tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, includeGlobal, origin, page, size);
+        } else {
+            result = repository.searchAssets(userId, scope, projectId, folderId, query, type,
+                    tagIds, tagMode == null ? TagMode.ALL : tagMode, deleted, includeGlobal, origin,
+                    conversationId, page, size);
+        }
         return new PageResponse<>(
                 result.records().stream().map(this::withSignedCover).toList(),
                 result.total(), result.page(), result.size());
+    }
+
+    @Override
+    public List<OutputConversationSummary> listOutputConversations(
+            String userId, String projectId, String query, AssetType type,
+            Collection<String> tagIds, TagMode tagMode
+    ) {
+        return listOutputConversations(userId, projectId, query, type, tagIds, tagMode, null, null, null);
+    }
+
+    @Override
+    public List<OutputConversationSummary> listOutputConversations(
+            String userId, String projectId, String query, AssetType type,
+            Collection<String> tagIds, TagMode tagMode,
+            Integer minRating, String flag, String colorLabel
+    ) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new BusinessException(40001, "请先选择项目");
+        }
+        projectAccess.requireOwned(userId, projectId);
+        return repository.listOutputConversations(userId, projectId, query, type, tagIds,
+                        tagMode == null ? TagMode.ALL : tagMode, minRating, flag, colorLabel)
+                .stream()
+                .map(item -> new OutputConversationSummary(
+                        item.conversationId(), item.assetCount(), item.imageCount(),
+                        item.videoCount(), item.documentCount(),
+                        signCover(item.coverUrl()),
+                        item.previewUrls().stream().map(this::signCover).toList(),
+                        item.lastAssetName(), item.lastGeneratedAt()))
+                .toList();
     }
 
     @Override
@@ -283,7 +353,8 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         String assetId = repository.insertAsset(
                 userId, registration.scope(), registration.projectId(), registration.assetType(), null,
                 registration.name().trim(), trimToNull(registration.description()),
-                registration.sourceType(), registration.sourceId());
+                registration.sourceType(), registration.sourceId(),
+                registration.conversationId(), registration.sceneId());
         String blobId = repository.upsertBlob(
                 registration.objectKey(), registration.sha256(), registration.mimeType(),
                 registration.sizeBytes(), registration.width(), registration.height(),
@@ -358,6 +429,193 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
         return new AnalysisRequestResult(List.copyOf(queued), 0);
     }
 
+    @Override
+    public List<LibraryGroupInsight> listGroupInsights(String userId, String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new BusinessException(40001, "请先选择项目");
+        }
+        projectAccess.requireOwned(userId, projectId);
+        return repository.listGroupInsights(userId, projectId);
+    }
+
+    @Override
+    @Transactional
+    public AssetSummary mark(String userId, String assetId, AssetMarkRequest request) {
+        MarkValues marks = normalizeMarks(request == null ? null : request.rating(),
+                request == null ? null : request.flag(), request == null ? null : request.colorLabel());
+        boolean updated = repository.updateMarks(
+                userId, assetId, marks.rating(), marks.flag(), marks.colorLabel());
+        if (!updated) throw new BusinessException(40401, "素材不存在或不在可用状态");
+        return requireAsset(userId, assetId);
+    }
+
+    @Override
+    @Transactional
+    public BulkAssetOperationResult bulkMark(String userId, BulkMarkRequest request) {
+        if (request == null || request.assetIds() == null || request.assetIds().isEmpty()) {
+            throw new BusinessException(40001, "请选择要标记的素材");
+        }
+        List<String> ids = request.assetIds().stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        if (ids.isEmpty()) throw new BusinessException(40001, "请选择要标记的素材");
+        if (ids.size() > MAX_BULK_ASSETS) throw new BusinessException(40001, "单次最多标记 500 项素材");
+        MarkValues marks = normalizeMarks(request.rating(), request.flag(), request.colorLabel());
+        List<String> updated = new java.util.ArrayList<>(ids.size());
+        List<com.storyboard.asset.client.AssetContracts.SkippedAsset> skipped =
+                new java.util.ArrayList<>();
+        for (String id : ids) {
+            if (repository.updateMarks(userId, id, marks.rating(), marks.flag(), marks.colorLabel())) {
+                updated.add(id);
+            } else {
+                skipped.add(new com.storyboard.asset.client.AssetContracts.SkippedAsset(id, "素材不可用"));
+            }
+        }
+        return new BulkAssetOperationResult(List.copyOf(updated), List.copyOf(skipped));
+    }
+
+    @Override
+    public List<AssetSummary> search(String userId, String projectId, String query,
+                                     String color, String similarTo, int limit) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new BusinessException(40001, "请先选择项目");
+        }
+        projectAccess.requireOwned(userId, projectId);
+        int size = Math.max(1, Math.min(60, limit));
+        if (similarTo != null && !similarTo.isBlank()) {
+            AssetSummary source = requireAsset(userId, similarTo);
+            return repository.listSearchCandidates(
+                            userId, projectId, source.type().name(), source.id(), 400)
+                    .stream()
+                    .map(candidate -> new ScoredAsset(candidate, similarityScore(source, candidate)))
+                    .filter(scored -> scored.score() > 0.01)
+                    .sorted(java.util.Comparator.comparingDouble(ScoredAsset::score).reversed())
+                    .limit(size)
+                    .map(scored -> withSignedCover(scored.asset()))
+                    .toList();
+        }
+        if (color != null && !color.isBlank()) {
+            int[] target = parseHex(color);
+            if (target == null) throw new BusinessException(40001, "颜色格式应为 #RRGGBB");
+            return repository.listColorCandidates(userId, projectId, 500).stream()
+                    .map(candidate -> new ScoredColor(
+                            candidate.asset(), colorDistance(target, candidate.color())))
+                    .filter(scored -> scored.distance() >= 0)
+                    .sorted(java.util.Comparator.comparingInt(ScoredColor::distance))
+                    .limit(size)
+                    .map(scored -> withSignedCover(scored.asset()))
+                    .toList();
+        }
+        if (query == null || query.isBlank()) return List.of();
+        return repository.searchAssetsByText(userId, projectId, query.trim(), null, null, size)
+                .stream().map(this::withSignedCover).toList();
+    }
+
+    private record ScoredColor(AssetSummary asset, int distance) {
+    }
+
+    private record ScoredAsset(AssetSummary asset, double score) {
+    }
+
+    /** 中文按字符二元组做 Jaccard，名称权重最高；标签重叠再加分。 */
+    private static double similarityScore(AssetSummary source, AssetSummary candidate) {
+        double score = jaccard(bigrams(source.name()), bigrams(candidate.name())) * 2
+                + jaccard(bigrams(source.aiDescription()), bigrams(candidate.aiDescription()))
+                + jaccard(bigrams(source.description()), bigrams(candidate.description()));
+        java.util.Set<String> sourceTags = source.tags().stream()
+                .map(tag -> tag.id()).collect(java.util.stream.Collectors.toSet());
+        long overlap = candidate.tags().stream()
+                .filter(tag -> sourceTags.contains(tag.id())).count();
+        return score + overlap * 0.3;
+    }
+
+    private static java.util.Set<String> bigrams(String text) {
+        if (text == null || text.isBlank()) return java.util.Set.of();
+        String clean = text.toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
+        java.util.Set<String> grams = new java.util.HashSet<>();
+        for (int index = 0; index < clean.length() - 1; index += 1) {
+            grams.add(clean.substring(index, index + 2));
+        }
+        return grams;
+    }
+
+    private static double jaccard(java.util.Set<String> first, java.util.Set<String> second) {
+        if (first.isEmpty() || second.isEmpty()) return 0;
+        long intersection = first.stream().filter(second::contains).count();
+        long union = first.size() + second.size() - intersection;
+        return union == 0 ? 0 : (double) intersection / union;
+    }
+
+    private static int[] parseHex(String color) {
+        if (color == null) return null;
+        String value = color.trim();
+        if (value.startsWith("#")) value = value.substring(1);
+        if (value.length() != 6) return null;
+        try {
+            return new int[]{
+                    Integer.parseInt(value.substring(0, 2), 16),
+                    Integer.parseInt(value.substring(2, 4), 16),
+                    Integer.parseInt(value.substring(4, 6), 16),
+            };
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
+
+    private static int colorDistance(int[] target, String hex) {
+        int[] candidate = parseHex(hex);
+        if (candidate == null) return -1;
+        int red = target[0] - candidate[0];
+        int green = target[1] - candidate[1];
+        int blue = target[2] - candidate[2];
+        return red * red + green * green + blue * blue;
+    }
+
+    @Override
+    public AssetUsage getUsage(String userId, String assetId) {
+        return repository.findAssetUsage(requireAsset(userId, assetId));
+    }
+
+    @Override
+    public PageResponse<AssetSummary> listUnused(
+            String userId, String projectId, int page, int size
+    ) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new BusinessException(40001, "请先选择项目");
+        }
+        projectAccess.requireOwned(userId, projectId);
+        PageResponse<AssetSummary> result = repository.searchUnusedAssets(userId, projectId, page, size);
+        return new PageResponse<>(
+                result.records().stream().map(this::withSignedCover).toList(),
+                result.total(), result.page(), result.size());
+    }
+
+    private static MarkValues normalizeMarks(Integer rating, String flag, String colorLabel) {        int normalizedRating = rating == null ? 0 : Math.max(0, Math.min(5, rating));
+        String normalizedFlag = normalizeFlag(flag);
+        String normalizedColor = normalizeColor(colorLabel);
+        return new MarkValues(normalizedRating, normalizedFlag, normalizedColor);
+    }
+
+    private static String normalizeFlag(String flag) {
+        if (flag == null || flag.isBlank()) return null;
+        String value = flag.trim().toLowerCase();
+        if (!value.equals("pick") && !value.equals("reject")) {
+            throw new BusinessException(40001, "旗标只能是 pick 或 reject");
+        }
+        return value;
+    }
+
+    private static String normalizeColor(String colorLabel) {
+        if (colorLabel == null || colorLabel.isBlank()) return null;
+        String value = colorLabel.trim().toLowerCase();
+        if (!List.of("red", "yellow", "green", "blue", "purple").contains(value)) {
+            throw new BusinessException(40001, "色标取值不合法");
+        }
+        return value;
+    }
+
+    private record MarkValues(int rating, String flag, String colorLabel) {
+    }
+
     private void validateCreate(String userId, CreateAssetRequest request) {
         if (userId == null || userId.isBlank()) throw new BusinessException(40001, "用户不能为空");
         if (request == null || request.name() == null || request.name().isBlank()) {
@@ -422,6 +680,12 @@ public class AssetCatalogServiceImpl implements AssetCatalogService {
                 asset.aiKind(), asset.name(), asset.description(), asset.aiDescription(), asset.manualOverride(),
                 asset.metadataState(), asset.status(), fileAccessUrlSigner.signIfLocal(asset.coverUrl()),
                 asset.version(), asset.tags(), asset.projects(), asset.folderId(), asset.folderPath(),
-                asset.sourceType(), asset.sourceId(), asset.createdAt(), asset.updatedAt());
+                asset.sourceType(), asset.sourceId(), asset.createdAt(), asset.updatedAt(),
+                asset.conversationId(), asset.sceneId(), asset.rating(), asset.flag(), asset.colorLabel());
+    }
+
+    private String signCover(String coverUrl) {
+        if (coverUrl == null || coverUrl.isBlank()) return coverUrl;
+        return fileAccessUrlSigner.signIfLocal(coverUrl);
     }
 }

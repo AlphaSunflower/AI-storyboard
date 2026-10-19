@@ -1,3 +1,5 @@
+import { History } from 'lucide-react';
+
 export function DraftRecoverBanner({
   projectName,
   onRecover,
@@ -10,49 +12,42 @@ export function DraftRecoverBanner({
   return (
     <div
       style={{
-        padding: '10px var(--space-lg)',
-        background: 'var(--color-surface-card)',
+        padding: '7px 20px',
+        background: 'var(--color-primary-tint)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        gap: 16,
         borderBottom: '1px solid var(--color-hairline)',
         flexShrink: 0,
       }}
     >
-      <span style={{ font: 'var(--text-body-sm)', color: 'var(--color-body-strong)' }}>
-        检测到未保存的草稿：<strong>{projectName}</strong>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 7,
+          minWidth: 0,
+          fontSize: 12.5,
+          color: 'var(--color-body)',
+        }}
+      >
+        <History size={14} strokeWidth={1.9} color="var(--color-primary-active)" />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          有未完成的草稿「<strong style={{ fontWeight: 600, color: 'var(--color-ink)' }}>{projectName}</strong>」
+        </span>
       </span>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={onRecover}
-          style={{
-            padding: '4px 16px',
-            height: 30,
-            borderRadius: 'var(--rounded-md)',
-            fontSize: 12,
-            fontWeight: 500,
-            background: 'var(--color-primary)',
-            color: 'var(--color-on-primary)',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          恢复
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onDismiss}>
+          忽略
         </button>
         <button
-          onClick={onDismiss}
-          style={{
-            padding: '4px 16px',
-            height: 30,
-            borderRadius: 'var(--rounded-md)',
-            fontSize: 12,
-            background: 'transparent',
-            color: 'var(--color-muted)',
-            border: '1px solid var(--color-hairline)',
-            cursor: 'pointer',
-          }}
+          type="button"
+          className="btn btn--sm"
+          onClick={onRecover}
+          style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)', borderColor: 'var(--color-primary)' }}
         >
-          忽略
+          继续编辑
         </button>
       </div>
     </div>

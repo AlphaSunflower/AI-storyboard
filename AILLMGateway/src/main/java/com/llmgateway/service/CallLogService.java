@@ -18,6 +18,16 @@ public interface CallLogService {
         log(model, channelId, status, durationMs, error, videoUrl, taskId);
     }
 
+    /**
+     * 带可观测字段的日志：上游模型名、第几次尝试、token 用量。
+     * 旧调用点不传这些字段时自动降级到 8 参版本。
+     */
+    default void log(String model, String channelId, String status, long durationMs,
+                     String error, String videoUrl, String taskId, String callId,
+                     String upstreamModel, Integer attempt, Integer promptTokens, Integer completionTokens) {
+        log(model, channelId, status, durationMs, error, videoUrl, taskId, callId);
+    }
+
     // ===== 管理后台查询（admin 模块使用）=====
 
     /** 分页查询调用日志（按 createdAt 倒序；size 钳制 1~50；model 非空时精确过滤） */

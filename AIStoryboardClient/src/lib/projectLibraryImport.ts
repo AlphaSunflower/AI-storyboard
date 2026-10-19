@@ -12,6 +12,8 @@ export interface ProjectLibraryImportInput {
   url: string;
   mediaType: MediaType;
   label?: string;
+  /** 素材来自哪个对话：导入后进入该对话的「产出素材」文件夹。编辑器导入不传。 */
+  conversationId?: string;
   /** 已经算过幂等键时传入，避免重复算哈希并与查重结果对齐。 */
   generationRecordId?: string;
 }
@@ -32,6 +34,10 @@ export async function importMediaToProjectLibrary(
     detail: '导入项目库',
     status: 'queued',
     progress: 0,
+    retryUrl: input.url,
+    retryProducer: input.producer,
+    retryMediaType: input.mediaType,
+    retryProjectId: input.projectId,
   });
 
   try {
@@ -42,6 +48,7 @@ export async function importMediaToProjectLibrary(
       resultIndex: 0,
       resultUrl: input.url,
       mediaType: input.mediaType,
+      metadata: input.conversationId ? { conversationId: input.conversationId } : undefined,
     });
     const asset = response.data.data;
     taskStore.updateTask(taskId, {

@@ -45,10 +45,12 @@ import { Tooltip, TooltipGroup } from '../components/common/Tooltip';
 import { MobileHeader } from '../components/agent/MobileHeader';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
 import { ConversationSearchModal } from '../components/agent/ConversationSearchModal';
+import { ShortcutHelpDialog } from '../components/agent/ShortcutHelpDialog';
+import { matchMoonShortcut, MOON_PAGE_SHORTCUT_IDS } from '../lib/moonShortcuts';
+import { notify } from '../stores/toastStore';
 import { shouldShowFirstRunHero } from '../components/agent/sideChatFrame';
 import { agentApi } from '../api/agent';
-import { Moon } from 'lucide-react';
-import { X, FolderKanban, PanelLeftClose, ChevronDown, ChevronsDown, Info, User, LogOut, Library, Search } from 'lucide-react';
+import { X, FolderKanban, PanelLeftClose, ChevronDown, ChevronsDown, Info, User, LogOut, Library, Search, Keyboard } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePresence } from '../hooks/usePresence';
@@ -57,6 +59,7 @@ import {
   useAgentAssetDragOutsideSidebar,
 } from '../hooks/useAgentAssetDragOutsideSidebar';
 import { useAuthStore } from '../stores/authStore';
+import { useAccountSettingsStore } from '../stores/accountSettingsStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
 import { useDocumentPreviewStore } from '../stores/documentPreviewStore';
@@ -82,8 +85,8 @@ import { canvasIdFromUrl, openChatAppEntry, type ChatAppKey } from '../component
 import { requestSideChatSelectionContext } from '../lib/sideChatSelectionSync';
 import { shouldHidePendingCardMessage } from '../lib/pendingCardMessage';
 import MoonLogo from '../components/agent/MoonLogo';
-import AmbientGlow from '../components/AmbientGlow';
 import { Frame } from 'lucide-react';
+import '../styles/chat-theme.css';
 import '../styles/chat-interactions.css';
 import '../styles/canvas-tech-chat.css';
 
@@ -177,6 +180,7 @@ export function ChatPage() {
   const documentPreviewAttachment = useDocumentPreviewStore((state) => state.attachment);
   const [recordsOpen, setRecordsOpen] = useState(false);         // 生成记录（右上角 History）
   const [searchOpen, setSearchOpen] = useState(false);           // 全文+标题搜索（会话栏搜索图标）
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false); // 键盘快捷键表
   const [projectOpen, setProjectOpen] = useState(false);
   const [generationCenterOpen, setGenerationCenterOpen] = useState(false);
   const [generationCenterTab, setGenerationCenterTab] = useState<GenerationCenterTab>('active');
@@ -463,6 +467,19 @@ export function ChatPage() {
     }
     void useAuthStore.getState().checkAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 账号级通用设置：登录后拉一次；新会话的默认审批模式跟随「全局权限」。
+  useEffect(() => {
+    void useAccountSettingsStore.getState().load().then(() => {
+      const settingsState = useAccountSettingsStore.getState();
+      if (!settingsState.loaded) return;
+      if (!useAgentStore.getState().activeConversationId) {
+        useAgentStore.setState({
+          pendingApprovalMode: settingsState.settings.defaultApprovalMode,
+        });
+      }
+    });
   }, []);
 
   // 无项目上下文时自动选第一个项目（会话绑定项目是后端契约）
@@ -772,6 +789,50 @@ export function ChatPage() {
     setGenerationCenterOpen(true);
   }, []);
 
+  /**
+   * 页面级快捷键：搜索 / 生成中心 / 编辑器 / 画布 / 项目库 / 帮助。
+   * 输入卡级快捷键由可见的 ChatComposer 自己消费（见 moonShortcuts 的 id 分组），
+   * 这里只处理页面级 id，避免一次按键执行两遍。
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const id = matchMoonShortcut(event);
+      if (!id || !MOON_PAGE_SHORTCUT_IDS.has(id)) return;
+      // 帮助面板是模态的：只保留 Ctrl+/ 自己开关，其余快捷键不穿透到背后的页面。
+      if (shortcutHelpOpen && id !== 'help') return;
+      event.preventDefault();
+      event.stopPropagation();
+      switch (id) {
+        case 'search':
+          setSearchOpen(true);
+          break;
+        case 'generation-center':
+          openGenerationCenter('active');
+          break;
+        case 'editor':
+          if (!currentProject?.id) {
+            notify({ title: '请先选择项目', description: '编辑器需要项目上下文', variant: 'info' });
+            return;
+          }
+          handleChatAppOpen('editor');
+          break;
+        case 'canvas':
+          handleChatAppOpen('canvas');
+          break;
+        case 'library':
+          handleChatAppOpen('library');
+          break;
+        case 'help':
+          setShortcutHelpOpen((value) => !value);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [currentProject?.id, handleChatAppOpen, openGenerationCenter, shortcutHelpOpen]);
+
   useLayoutEffect(() => {
     if (embed || !chatApps.hasTabs || chatApps.layout.minimized || showMobile || collapsed) return;
     if (chatApps.layout.width >= sidebarCollapseWidth) {
@@ -939,17 +1000,17 @@ export function ChatPage() {
     <ChatAppsProvider open={chatApps.open}>
     <>
     {/* 页面氛围光晕（fixed 覆盖手机/桌面两分支，pointer-events none） */}
-    {!canvasTechActive && <AmbientGlow />}
+    
     {/* ═══════════════ 手机端布局（CSS 隐藏/显示，避免 hooks 协调错误）═══════════════ */}
       <div
       className={`chat-page-shell${canvasTechActive ? ' is-canvas-tech' : ''}`}
       data-canvas-mode={canvasTechActive ? 'true' : undefined}
-      style={{ height: '100dvh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'white', overflow: 'hidden' }}
+      style={{ height: '100dvh', display: showMobile ? 'flex' : 'none', flexDirection: 'column', background: 'var(--color-canvas)', overflow: 'hidden' }}
     >
         <CanvasTechAtmosphere active={canvasTechActive} />
         {/* 顶部导航栏 */}
         <MobileHeader
-          title={currentTitle}
+          title={activeConversation ? currentTitle : 'Moon 智能体'}
           onMenuClick={() => setMobileSidebarOpen(true)}
           onNewConversation={handleMobileNewConversation}
         />
@@ -996,11 +1057,11 @@ export function ChatPage() {
           }}>
             <LiveOrb variant="webgl" colors={["#1D4E89", "#81C3D7", "#D9E8F5"]} size={90} />
             <div style={{ textAlign: 'center' }}>
-              <div style={{ marginBottom: 6 }}><MoonLogo size={28} showText textColor={DS.ink} /></div>
+              <div style={{ marginBottom: 6 }}><MoonLogo size={28} showText textColor={DS.ink} animated /></div>
               <div style={{ fontSize: 13, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
             <div style={{ width: '100%', maxWidth: 480 }}>
-              <ChatComposer enableSideChat={false} canvasModeCommand={canvasModeCommand} />
+              <ChatComposer enableSideChat={false} canvasModeCommand={canvasModeCommand} shortcutsEnabled={showMobile && !shortcutHelpOpen} />
             </div>
             {streamError && <AgentStreamErrorNotice message={streamError} />}
             {/* 快捷提示 chips（手机端） */}
@@ -1031,7 +1092,7 @@ export function ChatPage() {
               ref={mobileScrollRef}
               onScroll={handleThreadScroll}
               className="chat-thread-scroll"
-              style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'white' }}
+              style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--color-canvas)' }}
             >
               <div
                 key={activeConversationId ?? 'new-conversation'}
@@ -1179,6 +1240,7 @@ export function ChatPage() {
                   canvasModeCommand={canvasModeCommand}
                   compact={compactComposer}
                   onCollapsedChange={setComposerCollapsed}
+                  shortcutsEnabled={showMobile && !shortcutHelpOpen}
                 />
               </div>
             </div>
@@ -1192,7 +1254,7 @@ export function ChatPage() {
     <div
       className={`chat-page-shell${canvasTechActive ? ' is-canvas-tech' : ''}`}
       data-canvas-mode={canvasTechActive ? 'true' : undefined}
-      style={{ height: '100dvh', display: showMobile ? 'none' : 'flex', background: 'white', overflow: 'hidden', position: 'relative' }}
+      style={{ height: '100dvh', display: showMobile ? 'none' : 'flex', background: 'var(--color-canvas)', overflow: 'hidden', position: 'relative' }}
     >
       <CanvasTechAtmosphere active={canvasTechActive} />
       {/* ── 会话栏（可收起：展开=完整列表，收起=48px 图标 rail，仿 DeepSeek）── */}
@@ -1216,7 +1278,7 @@ export function ChatPage() {
                       style={railIconBtn}
                       className="chat-icon-button"
                       {...railHover}
-                    ><Moon size={18} strokeWidth={1.8} /></button>
+                    ><MoonLogo variant="mark" size={20} tone="blue" /></button>
                   </Tooltip>
                   <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
                     <Tooltip side="right" label={canvasPhase === 'natural' ? (currentProject?.name ?? '选择项目') : '请先离开画布编辑模式'}>
@@ -1280,11 +1342,12 @@ export function ChatPage() {
                   headerRight={
                     <TooltipGroup>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                      <Tooltip side="bottom" label={searchOpen ? '关闭搜索' : '搜索对话'}>
+                      <Tooltip side="bottom" shortcut="Ctrl/Cmd+F" label={searchOpen ? '关闭搜索' : '搜索对话'}>
                       <button
                         onClick={() => setSearchOpen((value) => !value)}
                         aria-label={searchOpen ? '关闭搜索' : '搜索对话'}
                         aria-expanded={searchOpen}
+                        aria-keyshortcuts="Control+F Meta+F"
                         className="chat-icon-button"
                         style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1300,6 +1363,23 @@ export function ChatPage() {
                         </span>
                       </button>
                       </Tooltip>
+                      <Tooltip side="bottom" shortcut="Ctrl/Cmd+/" label="键盘快捷键">
+                      <button
+                        onClick={() => setShortcutHelpOpen(true)}
+                        aria-label="键盘快捷键"
+                        aria-keyshortcuts="Control+/ Meta+/"
+                        className="chat-icon-button"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer',
+                          color: 'var(--color-muted)', borderRadius: 8,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                      >
+                        <Keyboard size={15} strokeWidth={1.8} />
+                      </button>
+                      </Tooltip>
                     </div>
                     </TooltipGroup>
                   }
@@ -1313,16 +1393,17 @@ export function ChatPage() {
                           onMouseDown={(e) => e.stopPropagation()}
                           aria-label={canvasPhase === 'natural' ? '切换项目' : '请先离开画布编辑模式'}
                           style={{
-                            width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-                            border: 'none', borderRadius: 10, background: 'transparent',
-                            padding: '0 12px', height: 40, fontSize: 15,
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 7,
+                            border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white',
+                            padding: '0 10px', height: 36, fontSize: 13, fontWeight: 500,
                             color: DS.ink, cursor: canvasPhase === 'natural' ? 'pointer' : 'not-allowed',
                             opacity: canvasPhase === 'natural' ? 1 : 0.5,
+                            boxShadow: 'var(--shadow-xs)',
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-subtle)'; e.currentTarget.style.border = '1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-hairline))'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; e.currentTarget.style.border = '1px solid var(--color-hairline)'; }}
                         >
-                          <span style={{ fontSize: 15 }}><FolderKanban size={15} strokeWidth={1.8} /></span>
+                          <span style={{ color: 'var(--color-muted)' }}><FolderKanban size={14} strokeWidth={1.8} /></span>
                           <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {currentProject?.name ?? '选择项目'}
                           </span>
@@ -1461,7 +1542,7 @@ export function ChatPage() {
         <ChatDockShell
           active={dockMode === 'docked' && !embed}
           presentation={dockPresentation}
-          title={currentTitle}
+          title={activeConversation ? currentTitle : 'Moon 智能体'}
           streaming={streaming}
           onOpen={() => setDockPresentation('open')}
           onCollapse={() => setDockPresentation('pill')}
@@ -1483,7 +1564,7 @@ export function ChatPage() {
               <button
                 onClick={() => setEmbedConvOpen(true)}
                 style={{ position: 'absolute', top: 8, left: 8, border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3 }}
-              ><Moon size={12} strokeWidth={1.8} /> 会话</button>
+              ><MoonLogo variant="mark" size={14} tone="blue" /> 会话</button>
             )}
             {embed && canvasEditContext && !canvasEditLocked && (
               <div style={{ position: 'absolute', top: 8, right: 8 }}>
@@ -1494,11 +1575,11 @@ export function ChatPage() {
               <>
                 <LiveOrb
                   variant="webgl"
-                  colors={["#1D4E89", "#81C3D7", "#D9E8F5"]}
-                  size={120}
+                  colors={["#4D6BFE", "#7C93FF", "#DDE4FF"]}
+                  size={112}
                 />
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ marginBottom: 8 }}><MoonLogo size={36} showText textColor={DS.ink} /></div>
+                  <div style={{ marginBottom: 8 }}><MoonLogo size={36} showText textColor={DS.ink} animated /></div>
                   <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
                 </div>
               </>
@@ -1507,6 +1588,7 @@ export function ChatPage() {
               enableSideChat={sideChatCommandEnabled}
               canvasModeCommand={canvasModeCommand}
               docked={dockMode === 'docked'}
+              shortcutsEnabled={!showMobile && !shortcutHelpOpen}
               onViewConversation={dockMode === 'docked'
                 ? () => setDockPresentation('history')
                 : undefined}
@@ -1526,8 +1608,8 @@ export function ChatPage() {
                     background: 'white', fontSize: 13, color: DS.textSecondary, cursor: 'pointer',
                     transition: 'border-color 0.15s, color 0.15s',
                   }}
-                  onMouseEnter={(e) => { const el = e.currentTarget; el.style.borderColor = DS.brand; el.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.borderColor = DS.border; el.style.color = DS.textSecondary; }}
+                  onMouseEnter={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.brand; el.style.color = DS.brand; }}
+                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.border; el.style.color = DS.textSecondary; }}
                 >{t}</button>
               ))}
             </div>
@@ -1537,9 +1619,12 @@ export function ChatPage() {
           <>
             {/* 头部：会话名称 + 操作（embed 小窗内收紧字号与留白） */}
             <div style={{
-              padding: embed ? '8px 12px' : '14px 28px', borderBottom: `1px solid ${DS.border}`,
-              display: dockMode === 'docked' || sideChatMode ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+              paddingTop: embed ? 8 : 12,
+              paddingBottom: embed ? 8 : 12,
+              paddingLeft: embed ? 12 : 24,
               paddingRight: !embed ? desktopRightReserve + 16 : 12,
+              borderBottom: `1px solid ${DS.border}`,
+              display: dockMode === 'docked' || sideChatMode ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
               transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
@@ -1547,7 +1632,7 @@ export function ChatPage() {
                   <button
                     onClick={() => setEmbedConvOpen(true)}
                     style={{ border: 'none', background: 'transparent', color: DS.textSecondary, fontSize: 12, cursor: 'pointer', padding: '4px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}
-                  ><Moon size={12} strokeWidth={1.8} /> 会话</button>
+                  ><MoonLogo variant="mark" size={14} tone="blue" /> 会话</button>
                 )}
                 {editingTitle ? (
                   <input
@@ -1560,7 +1645,7 @@ export function ChatPage() {
                       else if (e.key === 'Escape') cancelTitleEdit();
                     }}
                     style={{
-                      fontSize: embed ? 13 : 18, fontWeight: 600, color: DS.ink, minWidth: 0,
+                      fontSize: embed ? 13 : 16, fontWeight: 600, color: DS.ink, minWidth: 0,
                       border: `1px solid ${DS.brand}`, borderRadius: 8, padding: '2px 8px',
                       outline: 'none', background: 'white', boxSizing: 'border-box', fontFamily: 'inherit',
                     }}
@@ -1579,7 +1664,7 @@ export function ChatPage() {
                     onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <span style={{ fontSize: embed ? 13 : 18, fontWeight: 600, color: DS.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ fontSize: embed ? 13 : 16, fontWeight: 600, color: DS.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {currentTitle}
                     </span>
                   </button>
@@ -1615,7 +1700,7 @@ export function ChatPage() {
                 display: dockMode === 'docked' && dockPresentation === 'open' ? 'none' : 'block',
                 overflowY: 'auto',
                 overflowX: 'hidden',
-                background: 'white',
+                background: 'var(--color-canvas)',
                 paddingRight: !embed ? desktopRightReserve : 0,
                 transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
@@ -1763,8 +1848,8 @@ export function ChatPage() {
                     fontWeight: 500,
                     whiteSpace: 'nowrap',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.border = '1px solid var(--color-primary)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.border = '1px solid var(--color-hairline)'; }}
                 >
                   <span>回到底部</span>
                   <ChevronsDown size={15} strokeWidth={2} />
@@ -1783,6 +1868,7 @@ export function ChatPage() {
                   forceExpanded={dragOutsideSidebar}
                   onCollapsedChange={setComposerCollapsed}
                   docked={dockMode === 'docked'}
+                  shortcutsEnabled={!showMobile && !shortcutHelpOpen}
                   onViewConversation={dockMode === 'docked'
                     ? () => setDockPresentation('history')
                     : undefined}
@@ -1833,6 +1919,7 @@ export function ChatPage() {
       onClose={() => setSearchOpen(false)}
       onSelectConversation={(id) => { void useAgentStore.getState().selectConversation(id); }}
     />
+    <ShortcutHelpDialog open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
     </>
     </ChatAppsProvider>
   );
@@ -1849,7 +1936,7 @@ function CanvasModeExitButton() {
       disabled={canvasExitPending}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
-        border: '1px solid rgba(65,118,230,0.25)', background: 'rgba(65,118,230,0.08)',
+        border: '1px solid color-mix(in srgb, var(--color-primary) 25%, transparent)', background: 'color-mix(in srgb, var(--color-primary) 8%, transparent)',
         color: DS.brand, borderRadius: 8, padding: '5px 9px', fontSize: 12,
         fontWeight: 600, cursor: canvasExitPending ? 'not-allowed' : 'pointer',
         whiteSpace: 'nowrap', opacity: canvasExitPending ? 0.55 : 1,

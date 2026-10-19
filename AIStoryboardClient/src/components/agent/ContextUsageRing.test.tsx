@@ -42,13 +42,13 @@ describe('ContextUsageRing', () => {
     const strokeOf = () =>
       screen.getByRole('meter').querySelectorAll('circle')[1]?.getAttribute('stroke');
     const { rerender } = render(<ContextUsageRing usedTokens={10_000} limitTokens={128_000} />);
-    expect(strokeOf()).toBe('rgb(65, 118, 230)');
+    expect(strokeOf()).toBe('var(--color-primary)');
 
     rerender(<ContextUsageRing usedTokens={100_000} limitTokens={128_000} />);
-    expect(strokeOf()).toBe('rgb(212, 160, 23)');
+    expect(strokeOf()).toBe('var(--color-warning)');
 
     rerender(<ContextUsageRing usedTokens={124_000} limitTokens={128_000} />);
-    expect(strokeOf()).toBe('rgb(217, 45, 32)');
+    expect(strokeOf()).toBe('var(--color-error)');
   });
 
   it('calls onToggle when the clickable ring is activated', () => {

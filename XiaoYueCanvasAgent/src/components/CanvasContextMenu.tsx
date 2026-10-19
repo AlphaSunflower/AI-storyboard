@@ -70,6 +70,14 @@ interface CanvasContextMenuProps {
   onPaste: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  /** 把当前多选节点合并成一个分组（frame） */
+  onCreateGroup?: () => void;
+  /** 选中某个分组内的全部节点 */
+  onSelectGroup?: (groupId: string) => void;
+  /** 解散某个分组（节点保留） */
+  onUngroupGroup?: (groupId: string) => void;
+  /** 执行某个分组（分组成员 + 上游依赖） */
+  onRunGroup?: (groupId: string) => void;
   onSaveToLibrary: () => void;
   onFlattenHistory: () => void;
   onDownload: () => void;
@@ -145,6 +153,18 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       <MenuItem shortcut="Ctrl C" onSelect={run(props.onCopy)}>复制</MenuItem>
       <MenuItem disabled={!props.canPaste} shortcut="Ctrl V" onSelect={run(props.onPaste)}>粘贴</MenuItem>
       <MenuItem onSelect={run(props.onDuplicate)}>副本</MenuItem>
+      {target.node.data.groupId && (props.onSelectGroup || props.onUngroupGroup || props.onRunGroup) && <>
+        <Separator />
+        {props.onRunGroup && (
+          <MenuItem onSelect={run(() => props.onRunGroup!(String(target.node.data.groupId)))}>执行分组</MenuItem>
+        )}
+        {props.onSelectGroup && (
+          <MenuItem onSelect={run(() => props.onSelectGroup!(String(target.node.data.groupId)))}>选中所在分组</MenuItem>
+        )}
+        {props.onUngroupGroup && (
+          <MenuItem onSelect={run(() => props.onUngroupGroup!(String(target.node.data.groupId)))}>解散分组</MenuItem>
+        )}
+      </>}
       <Separator />
       <MenuItem onSelect={run(props.onLayout)}>整理编排</MenuItem>
       <Separator />
@@ -161,6 +181,8 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       <MenuItem shortcut="Ctrl C" onSelect={run(props.onCopy)}>复制</MenuItem>
       <MenuItem shortcut="Ctrl X" onSelect={run(props.onCut)}>剪切</MenuItem>
       <Separator />
+      {props.onCreateGroup && <MenuItem shortcut="Ctrl G" onSelect={run(props.onCreateGroup)}>创建分组</MenuItem>}
+      {props.onCreateGroup && <Separator />}
       <MenuItem onSelect={run(props.onLayout)}>整理编排</MenuItem>
       <Separator />
       <MenuItem shortcut="Ctrl D / Del" onSelect={run(props.onDelete)}>删除</MenuItem>

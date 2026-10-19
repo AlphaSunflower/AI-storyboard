@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { AgentReasoning, AgentTraceEvent } from '../../api/agent';
 import { AgentTraceTimeline } from './AgentTraceTimeline';
 import { usePresence } from '../../hooks/usePresence';
+import { useWorkStepDisplay } from '../../stores/accountSettingsStore';
 import { agentChatTokens as DS } from './agentChatTokens';
 import LatticeLoader from '../ui/LatticeLoader';
 
@@ -25,8 +26,10 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
   streaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const display = useWorkStepDisplay();
   const panelPresence = usePresence(expanded, 220);
-  const hasContent = !!reasoning || (agentTrace && agentTrace.length > 0);
+  const hasContent = !!reasoning
+    || (display !== 'thinking' && !!agentTrace && agentTrace.length > 0);
   useEffect(() => {
     setExpanded(!!streaming);
   }, [streaming]);
@@ -109,7 +112,9 @@ export function ReasoningPanel({ reasoning, agentTrace, streaming }: {
                   </div>
                 </div>
               )}
-              {agentTrace && agentTrace.length > 0 && <AgentTraceTimeline events={agentTrace} />}
+              {display !== 'thinking' && agentTrace && agentTrace.length > 0 && (
+                <AgentTraceTimeline events={agentTrace} />
+              )}
             </div>
           </div>
         </div>

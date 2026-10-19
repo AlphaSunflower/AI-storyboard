@@ -50,6 +50,7 @@ public class AdminChannelController {
 
     private ChannelVO toVO(Channel e) {
         return new ChannelVO(e.getId(), e.getName(), e.getType(), e.getBaseUrl(), e.getModels(),
-                e.getEnabled(), e.getPriority(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getEnabled(), e.getPriority(), e.getWeight(), e.getTimeoutMs(), e.getMaxRetries(),
+                e.getLastError(), e.getLastCheckedAt(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }

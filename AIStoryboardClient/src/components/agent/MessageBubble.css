@@ -101,7 +101,7 @@
 }
 
 .chat-live-text tbody tr:nth-child(even) {
-  background: rgba(204, 120, 92, 0.025);
+  background: color-mix(in srgb, var(--color-primary) 2.5%, transparent);
 }
 
 /* Moon 助手消息 Markdown 排版：标题、列表、引用、分割线、行内代码、代码块、高亮 */

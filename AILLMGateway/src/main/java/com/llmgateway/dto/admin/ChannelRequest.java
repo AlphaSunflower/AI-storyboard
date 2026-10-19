@@ -15,4 +15,10 @@ public class ChannelRequest {
     private String models;
     private Boolean enabled;
     private Integer priority;
+    /** 同优先级负载权重（默认 1） */
+    private Integer weight;
+    /** 单请求超时覆盖（毫秒，空=全局默认） */
+    private Integer timeoutMs;
+    /** 渠道级额外重试次数（默认 0） */
+    private Integer maxRetries;
 }

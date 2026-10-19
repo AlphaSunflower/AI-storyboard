@@ -19,10 +19,11 @@ import {
   type CanvasSessionInfo,
   type ConfirmResultInfo,
   type ClearContextResult,
-  DEFAULT_AGENT_APPROVAL_MODE,
 } from '../api/agent';
 import { useProjectStore } from './projectStore';
 import { notify } from './toastStore';
+import { useSendQueueStore } from './sendQueueStore';
+import { useAccountSettingsStore } from './accountSettingsStore';
 import { useChatAnnotationStore } from './chatAnnotationStore';
 import { rememberDocumentSource } from '../lib/documentPreview';
 import { activeReferences } from '../lib/mentionReferences';
@@ -317,6 +318,17 @@ export class AgentTurnEventSequencer {
 export const TURN_GAP_TIMEOUT_MS = 2_500;
 export const TURN_GAP_MAX_ATTEMPTS = 3;
 export const TURN_GAP_BACKOFF_FACTOR = 2;
+
+/**
+ * 新会话的默认审批模式以账号级「全局权限」为准。
+ *
+ * 不能再用 DEFAULT_AGENT_APPROVAL_MODE：用户在设置页选了完全访问后，
+ * newConversation / 删除当前会话 / 切换会话的回退值都会把 pendingApprovalMode
+ * 重新打回方案批准，表现为「设置没生效」。
+ */
+function defaultApprovalMode(): AgentApprovalMode {
+  return useAccountSettingsStore.getState().settings.defaultApprovalMode;
+}
 
 /** 第 n 次（从 0 计）缺口恢复的等待时长：2500 → 5000 → 10000 ms。 */
 export function turnGapTimeoutForAttempt(attempt: number): number {
@@ -3140,7 +3152,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   conversations: [],
   activeConversationId: null,
-  pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
+  pendingApprovalMode: defaultApprovalMode(),
   generationPreferences: loadGenerationPreferences(),
   updateGenerationPreferences: (updater) => {
     set((state) => {
@@ -3175,7 +3187,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     clearCanvasEditContext();
     set({
       activeConversationId: null,
-      pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
+      pendingApprovalMode: defaultApprovalMode(),
       canvasEditContext: null,
       canvasBinding: null,
       canvasBindingStatus: '',
@@ -3281,6 +3293,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     if (!options?.silent) notify({ title: '已删除对话', description: title ? `「${title}」` : undefined });
     cancelConversationTitleRefresh(id);
+    useSendQueueStore.getState().clear(id);
     set((s) => {
       const g = { ...s.generating };
       delete g[id];
@@ -3293,7 +3306,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return {
         conversations: s.conversations.filter((c) => c.id !== id),
         activeConversationId: active,
-        pendingApprovalMode: isActive ? DEFAULT_AGENT_APPROVAL_MODE : s.pendingApprovalMode,
+        pendingApprovalMode: isActive ? defaultApprovalMode() : s.pendingApprovalMode,
         generating: g,
         streaming: generationInProgress(gview),
         workflowHint: generationHint(gview),
@@ -3395,7 +3408,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return {
         activeConversationId: id,
         pendingApprovalMode: s.conversations.find((conversation) => conversation.id === id)
-          ?.approvalMode ?? DEFAULT_AGENT_APPROVAL_MODE,
+          ?.approvalMode ?? defaultApprovalMode(),
         messages: [],
         streaming: generationInProgress(g),
         workflowHint: generationHint(g),
@@ -4976,6 +4989,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                 resultAssetId: t.assetId,
                 resultUrl: t.url,
                 mediaType: 'VIDEO',
+                metadata: get().activeConversationId
+                  ? { conversationId: get().activeConversationId }
+                  : undefined,
               }).catch(() => undefined);
               sessionStorage.removeItem('moon.activeGroupId');
             }
@@ -5325,7 +5341,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     videoPollToken += 1;
     clearCanvasEditContext();
     set({ messages: [], generating: {}, streaming: false, waitingHumanInput: null,
-       pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
+       pendingApprovalMode: defaultApprovalMode(),
        waitingVideoPlan: null, hitlVideoPlan: {}, streamError: null, workflowHint: '', assets: null, refImageUrls: [],
        pendingAttachments: [], pendingReferences: [], pickedReferenceVideos: [], pickedReferenceAudios: [],
        pendingAssistantId: null,

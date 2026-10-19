@@ -26,8 +26,19 @@ const actionLabel: Record<string, string> = {
   'agent.request': '设计助理',
 };
 
-export const TaskQueuePanel = memo(function TaskQueuePanel() {
-  const [open, setOpen] = useState(false);
+export interface TaskQueuePanelProps {
+  /** 受控开合：画布快捷键 Q 与右上角按钮共用同一状态；不传时保持面板自管理。 */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export const TaskQueuePanel = memo(function TaskQueuePanel({ open: controlledOpen, onOpenChange }: TaskQueuePanelProps = {}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => {
+    if (onOpenChange) onOpenChange(next);
+    else setInternalOpen(next);
+  };
   const panel = usePresence(open, { duration: 140 });
   const [notice, setNotice] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
@@ -68,7 +79,8 @@ export const TaskQueuePanel = memo(function TaskQueuePanel() {
   return (
     <div ref={rootRef} className="task-queue-shell">
       <button className="canvas-quick-action" aria-label="任务队列" aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}>
+        title="任务队列（Q）"
+        onClick={() => setOpen(!open)}>
         <ListTodo size={18} />
         {active.length > 0 && <span className="canvas-quick-action__badge">{active.length}</span>}
       </button>

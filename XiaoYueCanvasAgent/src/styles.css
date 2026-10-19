@@ -681,10 +681,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
    这条要放在 min-width 里而不是靠 max-width 覆盖——:hover 的特异性比
    移动端那条 `.canvas-tool-island { width: … }` 高，放外层会在触屏上误触发展开。 */
 @media (min-width: 741px) {
-  /* 134 = 左栏内边距 18 + 按钮内边距 16 + 图标 24 + 间隙 12 + 最长名称（分镜拆解）≈ 58。
-     这个值是算出来的，不是拍的：给多了名称右边就会留一大片死白。 */
+  /* 158 = 左栏内边距 18 + 按钮内边距 16 + 图标 24 + 间隙 12 + 最长名称（分镜拆解）≈ 58
+     + 键位徽标 ≈ 30。这个值是算出来的，不是拍的：给多了名称右边就会留一大片死白。 */
   .canvas-tool-island:hover,
-  .canvas-tool-island:focus-within { width: 134px; }
+  .canvas-tool-island:focus-within { width: 158px; }
 }
 .canvas-tool-island::-webkit-scrollbar { width: 6px; }
 .canvas-tool-island::-webkit-scrollbar-track { background: transparent; }
@@ -726,6 +726,22 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 }
 .canvas-tool-island:hover .tool-rail-label,
 .canvas-tool-island:focus-within .tool-rail-label { opacity: 1; translate: 0 0; }
+.tool-rail-key {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 5px;
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.52);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  opacity: 0;
+  transition: opacity 160ms var(--motion-ease) 40ms;
+}
+.canvas-tool-island:hover .tool-rail-key,
+.canvas-tool-island:focus-within .tool-rail-key { opacity: 1; }
 .tool-rail-divider { flex: 0 0 auto; height: 1px; margin: 6px 8px; background: rgba(255,255,255,.12); }
 
 .canvas-view-bar {
@@ -987,6 +1003,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
   /* 窄屏左栏横过来当底部工具条用：名称展开会把 10 个按钮撑到 440px 以上，
      所以这里不展开，靠 aria-label / title 兜底。 */
   .tool-rail-label { display: none; }
+  .tool-rail-key { display: none; }
   .tool-rail-divider { width: 1px; height: auto; margin: 4px 2px; }
   /* 名称收起来了，按钮就没有左侧内容要对齐：去掉左右内边距让图标在 42px 里居中，
      否则 42 - 2×10 只剩 22px，正好等于图标尺寸，改一点点就会被裁。 */
@@ -1250,6 +1267,104 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px
 .canvas-item-menu > button:hover { background: rgba(244,244,245,.1); color: var(--acid); }
 .canvas-item-menu > .canvas-menu-danger { color: #afafaf; }
 .canvas-item-menu > .canvas-menu-danger:hover { background: rgba(145,145,145,.1); color: #c0c0c0; }
+
+.canvas-frame-menu {
+  min-width: 168px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.canvas-frame-menu__label {
+  padding: 5px 9px 3px;
+  color: rgba(244,244,245,.42);
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.canvas-frame-menu__item {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  border-radius: 7px 13px 7px 7px;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  outline: 0;
+}
+
+.canvas-frame-menu__item[data-highlighted] {
+  background: rgba(244,244,245,.1);
+  color: var(--acid);
+}
+
+.canvas-frame-menu__item.is-danger {
+  color: #afafaf;
+}
+
+.canvas-frame-menu__item.is-danger[data-highlighted] {
+  background: rgba(145,145,145,.12);
+  color: #d0d0d0;
+}
+
+.canvas-frame-context-menu {
+  position: fixed;
+  z-index: 240;
+  min-width: 184px;
+  padding: 6px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px 18px 10px 10px;
+  background: rgba(32,32,32,.98);
+  color: #ececec;
+  box-shadow: 0 18px 44px rgba(0,0,0,.48);
+  animation: project-menu-in .16s ease both;
+}
+
+.canvas-frame-context-menu__title {
+  padding: 5px 9px 4px;
+  overflow: hidden;
+  color: rgba(244,244,245,.42);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-frame-context-menu__sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255,255,255,.08);
+}
+
+.canvas-frame-context-menu button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px 13px 7px 7px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.canvas-frame-context-menu button:hover {
+  background: rgba(244,244,245,.1);
+  color: var(--acid);
+}
+
+.canvas-frame-context-menu button.is-danger {
+  color: #afafaf;
+}
+
+.canvas-frame-context-menu button.is-danger:hover {
+  background: rgba(145,145,145,.12);
+  color: #d0d0d0;
+}
 
 .project-dialog-backdrop { position: fixed; inset: 0; z-index: 220; display: grid; place-items: center; padding: 20px; background: rgba(8,8,8,.72); backdrop-filter: blur(5px); }
 .project-dialog {
@@ -2788,14 +2903,6 @@ textarea.text-node-editor::placeholder,
 .generation-records-filter select { height: 30px; flex: 1; padding: 0 8px; border: 1px solid rgba(244,244,245,.14); border-radius: 6px; background: rgba(255,255,255,.04); color: #f4f4f5; }
 .generation-record-list { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; }
 .generation-record-list > p { color: rgba(244,244,245,.45); font-size: 11px; }
-.generation-record-card { padding: 9px; border: 1px solid rgba(244,244,245,.1); border-radius: 8px; background: rgba(255,255,255,.03); }
-.generation-record-card header { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
-.generation-record-card header span { color: var(--acid); }
-.generation-record-card p { margin: 7px 0; color: #f4f4f5; font-size: 11px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.generation-record-card dl { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; margin: 0; }
-.generation-record-card dl div { min-width: 0; }
-.generation-record-card dt { color: rgba(244,244,245,.38); font-size: 9px; }
-.generation-record-card dd { margin: 0; color: rgba(244,244,245,.72); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .media-node .node-card__inspector {
   width: 28px;
@@ -2861,7 +2968,6 @@ textarea.text-node-editor::placeholder,
   background: rgba(20,20,20,.92);
   color: var(--acid);
 }
-.generation-record-card small { display: block; margin-top: 6px; color: #bcbcbc; font-size: 10px; }
 
 /* React Flow standard controls, minimap, toolbars and resize handles. */
 .react-flow__controls.canvas-controls {
@@ -3001,6 +3107,271 @@ textarea.text-node-editor::placeholder,
 .canvas-selection-actions button.is-danger:hover {
   background: rgba(145,145,145,.14);
   color: #a5a5a5;
+}
+
+/* ── 分组框（frame）：画在节点下面，只有标题条接指针事件 ───────────────────── */
+.canvas-frame {
+  position: absolute;
+  z-index: -1;
+  border: 1px dashed rgba(244,244,245,.2);
+  border-radius: 14px;
+  background: rgba(244,244,245,.016);
+  pointer-events: none;
+  transition: border-color .15s ease,background .15s ease;
+}
+
+.canvas-frame.is-selected {
+  border-color: rgba(244,244,245,.42);
+  background: rgba(244,244,245,.034);
+}
+
+.canvas-frame__head {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 11px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(244,244,245,.1);
+  border-radius: 13px 13px 0 0;
+  background: rgba(20,20,20,.62);
+  color: rgba(244,244,245,.8);
+  cursor: grab;
+  pointer-events: auto;
+  user-select: none;
+  /* 画布缩小时标题条反向放大（上限 3 倍），保持屏幕上可读；同时按屏幕距离上移，
+     避免压住节点外置标题。 */
+  transform: translateY(calc(min(0px, 48px - 26px * var(--inverse-zoom, 1)))) scale(clamp(1, var(--inverse-zoom, 1), 3));
+  transform-origin: 0 100%;
+}
+
+.canvas-frame__head:active {
+  cursor: grabbing;
+}
+
+.canvas-frame__head:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: -2px;
+}
+
+.canvas-frame.is-collapsed {
+  border-style: solid;
+  border-color: rgba(244,244,245,.26);
+  background: rgba(22,22,23,.9);
+  box-shadow: 0 12px 30px rgba(0,0,0,.34);
+  /* 折叠条整体反向缩放：缩到 1/3 也还是屏幕上一个可读的条。 */
+  transform: scale(clamp(1, var(--inverse-zoom, 1), 3));
+  transform-origin: 0 0;
+}
+
+.canvas-frame.is-collapsed .canvas-frame__head {
+  border-bottom-color: transparent;
+  border-radius: 13px;
+  /* 折叠条整体已经反向缩放了，标题条不再叠一层。 */
+  transform: none;
+  transform-origin: 0 0;
+}
+
+.canvas-frame.is-collapsed .canvas-frame__dot,
+.canvas-frame.is-collapsed .canvas-frame__count {
+  display: none;
+}
+
+.canvas-frame.is-collapsed .canvas-frame__head {
+  gap: 6px;
+  padding: 0 7px 0 8px;
+}
+
+.canvas-frame.is-collapsed .canvas-frame__run-text {
+  display: none;
+}
+
+.canvas-frame__collapse {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(244,244,245,.58);
+  cursor: pointer;
+}
+
+.canvas-frame__collapse:hover {
+  background: rgba(244,244,245,.12);
+  color: #fff;
+}
+
+.canvas-frame__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--acid);
+}
+
+.canvas-frame__title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-frame__count {
+  margin-left: auto;
+  color: rgba(244,244,245,.42);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.canvas-frame__progress {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 0 7px;
+  border: 1px solid rgba(244,244,245,.16);
+  border-radius: 999px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.canvas-frame__progress.is-running {
+  border-color: rgba(244,244,245,.3);
+  background: rgba(244,244,245,.1);
+  color: #f4f4f5;
+}
+
+.canvas-frame__progress.is-failed {
+  border-color: rgba(145,145,145,.26);
+  background: rgba(145,145,145,.09);
+  color: #c2c2c2;
+}
+
+.canvas-frame__progress.is-done {
+  border-color: rgba(238,238,238,.14);
+  background: rgba(238,238,238,.05);
+  color: rgba(238,238,238,.64);
+}
+
+.canvas-frame__results {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.canvas-frame__result {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(244,244,245,.18);
+  border-radius: 5px;
+  background: rgba(255,255,255,.05);
+  color: rgba(244,244,245,.58);
+  cursor: zoom-in;
+}
+
+.canvas-frame__result:hover {
+  border-color: rgba(244,244,245,.42);
+}
+
+.canvas-frame__result.is-placeholder {
+  cursor: default;
+}
+
+.canvas-frame__result img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.canvas-frame__result-more {
+  padding: 0 2px;
+  color: rgba(244,244,245,.46);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.canvas-frame__run {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  border: 1px solid rgba(244,244,245,.16);
+  border-radius: 7px;
+  background: rgba(244,244,245,.06);
+  color: rgba(244,244,245,.82);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color .14s ease,background .14s ease,color .14s ease;
+}
+
+.canvas-frame__run:hover {
+  border-color: rgba(244,244,245,.34);
+  background: rgba(244,244,245,.14);
+  color: #fff;
+}
+
+.canvas-frame__actions {
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity .14s ease;
+}
+
+.canvas-frame:hover .canvas-frame__actions,
+.canvas-frame:focus-within .canvas-frame__actions,
+.canvas-frame.is-selected .canvas-frame__actions {
+  opacity: 1;
+}
+
+.canvas-frame__action {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(244,244,245,.56);
+  cursor: pointer;
+}
+
+.canvas-frame__action:hover {
+  background: rgba(244,244,245,.12);
+  color: #fff;
+}
+
+.canvas-frame__rename {
+  width: 160px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid rgba(244,244,245,.3);
+  border-radius: 6px;
+  outline: 0;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 12px;
+}
+
+.canvas-frame__rename:focus {
+  border-color: var(--acid);
 }
 
 .react-flow__node-toolbar.node-add-toolbar {
@@ -3301,11 +3672,12 @@ textarea.text-node-editor::placeholder,
 
 .generation-records-panel {
   /* 入口在右上角（生成记录按钮）：抽屉就挂在右上角按钮下方，
-     宽度/最大高度按画布区算——画布区 overflow:hidden，用 100vw 会在侧栏展开时被裁。 */
+     宽度/最大高度按画布区算——画布区 overflow:hidden，用 100vw 会在侧栏展开时被裁。
+     抽屉只放列表；详情点开走居中弹窗（.generation-record-dialog），不再和列表分宽度。 */
   left: auto;
   right: 15px;
   top: 70px;
-  width: min(440px, calc(100% - 30px));
+  width: min(460px, calc(100% - 30px));
   max-height: min(760px, calc(100dvh - 92px));
   padding: 0;
   display: flex;
@@ -3317,10 +3689,6 @@ textarea.text-node-editor::placeholder,
   color: #f4f4f5;
   box-shadow: 0 26px 76px rgba(0,0,0,.52), inset 0 .5px 0 rgba(255,255,255,.06);
   backdrop-filter: blur(20px);
-}
-
-.generation-records-panel.is-detail-open {
-  width: min(820px, calc(100% - 30px));
 }
 
 .generation-records-panel .drawer-heading {
@@ -3373,20 +3741,13 @@ textarea.text-node-editor::placeholder,
   border-color: rgba(244,244,245,.25);
 }
 
-.generation-records-body {
+.generation-record-list {
   flex: 1 1 auto;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0,1fr);
-}
-
-.generation-records-panel.is-detail-open .generation-records-body {
-  grid-template-columns: minmax(235px,.36fr) minmax(0,.64fr);
-}
-
-.generation-record-list {
-  min-height: 0;
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(244,244,245,.28) transparent;
@@ -3418,81 +3779,145 @@ textarea.text-node-editor::placeholder,
   line-height: 1.55;
 }
 
-.generation-record-card {
+/* 列表行：缩略图 + 标题/状态 + 提示词 + 元信息。详情不在这里展开，点行开弹窗。 */
+.generation-record-row {
   width: 100%;
   min-width: 0;
   display: grid;
-  gap: 7px;
-  padding: 11px;
-  border: 1px solid rgba(238,238,238,.09);
-  border-radius: 11px;
-  background: rgba(255,255,255,.028);
+  grid-template-columns: 54px minmax(0,1fr) 14px;
+  align-items: start;
+  gap: 10px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
   color: #f4f4f5;
   text-align: left;
   cursor: pointer;
-  transition: border-color .14s ease,background .14s ease,transform .14s ease;
+  transition: background .14s ease,border-color .14s ease,transform .14s ease;
 }
 
-.generation-record-card + .generation-record-card {
-  margin-top: 8px;
-}
-
-.generation-record-card:hover {
-  border-color: rgba(244,244,245,.24);
+.generation-record-row:hover {
+  border-color: rgba(244,244,245,.12);
   background: rgba(244,244,245,.045);
 }
 
-.generation-record-card:active {
+.generation-record-row:active {
   transform: translateY(1px);
 }
 
-.generation-record-card.is-active {
-  border-color: rgba(244,244,245,.48);
-  background: rgba(244,244,245,.075);
-  box-shadow: inset 3px 0 0 var(--acid);
+.generation-record-row.is-active {
+  border-color: rgba(244,244,245,.2);
+  background: rgba(244,244,245,.07);
+  box-shadow: inset 2px 0 0 var(--acid);
 }
 
-.generation-record-card header,
-.generation-record-card footer {
+.generation-record-row__thumb {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(238,238,238,.12);
+  border-radius: 9px;
+  background: linear-gradient(145deg, rgba(45,45,45,.9), rgba(19,19,19,.96));
+  color: rgba(244,244,245,.58);
+}
+
+.generation-record-row__thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.generation-record-row__thumb.is-video {
+  color: rgba(214,214,214,.78);
+}
+
+.generation-record-row__thumb.is-storyboard {
+  color: rgba(214,214,214,.65);
+}
+
+.generation-record-row__body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.generation-record-row__head {
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-.video-gen-view .gen-body > * {
-  position: relative;
-  flex-shrink: 0;
-}
 
-.generation-record-card header small {
-  color: rgba(244,244,245,.58);
-  font-size: 9px;
-}
-
-.generation-record-card > strong {
+.generation-record-row__head > strong {
+  min-width: 0;
   overflow: hidden;
   color: #f4f4f5;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.generation-record-card p {
-  display: -webkit-box;
-  margin: 0;
+.generation-record-row .record-status {
+  min-height: 18px;
+  padding: 0 6px;
+  font-size: 9px;
+}
+
+.generation-record-row__prompt {
   overflow: hidden;
-  color: rgba(238,238,238,.62);
-  font-size: 10px;
+  color: rgba(238,238,238,.7);
+  font-size: 11px;
   line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-record-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.generation-record-row__meta > span {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgba(255,255,255,.035);
+  color: rgba(238,238,238,.68);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-record-row__chevron {
+  align-self: center;
+  color: rgba(244,244,245,.3);
+  transition: color .14s ease,transform .14s ease;
+}
+
+.generation-record-row:hover .generation-record-row__chevron {
+  color: var(--acid);
+  transform: translateX(1px);
+}
+
+.video-gen-view .gen-body > * {
+  position: relative;
+  flex-shrink: 0;
 }
 
 .generation-record-progress {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 8px 0 2px;
+  margin: 2px 0 0;
 }
 
 .generation-record-progress > i {
@@ -3516,24 +3941,6 @@ textarea.text-node-editor::placeholder,
   color: var(--acid);
   font: 600 9px/1 'Cascadia Mono',Consolas,monospace;
   text-align: right;
-}
-
-.generation-record-card footer {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-}
-
-.generation-record-card footer span {
-  min-width: 0;
-  max-width: 100%;
-  padding: 3px 6px;
-  overflow: hidden;
-  border-radius: 6px;
-  background: rgba(255,255,255,.035);
-  color: rgba(238,238,238,.68);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .record-status {
@@ -3580,34 +3987,128 @@ textarea.text-node-editor::placeholder,
   color: rgba(238,238,238,.64);
 }
 
-.generation-record-detail {
+/* ── 详情弹窗：居中、按窗口宽度给足阅读面 ─────────────────────────── */
+.generation-record-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  padding: max(18px, env(safe-area-inset-top)) 20px max(18px, env(safe-area-inset-bottom));
+  background: rgba(6,6,7,.72);
+  backdrop-filter: blur(7px);
+}
+
+.generation-record-dialog {
+  width: min(980px, 100%);
+  max-height: min(860px, calc(100dvh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(244,244,245,.16);
+  border-radius: 16px;
+  background: rgba(24,24,25,.985);
+  color: #f4f4f5;
+  box-shadow: 0 40px 120px rgba(0,0,0,.62), inset 0 .5px 0 rgba(255,255,255,.06);
+}
+
+.generation-record-dialog__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid rgba(244,244,245,.1);
+}
+
+.generation-record-dialog__title {
   min-width: 0;
-  padding: 16px;
+}
+
+.generation-record-dialog__title .eyebrow {
+  color: rgba(244,244,245,.52);
+}
+
+.generation-record-dialog__title h2 {
+  margin: 4px 0;
+  overflow: hidden;
+  color: #f4f4f5;
+  font-size: 20px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-record-dialog__title p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  color: rgba(238,238,238,.62);
+  font-size: 11px;
+}
+
+.generation-record-dialog__title p i {
+  color: rgba(238,238,238,.3);
+  font-style: normal;
+}
+
+.generation-record-dialog__tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.generation-record-dialog__close {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(244,244,245,.14);
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(244,244,245,.7);
+  cursor: pointer;
+}
+
+.generation-record-dialog__close:hover {
+  border-color: rgba(244,244,245,.34);
+  background: rgba(244,244,245,.08);
+  color: #fff;
+}
+
+.generation-record-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 18px 20px;
   overflow: auto;
-  border-left: 1px solid rgba(244,244,245,.1);
   scrollbar-width: thin;
   scrollbar-color: rgba(244,244,245,.28) transparent;
 }
 
-.generation-record-detail__head {
+.generation-record-detail {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0,1.4fr) minmax(280px,.75fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.generation-record-detail__main,
+.generation-record-detail__side {
+  min-width: 0;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
-  margin-bottom: 14px;
 }
 
-.generation-record-detail__head h3 {
-  margin: 5px 0 3px;
-  color: #f3f3f3;
-  font-size: 18px;
-  line-height: 1.2;
-}
-
-.generation-record-detail__head p {
-  margin: 0;
-  color: rgba(238,238,238,.66);
-  font-size: 10px;
+.generation-record-detail .record-provenance,
+.generation-record-detail .record-detail-block,
+.generation-record-detail .record-detail-error {
+  margin-top: 0;
 }
 
 .record-provenance,
@@ -3658,7 +4159,7 @@ textarea.text-node-editor::placeholder,
 
 .record-provenance__label {
   color: rgba(238,238,238,.64);
-  font: 9px/1.2 'Cascadia Mono',Consolas,monospace;
+  font: 10px/1.2 'Cascadia Mono',Consolas,monospace;
 }
 
 .record-flow-arrow {
@@ -3691,6 +4192,15 @@ textarea.text-node-editor::placeholder,
   border: 1px solid rgba(238,238,238,.1);
   border-radius: 9px;
   background: rgba(255,255,255,.03);
+}
+
+/* 弹窗里结果图给大一号，来源图收小一号：一眼分得清主次。 */
+.record-asset.is-sm {
+  width: 76px;
+}
+
+.record-asset.is-lg {
+  width: 152px;
 }
 
 .record-asset__preview {
@@ -3767,15 +4277,15 @@ textarea.text-node-editor::placeholder,
 }
 
 .record-asset figcaption strong {
-  color: rgba(238,238,238,.9);
-  font-size: 9px;
+  color: rgba(238,238,238,.92);
+  font-size: 10px;
   font-weight: 500;
 }
 
 .record-asset figcaption small {
   margin-top: 2px;
-  color: rgba(238,238,238,.54);
-  font-size: 8px;
+  color: rgba(238,238,238,.6);
+  font-size: 9px;
 }
 
 .record-node-pill {
@@ -3804,14 +4314,14 @@ textarea.text-node-editor::placeholder,
 }
 
 .record-node-pill strong {
-  color: rgba(238,238,238,.86);
-  font-size: 10px;
+  color: rgba(238,238,238,.88);
+  font-size: 11px;
 }
 
 .record-node-pill small {
   margin-top: 2px;
-  color: rgba(238,238,238,.58);
-  font-size: 8px;
+  color: rgba(238,238,238,.6);
+  font-size: 9px;
 }
 
 .record-operation {
@@ -3851,8 +4361,8 @@ textarea.text-node-editor::placeholder,
 
 .record-detail-block p {
   margin: 0;
-  color: rgba(238,238,238,.78);
-  font-size: 11px;
+  color: rgba(238,238,238,.82);
+  font-size: 12px;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3886,16 +4396,16 @@ textarea.text-node-editor::placeholder,
 
 .record-meta-grid dt,
 .record-param-grid dt {
-  color: rgba(238,238,238,.56);
-  font-size: 8px;
+  color: rgba(238,238,238,.6);
+  font-size: 9px;
 }
 
 .record-meta-grid dd,
 .record-param-grid dd {
   margin: 3px 0 0;
   overflow: hidden;
-  color: rgba(238,238,238,.9);
-  font-size: 10px;
+  color: rgba(238,238,238,.92);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3944,14 +4454,6 @@ select option {
 }
 
 @media (max-width: 900px) {
-  .generation-records-panel.is-detail-open {
-    width: min(640px, calc(100vw - 24px));
-  }
-
-  .generation-records-panel.is-detail-open .generation-records-body {
-    grid-template-columns: minmax(210px,.4fr) minmax(0,.6fr);
-  }
-
   .record-provenance__flow {
     grid-template-columns: 1fr;
   }
@@ -3960,11 +4462,19 @@ select option {
     transform: rotate(90deg);
     justify-self: center;
   }
+
+  /* 详情弹窗在窄屏落成单栏：先看提示词与链路，再往下是执行信息和参数。 */
+  .generation-record-dialog {
+    width: 100%;
+  }
+
+  .generation-record-detail {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 740px) {
-  .generation-records-panel,
-  .generation-records-panel.is-detail-open {
+  .generation-records-panel {
     left: 10px;
     right: 10px;
     top: 70px;
@@ -3972,16 +4482,30 @@ select option {
     max-height: calc(100vh - 90px);
   }
 
-  .generation-records-panel.is-detail-open .generation-records-body {
-    grid-template-columns: 1fr;
+  .generation-record-modal {
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
   }
 
-  .generation-records-panel.is-detail-open .generation-record-detail {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    border-left: 0;
-    background: rgba(27,27,27,.995);
+  .generation-record-dialog {
+    max-height: calc(100dvh - 20px);
+    border-radius: 14px;
+  }
+
+  .generation-record-dialog__bar {
+    padding: 14px 14px 12px;
+  }
+
+  .generation-record-dialog__body {
+    padding: 14px;
+  }
+
+  .generation-record-dialog__title h2 {
+    font-size: 17px;
+    white-space: normal;
+  }
+
+  .record-asset.is-lg {
+    width: calc(50% - 3px);
   }
 
   .task-queue-panel {
@@ -4218,8 +4742,7 @@ select option {
   }
 
   .floating-drawer,
-  .generation-records-panel,
-  .generation-records-panel.is-detail-open {
+  .generation-records-panel {
     left: max(10px, env(safe-area-inset-left));
     right: max(10px, env(safe-area-inset-right));
     top: max(68px, calc(env(safe-area-inset-top) + 58px));
@@ -4313,11 +4836,6 @@ select option {
 
   .generation-records-filter {
     grid-template-columns: 1fr;
-  }
-
-  .generation-records-panel.is-detail-open .generation-record-detail {
-    padding: 14px;
-    padding-top: calc(14px + env(safe-area-inset-top));
   }
 
   .record-meta-grid,
@@ -6257,14 +6775,10 @@ html[data-view-motion='back'] .view-shell { transform-origin: 50% 100%; }
 .app-shell.view-shell .canvas-quick-actions,
 .app-shell.view-shell .canvas-view-bar,
 .app-shell.view-shell .canvas-minimap { animation: chrome-in var(--motion-slow) var(--motion-ease); }
-/* 列表卡片依次进场（项目列表 / 画布列表） */
-@keyframes card-in {
-  from { opacity: 0; translate: 0 12px; }
-}
+/* 列表卡片不做逐项入场：进入项目中心是为了立刻操作，而不是看动画。 */
 .canvas-home__grid article,
 .project-home__grid article {
-  animation: card-in 320ms var(--motion-ease) backwards;
-  animation-delay: calc(var(--index, 0) * 45ms);
+  animation: none;
 }
 
 /* 开合位移挂在内层内容上而不是面板本身：面板在手机端是 inset:0，位移会让文档多出横向滚动 */
@@ -6360,6 +6874,9 @@ html[data-view-motion='back'] .view-shell { transform-origin: 50% 100%; }
   .project-dialog[data-state='closed'] { animation: presence-out var(--motion-dur) var(--motion-ease) both; }
   .project-dialog-backdrop[data-state='open'] { animation: presence-fade-in var(--motion-dur) var(--motion-ease) both; }
   .project-dialog-backdrop[data-state='closed'] { animation: presence-fade-out var(--motion-fast) var(--motion-ease) both; }
+  /* 生成记录详情：遮罩淡入 + 卡片升起（挂载即进，关闭即卸载） */
+  .generation-record-modal[data-state='open'] { animation: presence-fade-in var(--motion-dur) var(--motion-ease) both; }
+  .generation-record-dialog[data-state='open'] { animation: presence-in var(--motion-dur) var(--motion-ease) both; }
 }
 
 /* reduce：显示/隐藏退化成瞬时切换（宽度过渡、面板进场、标签页交叉淡入全部关掉），

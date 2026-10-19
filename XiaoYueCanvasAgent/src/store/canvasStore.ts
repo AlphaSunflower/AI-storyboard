@@ -23,6 +23,7 @@ import {
   type NodePort,
 } from '../canvas/graphContracts';
 import { reconcileStoryboardShots, type StoryboardShotPlan } from '../canvas/storyboardPlan';
+import { nextGroupTitle } from '../canvas/groups';
 import { relabelGeneratedResultNodes } from '../canvas/generationResultLabel';
 import { withResultSlotData } from '../canvas/resultSlots';
 
@@ -138,6 +139,20 @@ interface CanvasState {
   updateEdgeData: (edgeId: string, patch: Partial<CanvasEdge['data']>) => void;
   reorderOrderedInputs: (nodeId: string, handleId: string, orderedEdgeIds: string[]) => void;
   setNodePinned: (nodeId: string, pinned: boolean) => void;
+  /** 把一组节点合并成一个画布分组（frame）；少于 2 个节点返回 null。 */
+  groupNodes: (nodeIds: string[]) => { id: string; title: string } | null;
+  /** 解散分组：只清掉成员节点上的分组字段，不删除节点。 */
+  ungroupNodes: (groupId: string) => void;
+  /** 重命名分组：写回全部成员节点，保持同一分组标题一致。 */
+  renameGroup: (groupId: string, title: string) => void;
+  /** 折叠/展开分组：折叠时成员节点从画布隐藏，但仍在图里可执行；不写撤销栈。 */
+  toggleGroupCollapsed: (groupId: string, collapsed?: boolean) => void;
+  /** 把分组挂到另一个分组下；parentId=null 表示提升为顶层。返回 false 表示非法（成环/目标不存在）。 */
+  nestGroup: (groupId: string, parentId: string | null) => boolean;
+  /** 按 id 精确设置选中集合（分组标题点击用），不写历史、不碰 revision。 */
+  selectNodes: (nodeIds: string[]) => void;
+  /** 分组拖动中使用：只改坐标、不写历史；结束时由 beginNodeDrag/endNodeDrag 收口。 */
+  setNodePositions: (positions: Record<string, XYPosition>) => void;
   updateNodeTransient: (nodeId: string, patch: Partial<CanvasNode['data']>) => void;
   updateNodeGeometry: (nodeId: string, size: { width: number; height: number }) => void;
   copySelected: () => number;
@@ -333,12 +348,36 @@ const requireRemotePatchEdge = (entry: CanvasGraphPatchEntry): CanvasEdge => {
   return entry as unknown as CanvasEdge;
 };
 
+/** 删除节点后把指向已消失分组的 parentId 清掉，避免出现悬空的嵌套分组。 */
+const sanitizeGroupParents = (nodes: CanvasNode[]): CanvasNode[] => {
+  const groupIds = new Set(
+    nodes.map((node) => (typeof node.data.groupId === 'string' ? node.data.groupId : '')).filter(Boolean),
+  );
+  let changed = false;
+  const next = nodes.map((node) => {
+    const parent = typeof node.data.groupParentId === 'string' ? node.data.groupParentId : '';
+    if (!parent || groupIds.has(parent)) return node;
+    changed = true;
+    const data = { ...node.data };
+    delete data.groupParentId;
+    return { ...node, data };
+  });
+  return changed ? next : nodes;
+};
+
 const cloneSelection = (nodes: CanvasNode[], edges: CanvasEdge[], offset: XYPosition) => {
   const idMap = new Map<string, string>();
   const clonedNodes = nodes.map((node) => {
     const id = `${node.data.kind}-${createId()}`;
     idMap.set(node.id, id);
     const clone = structuredClone(node);
+    // 副本不继承分组：粘贴到别处却把原分组框撑大，是比“没分组”更糟的体验。
+    const data = { ...clone.data, label: `${clone.data.label} 副本` };
+    delete data.groupId;
+    delete data.groupTitle;
+    delete data.groupCreatedAt;
+    delete data.groupCollapsed;
+    delete data.groupParentId;
     return {
       ...clone,
       id,
@@ -346,7 +385,7 @@ const cloneSelection = (nodes: CanvasNode[], edges: CanvasEdge[], offset: XYPosi
       selected: true,
       dragging: false,
       measured: undefined,
-      data: { ...clone.data, label: `${clone.data.label} 副本` },
+      data,
     } satisfies CanvasNode;
   });
   const clonedEdges = edges.flatMap((edge) => {
@@ -397,7 +436,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
 
     onNodesChange: (changes) => {
       const permanent = changes.some((change) => change.type === 'remove');
-      if (permanent) commit((state) => ({ nodes: applyNodeChanges(changes, state.nodes), edges: state.edges }));
+      if (permanent) commit((state) => ({ nodes: sanitizeGroupParents(applyNodeChanges(changes, state.nodes)), edges: state.edges }));
       else set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) }));
     },
     onEdgesChange: (changes) => {
@@ -551,6 +590,134 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       edges: compactOrderedEdges(state.edges, nodeId, handleId, orderedEdgeIds),
     })),
     setNodePinned: (nodeId, pinned) => commit((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, draggable: !pinned, data: { ...node.data, pinned } } : node), edges: state.edges })),
+    groupNodes: (nodeIds) => {
+      const state = get();
+      const ids = new Set(nodeIds);
+      const members = state.nodes.filter((node) => ids.has(node.id));
+      if (members.length < 2) return null;
+      const id = `group-${createId()}`;
+      const title = nextGroupTitle(state.nodes);
+      const createdAt = Date.now();
+      // 选中的节点原本都在同一个父分组里 → 新分组继续挂在该父分组下；否则成为顶层分组。
+      const parentIds = new Set(members
+        .map((node) => typeof node.data.groupParentId === 'string' ? node.data.groupParentId : '')
+        .filter(Boolean));
+      const inheritedParent = parentIds.size === 1 ? [...parentIds][0] : '';
+      commit((current) => ({
+        nodes: current.nodes.map((node) => ids.has(node.id)
+          ? {
+            ...node,
+            data: {
+              ...node.data,
+              groupId: id,
+              groupTitle: title,
+              groupCreatedAt: createdAt,
+              groupCollapsed: false,
+              groupParentId: inheritedParent || undefined,
+            },
+          }
+          : node),
+        edges: current.edges,
+      }));
+      return { id, title };
+    },
+    ungroupNodes: (groupId) => {
+      if (!groupId) return;
+      commit((state) => ({
+        nodes: state.nodes.map((node) => {
+          if (node.data.groupId === groupId) {
+            const data = { ...node.data };
+            delete data.groupId;
+            delete data.groupTitle;
+            delete data.groupCreatedAt;
+            delete data.groupCollapsed;
+            delete data.groupParentId;
+            return { ...node, data };
+          }
+          // 子分组：父分组被解散后提升为顶层，不能留下指向不存在分组的 parentId。
+          if (node.data.groupParentId === groupId) {
+            const data = { ...node.data };
+            delete data.groupParentId;
+            return { ...node, data };
+          }
+          return node;
+        }),
+        edges: state.edges,
+      }));
+    },
+    renameGroup: (groupId, title) => {
+      const next = title.trim();
+      if (!groupId || !next) return;
+      commit((state) => ({
+        nodes: state.nodes.map((node) => node.data.groupId === groupId
+          ? { ...node, data: { ...node.data, groupTitle: next } }
+          : node),
+        edges: state.edges,
+      }));
+    },
+    toggleGroupCollapsed: (groupId, collapsed) => {
+      if (!groupId) return;
+      const state = get();
+      const members = state.nodes.filter((node) => node.data.groupId === groupId);
+      if (!members.length) return;
+      const next = collapsed ?? !members.some((node) => node.data.groupCollapsed === true);
+      set((current) => ({
+        nodes: current.nodes.map((node) => node.data.groupId === groupId
+          ? { ...node, selected: next ? false : node.selected, data: { ...node.data, groupCollapsed: next } }
+          : node),
+        selectedNodeId: next && current.selectedNodeId
+          && current.nodes.find((node) => node.id === current.selectedNodeId)?.data.groupId === groupId
+          ? null
+          : current.selectedNodeId,
+        revision: current.revision + 1,
+      }));
+    },
+    nestGroup: (groupId, parentId) => {
+      const state = get();
+      const members = state.nodes.filter((node) => node.data.groupId === groupId);
+      if (!members.length) return false;
+      if (parentId !== null) {
+        if (!parentId || parentId === groupId) return false;
+        if (!state.nodes.some((node) => node.data.groupId === parentId)) return false;
+        // 沿 parentId 往上走：目标不能是自己的后代，否则会形成环。
+        const parentOf = new Map<string, string>();
+        for (const node of state.nodes) {
+          const gid = typeof node.data.groupId === 'string' ? node.data.groupId : '';
+          const pid = typeof node.data.groupParentId === 'string' ? node.data.groupParentId : '';
+          if (gid && pid && !parentOf.has(gid)) parentOf.set(gid, pid);
+        }
+        let cursor: string | undefined = parentId;
+        const seen = new Set<string>();
+        while (cursor) {
+          if (cursor === groupId) return false;
+          if (seen.has(cursor)) break;
+          seen.add(cursor);
+          cursor = parentOf.get(cursor);
+        }
+      }
+      commit((current) => ({
+        nodes: current.nodes.map((node) => {
+          if (node.data.groupId !== groupId) return node;
+          const data = { ...node.data };
+          if (parentId) data.groupParentId = parentId;
+          else delete data.groupParentId;
+          return { ...node, data };
+        }),
+        edges: current.edges,
+      }));
+      return true;
+    },
+    selectNodes: (nodeIds) => set((state) => {
+      const ids = new Set(nodeIds);
+      return {
+        selectedNodeId: nodeIds.length ? nodeIds[nodeIds.length - 1] : null,
+        nodes: state.nodes.map((node) => Boolean(node.selected) === ids.has(node.id) ? node : { ...node, selected: ids.has(node.id) }),
+        edges: state.edges.map((edge) => edge.selected ? { ...edge, selected: false } : edge),
+      };
+    }),
+    setNodePositions: (positions) => set((state) => ({
+      nodes: state.nodes.map((node) => positions[node.id] ? { ...node, position: { ...positions[node.id] } } : node),
+    })),
     updateNodeTransient: (nodeId, patch) => set((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node) })),
     updateNodeGeometry: (nodeId, size) => set((state) => ({ nodes: state.nodes.map((node) => node.id === nodeId ? { ...node, width: size.width, height: size.height } : node) })),
     copySelected: () => {
@@ -627,7 +794,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       const selectedEdgeIds = new Set(state.edges.filter((edge) => edge.selected).map((edge) => edge.id));
       if (!ids.size && !selectedEdgeIds.size) return;
       commit((current) => ({
-        nodes: current.nodes.filter((node) => !ids.has(node.id)),
+        nodes: sanitizeGroupParents(current.nodes.filter((node) => !ids.has(node.id))),
         edges: current.edges.filter((edge) => !selectedEdgeIds.has(edge.id) && !ids.has(edge.source) && !ids.has(edge.target)),
       }));
       set({ selectedNodeId: null });
@@ -638,7 +805,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       const count = state.nodes.filter((node) => ids.has(node.id)).length;
       if (!count) return 0;
       commit((current) => ({
-        nodes: current.nodes.filter((node) => !ids.has(node.id)),
+        nodes: sanitizeGroupParents(current.nodes.filter((node) => !ids.has(node.id))),
         edges: current.edges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
       }));
       set((current) => ({ selectedNodeId: current.selectedNodeId && ids.has(current.selectedNodeId) ? null : current.selectedNodeId }));
@@ -978,7 +1145,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         if (!removedEdgeIds.has(id)) prunedEdgeIds.push(id);
       }
 
-      const nodes = [...nodeById.values()];
+      const nodes = sanitizeGroupParents([...nodeById.values()]);
       set({
         nodes,
         edges: [...edgeById.values()],

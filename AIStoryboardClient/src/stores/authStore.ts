@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { authApi } from '../api/auth';
 import type { LoginRequest, RegisterRequest } from '../api/auth';
 import { notify } from './toastStore';
+import { useSendQueueStore } from './sendQueueStore';
+import { useAccountSettingsStore } from './accountSettingsStore';
 import {
-  clearAuthSession,
+  broadcastLogout,
   persistUser,
   refreshAccessToken,
   setAccessToken,
@@ -63,7 +65,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     void authApi.logout().catch(() => undefined);
-    clearAuthSession();
+    broadcastLogout();
+    useSendQueueStore.getState().clearAll();
+    useAccountSettingsStore.getState().reset();
     set({ user: null, isAuthenticated: false });
     notify({ title: '已退出登录', variant: 'info', duration: 1800 });
     // 让退出确认先露一下再整页回到登录页（整页跳转用于清空全部内存态）

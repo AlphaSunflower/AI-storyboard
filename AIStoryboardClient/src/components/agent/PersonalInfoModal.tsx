@@ -146,7 +146,7 @@ export function PersonalInfoModal({ open, onClose }: { open: boolean; onClose: (
         </div>
 
         {msg && (
-          <div style={{ marginTop: 14, padding: '8px 12px', borderRadius: 'var(--rounded-md)', fontSize: 12, background: msg.ok ? 'rgba(204,120,92,0.12)' : 'rgba(200,80,60,0.12)', color: msg.ok ? 'var(--color-primary)' : 'var(--color-error)' }}>
+          <div style={{ marginTop: 14, padding: '8px 12px', borderRadius: 'var(--rounded-md)', fontSize: 12, background: msg.ok ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)' : 'rgba(200,80,60,0.12)', color: msg.ok ? 'var(--color-primary)' : 'var(--color-error)' }}>
             {msg.text}
           </div>
         )}

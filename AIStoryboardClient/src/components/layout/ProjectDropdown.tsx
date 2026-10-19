@@ -5,6 +5,7 @@ import { notify } from '../../stores/toastStore';
 import type { ProjectResponse } from '../../api/projects';
 import { MoreMenu } from '../common/MoreMenu';
 import { usePresence } from '../../hooks/usePresence';
+import { Plus } from 'lucide-react';
 
 const modalOverlayStyle: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(20, 20, 19, 0.35)',
@@ -114,15 +115,15 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
         onClick={handleNewProject}
         style={{
           width: '100%', padding: '10px 14px', border: 'none',
-          borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
-          background: 'transparent', color: 'rgb(65, 118, 230)',
-          font: 'var(--text-caption)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+          borderBottom: '1px solid var(--color-hairline)',
+          background: 'transparent', color: 'var(--color-primary)',
+          fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
         }}
       >
-        + 新建项目
+        <Plus size={14} strokeWidth={2} /> 新建项目
       </button>
 
-      <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+      <div style={{ maxHeight: 260, overflowY: 'auto', padding: 4 }}>
         {projects.length === 0 ? (
           <p style={{ padding: 12, color: 'var(--color-muted-soft)', fontSize: 12, textAlign: 'center' }}>
             暂无项目
@@ -132,18 +133,24 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
             <div
               key={p.id}
               className="project-dropdown-item"
+              onMouseEnter={(e) => {
+                if (currentProject?.id !== p.id) e.currentTarget.style.background = 'var(--color-surface-subtle)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = currentProject?.id === p.id ? 'var(--color-primary-tint)' : 'transparent';
+              }}
               style={{
                 '--item-index': index,
                 display: 'flex', alignItems: 'center',
-                borderBottom: '1px solid rgba(0, 0, 0, 0.04)',
-                background: currentProject?.id === p.id ? 'rgba(38, 49, 72, 0.06)' : 'white',
+                borderRadius: 8,
+                background: currentProject?.id === p.id ? 'var(--color-primary-tint)' : 'transparent',
               } as React.CSSProperties}
             >
               <button
                 onClick={() => handleSelectProject(p.id)}
                 style={{
-                  flex: 1, padding: '9px 6px 9px 14px', border: 'none', background: 'none',
-                  color: 'var(--color-body)', font: 'var(--text-body-sm)', cursor: 'pointer',
+                  flex: 1, padding: '8px 6px 8px 10px', border: 'none', background: 'none',
+                  color: 'var(--color-ink)', fontSize: 13, cursor: 'pointer',
                   textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap', minWidth: 0,
                 }}
@@ -166,13 +173,13 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
     </>
   );
 
-  // DeepSeek 风格菜单容器（圆角 12、细边框、阴影；portal 场景 zIndex 最高不被裁剪）
+  // 项目菜单浮层（控件 8 / 浮层 12；阴影走 token）
   const menuStyle: React.CSSProperties = {
-    width: 260,
+    width: 264,
     background: 'white',
-    border: '1px solid rgba(0, 0, 0, 0.10)',
+    border: '1px solid var(--color-hairline)',
     borderRadius: 12,
-    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+    boxShadow: 'var(--shadow-popover)',
     zIndex: 2000,
     overflow: 'hidden',
   };

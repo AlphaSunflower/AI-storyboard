@@ -15,6 +15,8 @@ export interface SlashCommandItem {
   /** 不可用项：仍展示（可发现），但不可执行并显示 disabledHint */
   disabled?: boolean;
   disabledHint?: string;
+  /** 全局快捷键提示：显示在菜单行右侧，与键盘监听共用同一套键位。 */
+  shortcut?: string;
   run: () => void;
 }
 
@@ -131,6 +133,20 @@ export function ChatSlashMenu({
               {item.disabled ? (item.disabledHint ?? item.description) : item.description}
             </span>
           </span>
+          {item.shortcut && (
+            <kbd style={{
+              flexShrink: 0,
+              padding: '2px 5px',
+              borderRadius: 5,
+              border: `1px solid ${T.border}`,
+              background: 'rgba(15,17,21,0.04)',
+              color: T.textCaption,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 10,
+              lineHeight: 1.4,
+              whiteSpace: 'nowrap',
+            }}>{item.shortcut}</kbd>
+          )}
         </button>
       ))}
     </div>,

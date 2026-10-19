@@ -576,7 +576,8 @@ test('matches the canvas, image, text, and edge context menu behavior', async ({
   const paneBox = await pane.boundingBox();
   expect(paneBox).not.toBeNull();
 
-  const revisionBeforeMenu = await page.evaluate(() => Number(document.querySelector('.project-copy small')?.textContent?.length ?? 0));
+  const revisionText = () => page.locator('.project-copy small').textContent();
+  const revisionBeforeMenu = await revisionText();
   await pane.click({ button: 'right', position: { x: paneBox!.width - 10, y: paneBox!.height - 10 } });
   const menu = page.getByRole('menu', { name: '画布右键菜单' });
   await expect(menu).toBeVisible();
@@ -588,6 +589,11 @@ test('matches the canvas, image, text, and edge context menu behavior', async ({
   const menuBox = await menu.boundingBox();
   expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual((await page.evaluate(() => innerWidth)) - 7);
   expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual((await page.evaluate(() => innerHeight)) - 7);
+
+  // 节点落在右键位置；贴边建点会让节点中心跑到视口外，所以把菜单挪到画布中间再建节点。
+  await page.keyboard.press('Escape');
+  await pane.click({ button: 'right', position: { x: paneBox!.width * .72, y: paneBox!.height * .25 } });
+  await expect(menu).toBeVisible();
 
   await menu.getByRole('menuitem', { name: '添加节点' }).hover();
   // 分组子菜单里的条目是普通 button，不是 menuitem 角色
@@ -614,7 +620,8 @@ test('matches the canvas, image, text, and edge context menu behavior', async ({
     .getByRole('menuitem', { name: '副本', exact: true }).click();
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
 
-  expect(await page.evaluate((before) => Number(document.querySelector('.project-copy small')?.textContent?.length ?? 0) >= before, revisionBeforeMenu)).toBe(true);
+  // 复制/粘贴/撤销都进历史后，revision 指示必须前进（比较内容而不是长度：v9 → v10 长度会变小）。
+  await expect.poll(revisionText).not.toBe(revisionBeforeMenu);
 });
 
 test('keeps video controls and screen chrome inside responsive viewports', async ({ page }) => {

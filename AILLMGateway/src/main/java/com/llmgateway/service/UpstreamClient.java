@@ -36,10 +36,16 @@ public class UpstreamClient {
 
     /** POST JSON 到 openai_compatible 渠道（base_url + path，Bearer 渠道 Key） */
     public HttpResponse<String> postJson(String baseUrl, String path, String apiKey, String bodyJson) {
+        return postJson(baseUrl, path, apiKey, bodyJson, null);
+    }
+
+    /** 同 {@link #postJson}，可按渠道/路由覆盖单请求超时（null=全局默认） */
+    public HttpResponse<String> postJson(String baseUrl, String path, String apiKey, String bodyJson, Integer timeoutMs) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .timeout(Duration.ofMillis(timeoutMs == null || timeoutMs <= 0
+                        ? config.getUpstream().getRequestTimeoutMs() : timeoutMs))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
         addAuthorization(builder, apiKey);
         HttpRequest request = builder.build();
@@ -52,10 +58,17 @@ public class UpstreamClient {
      * 不重试——SSE 流一旦建立无法安全重放，重试语义交给调用方（渠道轮换）。
      */
     public HttpResponse<java.io.InputStream> postJsonStream(String baseUrl, String path, String apiKey, String bodyJson) {
+        return postJsonStream(baseUrl, path, apiKey, bodyJson, null);
+    }
+
+    /** 同 {@link #postJsonStream}，可按渠道/路由覆盖流式超时（null=全局流式默认） */
+    public HttpResponse<java.io.InputStream> postJsonStream(String baseUrl, String path, String apiKey,
+                                                            String bodyJson, Integer timeoutMs) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + path))
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofMillis(config.getUpstream().getStreamTimeoutMs()))
+                .timeout(Duration.ofMillis(timeoutMs == null || timeoutMs <= 0
+                        ? config.getUpstream().getStreamTimeoutMs() : timeoutMs))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
         addAuthorization(builder, apiKey);
         HttpRequest request = builder.build();
@@ -69,10 +82,16 @@ public class UpstreamClient {
 
     /** POST Gemini 原生格式（Key 走 query 参数） */
     public HttpResponse<String> postGemini(String baseUrl, String apiKey, String bodyJson) {
+        return postGemini(baseUrl, apiKey, bodyJson, null);
+    }
+
+    /** 同 {@link #postGemini}，可按渠道/路由覆盖超时 */
+    public HttpResponse<String> postGemini(String baseUrl, String apiKey, String bodyJson, Integer timeoutMs) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(stripTrailingSlash(baseUrl) + "?key=" + apiKey))
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofMillis(config.getUpstream().getRequestTimeoutMs()))
+                .timeout(Duration.ofMillis(timeoutMs == null || timeoutMs <= 0
+                        ? config.getUpstream().getRequestTimeoutMs() : timeoutMs))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson));
         // Gemini 走 query 参数，不附加 Bearer（Key 由 ?key= 传递）
         HttpRequest request = builder.build();

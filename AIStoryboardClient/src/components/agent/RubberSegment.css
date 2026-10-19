@@ -17,7 +17,7 @@
   height: calc(100% - 8px);
   border-radius: 8px;
   background: var(--color-primary);
-  box-shadow: 0 4px 12px rgba(204, 120, 92, 0.26);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary) 26%, transparent);
   transform-origin: center;
   pointer-events: none;
   will-change: transform;

@@ -256,6 +256,12 @@ export interface MediaNodeData extends Record<string, unknown> {
   imagePreset?: string;
   model?: string;
   isGenerating?: boolean;
+  // ── 画布分组（frame）字段：同一 groupId 的节点共用一个可视分组框 ──
+  groupId?: string;
+  groupTitle?: string;
+  groupCreatedAt?: number;
+  groupCollapsed?: boolean;
+  groupParentId?: string;
 }
 
 export interface PersistedAsset {

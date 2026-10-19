@@ -27,13 +27,23 @@ describe('CanvasToolRail', () => {
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(expected);
   });
 
-  it('每个按钮都在 DOM 里带名称文本，悬停展开只切换显隐而不新增节点', () => {
+  it('每个节点按钮在 DOM 里带名称文本，悬停展开只切换显隐而不新增节点', () => {
     renderRail();
 
     // 展开态由 CSS 的 :hover / :focus-within 控制，所以名称必须常驻 DOM 而不是 tooltip 挂载时才出现。
     expect(screen.getAllByText('分镜拆解')).toHaveLength(1);
     expect(screen.getAllByText('上传')).toHaveLength(1);
     expect(screen.getAllByText('项目库')).toHaveLength(1);
+  });
+
+  it('节点按钮带 1–8 键位徽标，悬停提示也写明快捷键', () => {
+    renderRail();
+
+    expect(screen.getByRole('button', { name: '文字' }).title).toContain('快捷键 1');
+    expect(screen.getByRole('button', { name: '图片生成' }).title).toContain('快捷键 6');
+    expect(screen.getByRole('button', { name: '视频合并' }).title).toContain('快捷键 8');
+    expect(screen.getByRole('button', { name: '上传' }).title).toContain('快捷键 U');
+    expect(screen.getByRole('button', { name: '项目库' }).title).toContain('快捷键 L');
   });
 
   it('点节点按钮把 kind 交给父级决定落点', () => {

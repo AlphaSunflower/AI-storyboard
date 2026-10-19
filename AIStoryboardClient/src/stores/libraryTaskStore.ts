@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { MetadataState } from '../api/library';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import type { MediaType, MetadataState } from '../api/library';
 import { notify } from './toastStore';
 
 export type LibraryTaskKind = 'upload' | 'import' | 'analysis';
@@ -15,6 +16,15 @@ export interface LibraryTask {
   assetId?: string;
   jobId?: string;
   error?: string;
+  /** 同一批上传/导入的标识与展示名（任务面板按批次显示）。 */
+  batchId?: string;
+  batchLabel?: string;
+  /** 可重试的导入来源：对话素材导入等按 URL 重跑。 */
+  retryUrl?: string;
+  retryProducer?: 'moon-chat' | 'storyboard-editor';
+  retryMediaType?: MediaType;
+  /** 重试时必须回到原项目，避免把任务重跑到当前另一个项目。 */
+  retryProjectId?: string;
 }
 
 interface LibraryTaskState {
@@ -25,6 +35,7 @@ interface LibraryTaskState {
   updateTask: (id: string, patch: Partial<Omit<LibraryTask, 'id'>>) => void;
   addAnalysisTask: (assetId: string, label: string, state: MetadataState) => void;
   clearFinished: () => void;
+  clearFailed: () => void;
 }
 
 /** 上传/导入终态聚合窗口：窗口内的结果合成一条通知，避免逐个文件刷屏 */
@@ -69,7 +80,7 @@ function trackUploadResult(status: LibraryTaskStatus, error?: string) {
   pendingUploadTimer = setTimeout(flushUploadNotice, UPLOAD_NOTICE_WINDOW_MS);
 }
 
-export const useLibraryTaskStore = create<LibraryTaskState>((set) => ({
+export const useLibraryTaskStore = create<LibraryTaskState>()(persist((set) => ({
   tasks: [],
   panelOpen: false,
   setPanelOpen: (panelOpen) => set({ panelOpen }),
@@ -118,4 +129,21 @@ export const useLibraryTaskStore = create<LibraryTaskState>((set) => ({
   clearFinished: () => set((state) => ({
     tasks: state.tasks.filter((task) => task.status !== 'completed'),
   })),
+  clearFailed: () => set((state) => ({
+    tasks: state.tasks.filter((task) => task.status !== 'failed'),
+  })),
+}), {
+  name: 'moon.library.tasks.v1',
+  storage: createJSONStorage(() => sessionStorage),
+  partialize: (state) => ({ tasks: state.tasks, panelOpen: state.panelOpen }),
+  merge: (persisted, current) => {
+    const saved = (persisted ?? {}) as Partial<LibraryTaskState>;
+    const inFlight = new Set(['queued', 'uploading', 'processing']);
+    const tasks = (saved.tasks ?? []).map((task) => (
+      inFlight.has(task.status)
+        ? { ...task, status: 'failed' as const, error: '页面刷新后任务中断，可重试' }
+        : task
+    ));
+    return { ...current, ...saved, tasks };
+  },
 }));

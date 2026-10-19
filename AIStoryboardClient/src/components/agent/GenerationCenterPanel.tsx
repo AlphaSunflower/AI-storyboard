@@ -325,6 +325,8 @@ export function GenerationCenterPanel({
           className={`generation-center__trigger${isGenerating ? ' is-generating' : ''}${open ? ' is-open' : ''}${drag.dragging ? ' is-dragging' : ''}${drag.returning ? ' is-returning' : ''}`}
           aria-label={isGenerating ? `生成中心，${activeCount} 个任务生成中` : '生成中心'}
           aria-expanded={open}
+          aria-keyshortcuts="Control+Shift+6 Meta+Shift+6"
+          title="生成中心（Ctrl/Cmd + Shift + 6）"
           style={{ transform: drag.transform, transition: drag.transition }}
         >
           <ListTodo size={20} strokeWidth={1.8} />

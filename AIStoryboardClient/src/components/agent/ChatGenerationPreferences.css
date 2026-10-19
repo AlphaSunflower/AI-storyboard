@@ -28,12 +28,12 @@
 
 .chat-generation-prefs__trigger:hover:not(:disabled),
 .chat-generation-prefs__trigger[data-open] {
-  background: rgba(65, 118, 230, 0.08);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
   color: var(--color-primary);
 }
 
 .chat-generation-prefs__trigger[data-custom] {
-  border-color: rgba(65, 118, 230, 0.28);
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
   color: var(--color-primary);
 }
 

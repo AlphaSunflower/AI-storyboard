@@ -46,13 +46,12 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
           aria-label="返回主页"
         ><ArrowLeft size={18} /></button>
         <div style={{ flex: 1 }}>
-          <small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>MORROW / PROJECT</small>
           {renamingProject ? (
-            <input autoFocus defaultValue={project.title} style={{ fontSize: 28, fontWeight: 700, background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.3)', color: 'inherit', width: '100%' }} onBlur={(event) => { onRenameProject(event.target.value.trim() || project.title); setRenamingProject(false); }} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} />
+            <input autoFocus defaultValue={project.title} style={{ fontSize: 30, fontWeight: 700, letterSpacing: '-0.02em', background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.3)', color: 'inherit', width: '100%' }} onBlur={(event) => { onRenameProject(event.target.value.trim() || project.title); setRenamingProject(false); }} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} />
           ) : (
-            <h1 style={{ fontSize: 30, margin: '2px 0 6px' }}>{project.title || 'Untitled'}</h1>
+            <h1 style={{ fontSize: 32, lineHeight: 1.15, letterSpacing: '-0.02em', margin: '0 0 8px' }}>{project.title || 'Untitled'}</h1>
           )}
-          <p style={{ opacity: 0.55, margin: 0 }}>{canvases.length} 个画布 · 项目、原图与每个派生版本保存在本地</p>
+          <p style={{ opacity: 0.5, margin: 0, fontSize: 12.5 }}>{canvases.length} 个画布，原图与派生版本都在本地</p>
         </div>
         <div className="project-home__actions" style={{ display: 'flex', gap: 8 }}>
           <button disabled={canvasModeLocked} onClick={() => setRenamingProject(true)} style={{ ...ghostButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label="重命名项目"><Pencil size={15} /> 重命名</button>
@@ -68,7 +67,7 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
         </div>
       </header>
 
-      <div className="project-home__tabs" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+      <div className="project-home__tabs" style={{ display: 'inline-flex', width: 'fit-content', gap: 2, padding: 3, marginBottom: 22, borderRadius: 9, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.035)' }}>
         <button onClick={() => setTab('canvas')} style={tab === 'canvas' ? tabActive : tabInactive}>画布</button>
         <button onClick={() => setTab('assets')} style={tab === 'assets' ? tabActive : tabInactive}>项目库</button>
       </div>
@@ -76,9 +75,9 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
       <div className="project-home__content">
         {tab === 'canvas' ? (
           <section>
-            <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div><small style={{ opacity: 0.55, letterSpacing: '0.14em' }}>CANVASES</small><h2 style={{ margin: '2px 0 0', fontSize: 20 }}>画布</h2></div>
-              <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={16} /> 新建画布</button>
+            <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontSize: 19, fontWeight: 600, letterSpacing: '-0.01em' }}>画布</h2>
+              <button disabled={canvasModeLocked} onClick={onCreateCanvas} style={{ ...primaryButton, opacity: canvasModeLocked ? 0.4 : 1 }}><Plus size={15} /> 新建画布</button>
             </header>
 
             {canvases.length ? (
@@ -90,9 +89,9 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
                       {renamingCanvasId === canvas.id ? (
                         <input autoFocus defaultValue={canvas.title} style={{ fontSize: 16, fontWeight: 600, background: 'transparent', border: 'none', borderBottom: '1px solid rgba(255,255,255,0.3)', color: 'inherit', width: '100%' }} onClick={(event) => event.stopPropagation()} onBlur={(event) => { onRenameCanvas(canvas.id, event.target.value.trim() || canvas.title); setRenamingCanvasId(null); }} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }} />
                       ) : (
-                        <strong style={{ display: 'block', fontSize: 16 }}>{canvas.title}</strong>
+                        <strong style={{ display: 'block', fontSize: 14.5, fontWeight: 600, letterSpacing: '-0.01em' }}>{canvas.title}</strong>
                       )}
-                      <small style={{ opacity: 0.55 }}>{relativeTime(canvas.updatedAt)} · {canvas.nodeCount} 节点 · {canvas.assetCount} 素材</small>
+                      <small style={{ display: 'block', marginTop: 3, opacity: 0.5, fontSize: 11, lineHeight: 1.5 }}>{relativeTime(canvas.updatedAt)} / {canvas.nodeCount} 节点 / {canvas.assetCount} 素材</small>
                     </button>
                     <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
                       <button disabled={canvasModeLocked} style={{ ...miniButton, opacity: canvasModeLocked ? 0.4 : 1 }} aria-label={`重命名 ${canvas.title}`} onClick={() => setRenamingCanvasId(canvas.id)}><Pencil size={13} /></button>
@@ -129,22 +128,22 @@ export function ProjectHome({ project, canvases, onBack, onCreateCanvas, onOpenC
 function CanvasCover({ canvasId, coverAssetId }: { canvasId: string; coverAssetId?: string | null }) {
   const coverUrl = useCanvasCoverUrl(canvasId, coverAssetId);
   return (
-    <span className="project-home__cover" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 96, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 12, overflow: 'hidden' }}>
+    <span className="project-home__cover" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', aspectRatio: '16 / 9', borderRadius: 7, background: 'rgba(255,255,255,0.05)', marginBottom: 10, overflow: 'hidden' }}>
       {coverUrl
         ? <img className="project-home__cover-image" src={coverUrl} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : <Layers size={26} style={{ opacity: 0.5 }} />}
+        : <Layers size={24} style={{ opacity: 0.5 }} />}
     </span>
   );
 }
 
-const iconButton: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
-const ghostButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13 };
+const iconButton: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
+const ghostButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12.5 };
 const dangerButton: React.CSSProperties = { ...ghostButton, background: '#6a6a6a', borderColor: '#6a6a6a', color: '#fff' };
-const dangerGhostButton: React.CSSProperties = { ...iconButton, color: '#a3a3a3', width: 40, height: 40 };
-const primaryButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 9, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
-const card: React.CSSProperties = { padding: 16, borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)' };
+const dangerGhostButton: React.CSSProperties = { ...iconButton, color: '#a3a3a3' };
+const primaryButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 13px', borderRadius: 8, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 };
+const card: React.CSSProperties = { padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,0.11)', background: 'rgba(255,255,255,0.025)', transition: 'border-color .15s, background-color .15s' };
 const cardOpen: React.CSSProperties = { display: 'block', width: '100%', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 };
-const miniButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 5, borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
-const miniDanger: React.CSSProperties = { ...miniButton, color: '#a3a3a3', borderColor: 'rgba(163,163,163,0.4)' };
-const tabActive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 13, fontWeight: 600 };
-const tabInactive: React.CSSProperties = { padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13 };
+const miniButton: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, padding: 0, borderRadius: 6, border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'inherit', cursor: 'pointer' };
+const miniDanger: React.CSSProperties = { ...miniButton, width: 'auto', padding: '0 8px', color: '#a3a3a3', borderColor: 'rgba(163,163,163,0.4)' };
+const tabActive: React.CSSProperties = { height: 28, padding: '0 12px', borderRadius: 6, border: 'none', background: '#f4f4f5', color: '#141414', cursor: 'pointer', fontSize: 12, fontWeight: 600 };
+const tabInactive: React.CSSProperties = { height: 28, padding: '0 12px', borderRadius: 6, border: 'none', background: 'transparent', color: 'rgba(244,244,245,0.62)', cursor: 'pointer', fontSize: 12 };

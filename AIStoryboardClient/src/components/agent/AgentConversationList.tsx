@@ -5,11 +5,12 @@ import { notify } from '../../stores/toastStore';
 import { DS } from './ChatComposer';
 import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
-import { Archive, ChevronLeft, Pencil, Trash2 } from 'lucide-react';
+import { Archive, ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react';
 import { MoreMenu } from '../common/MoreMenu';
 import { ContextMenu } from '../common/ContextMenu';
 import { Tooltip, TooltipGroup } from '../common/Tooltip';
 import MoonLogo from './MoonLogo';
+import { CONVERSATION_DRAG_MIME } from '../../lib/mentionReferences';
 
 /** DeepSeek 风格时间分组：今天 / 昨天 / 7天内 / yyyy-MM（updatedAt 倒序前提下连续归组） */
 function groupByTime(items: AgentConversation[]) {
@@ -28,14 +29,14 @@ function groupByTime(items: AgentConversation[]) {
   return groups;
 }
 
-/** 勾选框（选中态 #cc785c 填充 + 勾，未选中空框） */
+/** 勾选框（选中态 var(--color-primary) 填充 + 勾，未选中空框） */
 function CheckIcon({ checked }: { checked: boolean }) {
   return (
     <span
       style={{
         width: 18, height: 18, flexShrink: 0, borderRadius: 4,
-        border: `2px solid ${checked ? '#cc785c' : 'var(--color-hairline)'}`,
-        background: checked ? '#cc785c' : 'transparent',
+        border: `2px solid ${checked ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
+        background: checked ? 'var(--color-primary)' : 'transparent',
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         transition: 'background 0.15s, border-color 0.15s',
         boxSizing: 'border-box',
@@ -152,19 +153,19 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       {/* Moon Logo 标题（手机端 overlay 由父组件渲染，此处跳过） */}
       {!hideHeader && (
         <TooltipGroup>
-        <div style={{ padding: '16px 16px 12px', borderBottom: `1px solid ${DS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ padding: '14px 14px 10px', borderBottom: `1px solid ${DS.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <Tooltip side="bottom" label="新建对话">
           <button
             onClick={() => newConversation()}
             aria-label="新建对话"
             style={{
               display: 'inline-flex', alignItems: 'center', border: 'none', background: 'transparent',
-              padding: '4px 8px', marginLeft: -8, borderRadius: 10, cursor: 'pointer', transition: 'background 0.15s',
+              padding: '3px 6px', marginLeft: -6, borderRadius: 8, cursor: 'pointer', transition: 'background 0.15s',
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <MoonLogo size={26} showText />
+            <MoonLogo size={24} showText animated />
           </button>
           </Tooltip>
           {headerRight}
@@ -174,20 +175,23 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       {/* toolbar 插槽 */}
       {toolbar}
       {/* 新建 */}
-      <div style={{ padding: 14 }}>
+      <div style={{ padding: '12px 12px 4px' }}>
         <SpecularButton
           size="md"
-          radius={10}
+          radius={8}
           tintOpacity={0}
-          textColor="#cc785c"
-          lineColor="#cc785c"
-          baseColor="#cc785c"
-          intensity={0.9}
-          thickness={1.2}
+          textColor="var(--color-primary)"
+          lineColor="var(--color-primary)"
+          baseColor="var(--color-primary)"
+          intensity={0.5}
+          thickness={1.1}
           className="specular-button--block"
           onClick={() => newConversation()}
         >
-          + 新建对话
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Plus size={14} strokeWidth={2} />
+            新建对话
+          </span>
         </SpecularButton>
       </div>
 
@@ -199,7 +203,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           className="chat-archive-toggle"
           onClick={() => setShowArchived(!showArchived)}
           aria-label={showArchived ? '返回进行中的对话' : '查看已归档对话'}
-          style={{ padding: '6px 8px', marginLeft: -8, border: 'none', background: 'none', color: DS.textCaption, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s' }}
+          style={{ padding: '6px 8px', marginLeft: -8, border: 'none', background: 'none', color: DS.textCaption, fontSize: 12.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s' }}
           onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.ink; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textCaption; }}
         >
@@ -223,8 +227,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
             aria-label={multiSelect ? '取消多选' : '多选删除'}
             style={{
               padding: '6px 8px', marginRight: -8, border: 'none', background: 'none',
-              color: multiSelect ? '#cc785c' : DS.textCaption,
-              fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s',
+              color: multiSelect ? 'var(--color-primary)' : DS.textCaption,
+              fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s',
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -247,7 +251,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       {/* 按时间分组的会话列表 */}
       {groups.map((g) => (
         <div key={g.label}>
-          <div style={{ padding: '10px 22px 4px', fontSize: 12, fontWeight: 600, color: DS.textCaption, letterSpacing: '0.02em', textAlign: 'left' }}>
+          <div style={{ padding: '12px 18px 4px', fontSize: 11, fontWeight: 600, color: DS.textCaption, letterSpacing: '0.04em', textAlign: 'left' }}>
             {g.label}
           </div>
           {g.items.map((c) => {
@@ -263,23 +267,33 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
               >
                 <div
                   className={`conversation-item${c.id === activeConversationId ? ' is-active' : ''}`}
+                  draggable={!multiSelect && c.id !== activeConversationId}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'copy';
+                    e.dataTransfer.setData(CONVERSATION_DRAG_MIME, JSON.stringify({
+                      id: c.id,
+                      title: c.title,
+                      messageCount: c.messageCount,
+                      summaryStatus: c.summaryStatus,
+                    }));
+                    e.dataTransfer.setData('text/plain', `@对话《${c.title || '未命名'}》`);
+                  }}
                   onClick={() => {
                     if (multiSelect) { toggleSelect(c.id); return; }
                     if (onSelectOverride) { onSelectOverride(c.id); return; }
                     selectConversation(c.id);
                   }}
-                  onMouseEnter={(e) => { setHoverId(c.id); if (c.id !== activeConversationId && !isSelected) e.currentTarget.style.background = 'rgba(0,0,0,0.035)'; }}
-                  onMouseLeave={(e) => { setHoverId(null); e.currentTarget.style.background = c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent'; }}
+                  onMouseEnter={(e) => { setHoverId(c.id); if (c.id !== activeConversationId && !isSelected) e.currentTarget.style.background = 'var(--color-surface-subtle)'; }}
+                  onMouseLeave={(e) => { setHoverId(null); e.currentTarget.style.background = c.id === activeConversationId ? DS.hover : isSelected ? 'color-mix(in srgb, var(--color-primary) 7%, transparent)' : 'transparent'; }}
                   style={{
-                    margin: '2px 10px',
-                    padding: '10px 12px',
-                    borderRadius: 10,
+                    margin: '1px 8px',
+                    padding: '9px 10px',
+                    borderRadius: 8,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
-                    background: c.id === activeConversationId ? DS.hover : isSelected ? 'rgba(204,120,92,0.06)' : 'transparent',
-                    boxShadow: c.id === activeConversationId ? 'inset 3px 0 0 ' + DS.brand : undefined,
+                    background: c.id === activeConversationId ? DS.hover : isSelected ? 'color-mix(in srgb, var(--color-primary) 7%, transparent)' : 'transparent',
                     opacity: 1,
                   }}
                 >
@@ -307,7 +321,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                   ) : (
                     <>
                       <div style={{
-                        flex: 1, minWidth: 0, fontSize: 15,
+                        flex: 1, minWidth: 0, fontSize: 14,
                         fontWeight: c.id === activeConversationId ? 600 : 400,
                         color: c.id === activeConversationId ? DS.brand : 'var(--color-ink)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -323,7 +337,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
                             padding: '1px 7px', borderRadius: 999,
-                            background: 'rgba(65, 118, 230, 0.10)', color: DS.brand,
+                            background: 'color-mix(in srgb, var(--color-primary) 10%, transparent)', color: DS.brand,
                             fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
                           }}
                         >

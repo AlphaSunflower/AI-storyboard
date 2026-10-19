@@ -179,7 +179,7 @@
 
 .agent-storyboard-card:hover {
   border-color: var(--color-primary);
-  box-shadow: 0 6px 18px rgba(204, 120, 92, 0.12);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-primary) 12%, transparent);
   transform: translateY(-1px);
 }
 

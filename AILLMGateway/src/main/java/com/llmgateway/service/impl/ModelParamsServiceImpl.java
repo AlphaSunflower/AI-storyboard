@@ -2,6 +2,7 @@ package com.llmgateway.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.llmgateway.dto.admin.ModelParamsRequest;
 import com.llmgateway.entity.ModelParams;
 import com.llmgateway.exception.BusinessException;
@@ -9,12 +10,16 @@ import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.service.ModelCatalogCache;
 import com.llmgateway.service.ModelParamsService;
 import com.llmgateway.service.ModelRouteService;
+import com.llmgateway.service.ParamsSchemaValidator;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 /** 模型参数能力+默认值管理实现：按 model_name upsert，GET 回显（表单编辑） */
@@ -26,6 +31,53 @@ public class ModelParamsServiceImpl implements ModelParamsService {
 
     /** 合法模型类型（text 文本 / image 生图 / video 视频生成 / vision 图片视频理解） */
     private static final Set<String> MODEL_TYPES = Set.of("text", "image", "video", "vision");
+
+    /**
+     * 允许通过 {@code clearFields} 置空的字段白名单。
+     * 用 SFunction 而不是列名字符串：由 MyBatis-Plus 负责驼峰→下划线，也避免任意属性名打穿实体。
+     */
+    private static final Map<String, SFunction<ModelParams, ?>> CLEARABLE = new LinkedHashMap<>();
+
+    static {
+        CLEARABLE.put("temperature", ModelParams::getTemperature);
+        CLEARABLE.put("maxTokens", ModelParams::getMaxTokens);
+        CLEARABLE.put("topP", ModelParams::getTopP);
+        CLEARABLE.put("contextWindow", ModelParams::getContextWindow);
+        CLEARABLE.put("nMin", ModelParams::getNMin);
+        CLEARABLE.put("nMax", ModelParams::getNMax);
+        CLEARABLE.put("nDefault", ModelParams::getNDefault);
+        CLEARABLE.put("sizes", ModelParams::getSizes);
+        CLEARABLE.put("sizeDefault", ModelParams::getSizeDefault);
+        CLEARABLE.put("qualities", ModelParams::getQualities);
+        CLEARABLE.put("qualityDefault", ModelParams::getQualityDefault);
+        CLEARABLE.put("styles", ModelParams::getStyles);
+        CLEARABLE.put("styleDefault", ModelParams::getStyleDefault);
+        CLEARABLE.put("durations", ModelParams::getDurations);
+        CLEARABLE.put("durationDefault", ModelParams::getDurationDefault);
+        CLEARABLE.put("resolutions", ModelParams::getResolutions);
+        CLEARABLE.put("resolutionDefault", ModelParams::getResolutionDefault);
+        CLEARABLE.put("aspectRatios", ModelParams::getAspectRatios);
+        CLEARABLE.put("aspectRatioDefault", ModelParams::getAspectRatioDefault);
+        CLEARABLE.put("refImagesMin", ModelParams::getRefImagesMin);
+        CLEARABLE.put("refImagesMax", ModelParams::getRefImagesMax);
+        CLEARABLE.put("refVideosMin", ModelParams::getRefVideosMin);
+        CLEARABLE.put("refVideosMax", ModelParams::getRefVideosMax);
+        CLEARABLE.put("audioCountMin", ModelParams::getAudioCountMin);
+        CLEARABLE.put("audioCountMax", ModelParams::getAudioCountMax);
+        CLEARABLE.put("audioSegmentDurationMin", ModelParams::getAudioSegmentDurationMin);
+        CLEARABLE.put("audioSegmentDurationMax", ModelParams::getAudioSegmentDurationMax);
+        CLEARABLE.put("videoSegmentDurationMin", ModelParams::getVideoSegmentDurationMin);
+        CLEARABLE.put("videoSegmentDurationMax", ModelParams::getVideoSegmentDurationMax);
+        CLEARABLE.put("maxTotalDuration", ModelParams::getMaxTotalDuration);
+        CLEARABLE.put("maxTotalFiles", ModelParams::getMaxTotalFiles);
+        CLEARABLE.put("maxVideoSizeMb", ModelParams::getMaxVideoSizeMb);
+        CLEARABLE.put("maxImageSizeMb", ModelParams::getMaxImageSizeMb);
+        CLEARABLE.put("maxAudioSizeMb", ModelParams::getMaxAudioSizeMb);
+        CLEARABLE.put("maxRequestBodyMb", ModelParams::getMaxRequestBodyMb);
+        CLEARABLE.put("maxPromptChars", ModelParams::getMaxPromptChars);
+        CLEARABLE.put("ollamaParams", ModelParams::getOllamaParams);
+        CLEARABLE.put("paramsSchema", ModelParams::getParamsSchema);
+    }
 
     private final ModelParamsMapper modelParamsMapper;
     private final ModelRouteService modelRouteService;
@@ -40,6 +92,14 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         String type = normalizeType(req.type());
         if (req.nMin() != null && req.nMax() != null && req.nMin() > req.nMax()) {
             throw new BusinessException(40001, "数量范围不合法");
+        }
+        // 结构错误必须在保存时挡住：否则 ModelParamsSpecNormalizer 会静默返回 null，
+        // 配置者以为生效了，实际前端退回固定列、响应归一化也没执行。
+        if (req.paramsSchema() != null && !req.paramsSchema().isBlank()) {
+            ParamsSchemaValidator.Result result = ParamsSchemaValidator.validate(req.paramsSchema());
+            if (!result.valid()) {
+                throw new BusinessException(40001, "参数 Schema 不合法：" + result.summary());
+            }
         }
         validateRange(req.refImagesMin(), req.refImagesMax(), "可参考图范围");
         validateRange(req.refVideosMin(), req.refVideosMax(), "可参考视频范围");
@@ -75,7 +135,10 @@ public class ModelParamsServiceImpl implements ModelParamsService {
             applyNonNull(existing, req);
             existing.setUpdatedAt(OffsetDateTime.now());
             modelParamsMapper.updateById(existing);
-            return existing;
+            // updateById 的默认策略忽略 null，清空必须显式 SET col = null
+            applyClearFields(existing.getId(), req);
+            ModelParams updated = modelParamsMapper.selectById(existing.getId());
+            return updated != null ? updated : existing;
         }
 
         ModelParams entity = new ModelParams();
@@ -95,6 +158,13 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         return modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
                 .eq(ModelParams::getModelName, modelName.trim())
                 .eq(ModelParams::getType, type));
+    }
+
+    @Override
+    public java.util.List<ModelParams> listAll() {
+        return modelParamsMapper.selectList(new LambdaQueryWrapper<ModelParams>()
+                .orderByAsc(ModelParams::getModelName)
+                .orderByAsc(ModelParams::getType));
     }
 
     @Override
@@ -152,8 +222,41 @@ public class ModelParamsServiceImpl implements ModelParamsService {
         if (req.maxAudioSizeMb() != null) entity.setMaxAudioSizeMb(req.maxAudioSizeMb());
         if (req.maxRequestBodyMb() != null) entity.setMaxRequestBodyMb(req.maxRequestBodyMb());
         if (req.maxPromptChars() != null) entity.setMaxPromptChars(req.maxPromptChars());
-        if (req.ollamaParams() != null) entity.setOllamaParams(req.ollamaParams());
-        if (req.paramsSchema() != null) entity.setParamsSchema(req.paramsSchema());
+        if (req.ollamaParams() != null && !req.ollamaParams().isBlank()) entity.setOllamaParams(req.ollamaParams());
+        if (req.paramsSchema() != null && !req.paramsSchema().isBlank()) entity.setParamsSchema(req.paramsSchema());
+    }
+
+    /**
+     * 显式清空字段：{@code clearFields} 里列出的字段 + 空字符串的 paramsSchema/ollamaParams。
+     * 未知字段只告警跳过，不因为一个拼写错误把整次保存打回。
+     */
+    private void applyClearFields(String id, ModelParamsRequest req) {
+        Set<String> fields = new LinkedHashSet<>();
+        if (req.clearFields() != null) {
+            for (String field : req.clearFields()) {
+                if (field != null && !field.isBlank()) fields.add(field.trim());
+            }
+        }
+        if (req.paramsSchema() != null && req.paramsSchema().isBlank()) fields.add("paramsSchema");
+        if (req.ollamaParams() != null && req.ollamaParams().isBlank()) fields.add("ollamaParams");
+        if (fields.isEmpty()) return;
+
+        LambdaUpdateWrapper<ModelParams> wrapper = new LambdaUpdateWrapper<ModelParams>()
+                .eq(ModelParams::getId, id);
+        boolean any = false;
+        for (String field : fields) {
+            SFunction<ModelParams, ?> column = CLEARABLE.get(field);
+            if (column == null) {
+                log.warn("忽略未知的可清空字段: {}", field);
+                continue;
+            }
+            wrapper.set(column, null);
+            any = true;
+        }
+        if (any) {
+            modelParamsMapper.update(null, wrapper);
+            log.info("模型参数已清空字段: modelParamsId={}, fields={}", id, fields);
+        }
     }
 
     private void validateRange(Integer min, Integer max, String label) {

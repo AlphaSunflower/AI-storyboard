@@ -37,6 +37,17 @@ export interface ConversationAssetGroupBinding {
   media: Array<{ type: 'IMAGE' | 'VIDEO' | 'AUDIO'; role: string; contentUrl: string }>;
 }
 
+/** 项目维度：某个资产组被哪个对话绑定。 */
+export interface ProjectAssetGroupBinding {
+  groupId: string;
+  conversationId: string;
+  conversationTitle: string | null;
+  snapshotId: string;
+  groupVersion: number;
+  target: string;
+  boundAt: string | null;
+}
+
 export type AgentAttachmentKind = 'image' | 'video' | 'audio' | 'file';
 
 export interface AgentAttachment {
@@ -979,6 +990,11 @@ export const agentApi = {
   listConversationAssetGroups: (conversationId: string) =>
     client.get<{ data: ConversationAssetGroupBinding[] }>(
       `/agent/conversations/${conversationId}/asset-groups`),
+
+  /** 项目维度：资产组被哪些对话使用（项目库展示用，只读绑定行）。 */
+  listProjectAssetGroupBindings: (projectId: string) =>
+    client.get<{ data: ProjectAssetGroupBinding[] }>(
+      `/agent/projects/${projectId}/asset-group-bindings`),
 
   attachConversationAssetGroup: (conversationId: string, groupId: string) =>
     client.post<{ data: ConversationAssetGroupBinding }>(

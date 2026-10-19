@@ -17,7 +17,7 @@ import { sceneApi, type SceneAssetGroupBinding } from '../../api/scenes';
 import { AssetGroupPickerModal } from '../library/AssetGroupPickerModal';
 import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
-import { Eye, Download, Sparkles, Library, LoaderCircle } from 'lucide-react';
+import { Eye, Download, Sparkles, Library, LoaderCircle, Clapperboard } from 'lucide-react';
 import { importMediaToProjectLibrary } from '../../lib/projectLibraryImport';
 import { notify } from '../../stores/toastStore';
 import { Tooltip } from '../common/Tooltip';
@@ -579,20 +579,21 @@ export function PreviewPanel() {
 
   if (!scene) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--color-muted-soft)',
-          fontSize: 13,
-          gap: 8,
-        }}
-      >
-        <span style={{ fontSize: 32, opacity: 0.3 }}><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>
-        <span>选择左侧分镜查看预览</span>
+      <div className="editor-preview">
+        <div className="preview-empty">
+          <span className="preview-empty__mark">
+            <Clapperboard size={26} strokeWidth={1.5} />
+          </span>
+          <h2 className="preview-empty__title">选择一镜开始</h2>
+          <p className="preview-empty__body">
+            从左侧分镜列表点选任意一镜，就能在这里改画面、生成图片与视频。
+          </p>
+          <div className="preview-empty__hints">
+            <span className="preview-empty__hint">点选左侧分镜</span>
+            <span className="preview-empty__hint">图片 / 视频双预览</span>
+            <span className="preview-empty__hint">修改自动保存</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -600,16 +601,13 @@ export function PreviewPanel() {
   return (
     <div
       ref={panelRef}
-      style={{
-        flex: 1,
-        padding: 'var(--space-md)',
-        overflowY: 'auto',
-        background: 'var(--color-canvas)',
-      }}
+      className="editor-preview"
+      style={{ padding: '18px 20px 80px' }}
     >
       {/* Title */}
-      <h2 style={{ font: 'var(--text-title-sm)', color: 'var(--color-ink)', marginBottom: 12 }}>
-        预览 — 分镜 {scene.sceneNumber}
+      <h2 className="preview-title">
+        分镜 {scene.sceneNumber}
+        <span className="preview-title__meta">预览</span>
       </h2>
 
       {/* Script content */}
@@ -777,14 +775,8 @@ export function PreviewPanel() {
                 </div>
               </div>
             ) : (
-              <div
-                style={{
-                  width: '100%', height: 200, borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-surface-soft)', color: 'var(--color-muted-soft)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
-                }}
-              >
-                {scene.imageStatus === 'generating' ? '正在生成图片...'
+              <div className="preview-media-empty">
+                {scene.imageStatus === 'generating' ? '正在生成图片…'
                   : scene.imageStatus === 'failed' ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                       <span>生成失败，点击下方重试</span>
@@ -796,8 +788,13 @@ export function PreviewPanel() {
                         刷新状态
                       </button>
                     </div>
-                  )
-                  : '未生成图片'}
+                  ) : (
+                    <>
+                      <span className="preview-media-empty__icon"><Clapperboard size={22} strokeWidth={1.5} /></span>
+                      <span className="preview-media-empty__title">这一镜还没有图片</span>
+                      <span className="preview-media-empty__body">在下方调整提示词与参数，生成后会在这里预览。</span>
+                    </>
+                  )}
               </div>
             )}
           </div>
@@ -994,14 +991,8 @@ export function PreviewPanel() {
                 </div>
                 </ContextMenu>
             ) : (
-              <div
-                style={{
-                  width: '100%', height: 200, borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-surface-soft)', color: 'var(--color-muted-soft)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
-                }}
-              >
-                {scene.videoStatus === 'generating' ? '正在生成视频...'
+              <div className="preview-media-empty">
+                {scene.videoStatus === 'generating' ? '正在生成视频…'
                   : scene.videoStatus === 'failed' ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                       <span>生成失败，点击下方重试</span>
@@ -1017,8 +1008,13 @@ export function PreviewPanel() {
                         </Tooltip>
                       )}
                     </div>
-                  )
-                  : '未生成视频'}
+                  ) : (
+                    <>
+                      <span className="preview-media-empty__icon"><Clapperboard size={22} strokeWidth={1.5} /></span>
+                      <span className="preview-media-empty__title">这一镜还没有视频</span>
+                      <span className="preview-media-empty__body">生成图片后，可在「视频」页签里创建这一镜的动态预演。</span>
+                    </>
+                  )}
               </div>
             )}
           </div>

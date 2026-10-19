@@ -198,7 +198,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
       {notice && (
         <div style={{
           marginBottom: 10, padding: '7px 10px', borderRadius: 8,
-          background: 'rgba(65,118,230,0.08)', color: DS.brand, fontSize: 12,
+          background: 'color-mix(in srgb, var(--color-primary) 8%, transparent)', color: DS.brand, fontSize: 12,
         }}>{notice}</div>
       )}
 

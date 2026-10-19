@@ -2,6 +2,7 @@ package com.moon.moonagent.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.moon.moonagent.dto.response.ConversationAssetGroupVO;
+import com.moon.moonagent.dto.response.ProjectAssetGroupBindingVO;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentConversationAssetGroup;
 import com.moon.moonagent.mapper.AgentConversationAssetGroupMapper;
@@ -14,7 +15,9 @@ import com.storyboard.common.BusinessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -47,6 +50,35 @@ public class ConversationAssetGroupServiceImpl implements ConversationAssetGroup
                     && !latest.snapshotId().equals(binding.getSnapshotId());
             return toVO(binding, bound, stale);
         }).toList();
+    }
+
+    @Override
+    public List<ProjectAssetGroupBindingVO> listProjectBindings(String userId, String projectId) {
+        if (projectId == null || projectId.isBlank()) return List.of();
+        List<AgentConversation> conversations = conversationMapper.selectList(
+                new LambdaQueryWrapper<AgentConversation>()
+                        .eq(AgentConversation::getUserId, userId)
+                        .eq(AgentConversation::getProjectId, projectId));
+        if (conversations == null || conversations.isEmpty()) return List.of();
+        Map<String, String> titles = new LinkedHashMap<>();
+        for (AgentConversation conversation : conversations) {
+            titles.put(conversation.getId(), conversation.getTitle());
+        }
+        List<AgentConversationAssetGroup> bindings = bindingMapper.selectList(
+                new LambdaQueryWrapper<AgentConversationAssetGroup>()
+                        .in(AgentConversationAssetGroup::getConversationId, titles.keySet())
+                        .orderByDesc(AgentConversationAssetGroup::getUpdatedAt));
+        if (bindings == null) return List.of();
+        return bindings.stream()
+                .map(binding -> new ProjectAssetGroupBindingVO(
+                        binding.getGroupId(),
+                        binding.getConversationId(),
+                        titles.get(binding.getConversationId()),
+                        binding.getSnapshotId(),
+                        binding.getGroupVersion() == null ? 0 : binding.getGroupVersion(),
+                        binding.getTarget(),
+                        binding.getUpdatedAt() == null ? binding.getCreatedAt() : binding.getUpdatedAt()))
+                .toList();
     }
 
     @Override

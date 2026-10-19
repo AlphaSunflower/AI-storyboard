@@ -117,7 +117,7 @@ describe('LeftSidebar project library integration', () => {
     expect(preview.getAttribute('src')).toBe(assetUrl('/api/library/media/media-1/content?token=signed'));
     expect(screen.queryByText('暂无资产，点击「管理」新建')).toBeNull();
     const libraryList = screen.getByTestId('project-library-list');
-    expect(libraryList.style.flexGrow).toBe('1');
+    expect(libraryList.className).toContain('editor-library__grid');
     expect(libraryList.style.maxHeight).toBe('');
 
     fireEvent.click(screen.getByRole('button', { name: '从项目库选择参考图' }));

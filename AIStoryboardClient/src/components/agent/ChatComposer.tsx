@@ -6,15 +6,19 @@ import { Tooltip } from '../common/Tooltip';
 import { useChatAnnotationStore, type ChatAnnotation } from '../../stores/chatAnnotationStore';
 import { AnnotationChip } from './AnnotationChip';
 import { SceneSelectorModal } from './SceneSelectorModal';
-import { MicButton } from './MicButton';
+import { MicButton, type MicButtonHandle } from './MicButton';
 import { UploadMaterialMenu } from './UploadMaterialMenu';
 import { ProjectLibraryPickerModal } from '../library/ProjectLibraryPickerModal';
 import {
   DEFAULT_AGENT_APPROVAL_MODE,
   agentApi,
   sttStream,
+  type AgentReference,
   type ConversationAssetGroupBinding,
 } from '../../api/agent';
+import { useBusySendBehavior } from '../../stores/accountSettingsStore';
+import { EMPTY_QUEUE, MAX_QUEUED_SENDS, useSendQueueStore } from '../../stores/sendQueueStore';
+import { SendQueuePanel } from './SendQueuePanel';
 import { FileText, Paperclip } from 'lucide-react';
 import {
   PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X,
@@ -47,19 +51,21 @@ import { ChatMentionMenu, type MentionMenuItem } from './ChatMentionMenu';
 import { ComposerMentionHighlight, COMPOSER_TEXT_METRICS } from './ComposerMentionHighlight';
 import {
   MENTION_LIMITS,
+  CONVERSATION_DRAG_MIME,
   activeReferences,
   conversationReference,
   insertMention,
   libraryMediaReference,
   localFileReference,
   mentionRanges,
+  parseConversationDragPayload,
   referenceQuotaExceeded,
   removeMentionSegment,
   resolveMentionQuery,
   sceneReference,
 } from '../../lib/mentionReferences';
-import type { AgentReference } from '../../api/agent';
 import { ConversationStatusCard } from './ConversationStatusCard';
+import { matchMoonShortcut, MOON_COMPOSER_SHORTCUT_IDS, type MoonShortcutId } from '../../lib/moonShortcuts';
 import { summarizeConversationStatus } from './contextStatus';
 import { agentChatTokens, type AgentChatTokens } from './agentChatTokens';
 import { formatApproxTokenCount } from './contextWindow';
@@ -115,6 +121,7 @@ export function ChatComposer({
   docked = false,
   onViewConversation,
   forceExpanded = false,
+  shortcutsEnabled = true,
 }: {
   enableSideChat?: boolean;
   canvasModeCommand?: CanvasModeCommand;
@@ -128,6 +135,8 @@ export function ChatComposer({
   docked?: boolean;
   /** 查看当前对话（浮窗里展开聊天记录） */
   onViewConversation?: () => void;
+  /** 只有当前可见的输入卡响应快捷键：手机/桌面两套布局同时挂载，隐藏分支必须关闭 */
+  shortcutsEnabled?: boolean;
 } = {}) {
   const {
     streaming, waitingHumanInput, waitingVideoPlan, agentVideoTask,
@@ -174,11 +183,12 @@ export function ChatComposer({
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
   const [dropActive, setDropActive] = useState(false);
-  const [dragKind, setDragKind] = useState<'file' | 'scene' | 'library' | 'asset' | null>(null);
+  const [dragKind, setDragKind] = useState<'file' | 'scene' | 'library' | 'asset' | 'conversation' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const micRef = useRef<MicButtonHandle>(null);
   const activeConversationId = useAgentStore((s) => s.activeConversationId);
   const conversations = useAgentStore((s) => s.conversations);
   const projectId = useProjectStore((s) => s.currentProject?.id);
@@ -397,6 +407,19 @@ export function ChatComposer({
     || mentionRanges(text, pendingReferences).length > 0
   );
   const canSteerNow = canSteer && !steerBlocked;
+  const busySendBehavior = useBusySendBehavior();
+  const queuedItems = useSendQueueStore((state) => (
+    activeConversationId ? state.queues[activeConversationId] ?? EMPTY_QUEUE : EMPTY_QUEUE
+  ));
+  const enqueueQueuedSend = useSendQueueStore((state) => state.enqueue);
+  const queueWhileBusy = busySendBehavior === 'queue' && canSteer;
+  const sendButtonLabel = queueWhileBusy
+    ? '排队发送'
+    : canSteerNow ? '插入并继续' : canSteer ? '停止并发送' : '发送';
+  const sendButtonTitle = queueWhileBusy
+    ? '加入队列，当前回合结束后发送'
+    : canSteerNow ? '插入当前回合'
+      : canSteer ? '停止并发送（带附件或引用）' : '发送';
   const attachLocked = readOnly;
   const fileAttachments = pendingAttachments.filter((attachment) => attachment.kind === 'file');
   const referencePreviews = refImageUrls.map((url, index) => ({
@@ -497,6 +520,70 @@ export function ChatComposer({
   };
 
   /**
+   * 输入卡级快捷键（录音 / 状态 / 压缩 / 清空 / 侧边对话）。
+   *
+   * <p>手机与桌面两套布局同时挂载，只有可见的那份 ChatComposer 会拿到
+   * `shortcutsEnabled=true`，避免同一次按键在两份实例里各执行一遍。
+   * 处理函数放 ref 里，监听器只注册一次，不随每次输入重绑。
+   */
+  const composerShortcutHandlers = useRef<Partial<Record<MoonShortcutId, () => void>>>({});
+  composerShortcutHandlers.current = {
+    record: () => {
+      if (readOnly) {
+        notify({ title: '该会话仅可查看历史记录', variant: 'info' });
+        return;
+      }
+      if (busy && !recording) {
+        notify({ title: '正在生成中', description: '先停止生成或完成确认后再录音', variant: 'info' });
+        return;
+      }
+      if (!micRef.current?.supported) {
+        notify({ title: '当前浏览器不支持录音', variant: 'info' });
+        return;
+      }
+      micRef.current.toggle();
+    },
+    status: () => setStatusOpen((value) => !value),
+    compact: () => {
+      if (!activeConversationId || messages.length === 0) {
+        notify({ title: '新对话暂无可压缩的上下文', variant: 'info' });
+        return;
+      }
+      void runCompress();
+    },
+    clear: () => {
+      if (!activeConversationId) {
+        notify({ title: '先选择或新建一个对话', variant: 'info' });
+        return;
+      }
+      void runClearContext();
+    },
+    'side-chat': () => {
+      if (!enableSideChat) return;
+      if (!activeConversationId || messages.length === 0 || sideChat.loading) {
+        notify({ title: '先完成一轮对话后再开启侧边', variant: 'info' });
+        return;
+      }
+      void openSideChat(activeConversationId, activeConversation?.title);
+    },
+  };
+
+  useEffect(() => {
+    if (!shortcutsEnabled) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const id = matchMoonShortcut(event);
+      if (!id || !MOON_COMPOSER_SHORTCUT_IDS.has(id)) return;
+      const handler = composerShortcutHandlers.current[id];
+      if (!handler) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handler();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [shortcutsEnabled]);
+
+  /**
    * 会话级用量聚合。与底部状态栏（ChatStatusBar）共用同一份口径，
    * 不再各自按消息求和 —— 否则「轮数」这类定义会两边漂移。
    */
@@ -529,6 +616,7 @@ export function ChatComposer({
       icon: <Minimize2 size={16} strokeWidth={2} />,
       title: '压缩上下文',
       description: '压缩此对话的上下文，保留最近若干轮',
+      shortcut: 'Ctrl/Cmd+Shift+3',
       disabled: !activeConversationId || messages.length === 0,
       disabledHint: '新对话暂无可压缩的上下文',
       run: () => { void runCompress(); },
@@ -541,6 +629,7 @@ export function ChatComposer({
       icon: <Trash2 size={16} strokeWidth={2} />,
       title: '清空上下文',
       description: '真删除此对话的全部上下文，清空后等同新对话（产出素材保留）',
+      shortcut: 'Ctrl/Cmd+Shift+4',
       disabled: !activeConversationId,
       disabledHint: '先选择或新建一个对话',
       run: () => { void runClearContext(); },
@@ -551,6 +640,7 @@ export function ChatComposer({
       icon: <Info size={16} strokeWidth={2} />,
       title: '状态',
       description: statusSlashDescription,
+      shortcut: 'Ctrl/Cmd+Shift+2',
       run: () => { setText(''); setStatusOpen(true); },
     },
     {
@@ -559,6 +649,7 @@ export function ChatComposer({
       icon: <PanelRightOpen size={16} strokeWidth={2} />,
       title: '侧边',
       description: '基于当前对话开启临时分支',
+      shortcut: 'Ctrl/Cmd+Shift+5',
       visible: enableSideChat,
       disabled: !activeConversationId || messages.length === 0 || sideChat.loading,
       disabledHint: '先完成一轮对话后再开启侧边',
@@ -717,14 +808,13 @@ export function ChatComposer({
         description: [
           conversation.messageCount ? `${conversation.messageCount} 条` : '',
           conversation.updatedAt ? new Date(conversation.updatedAt).toLocaleDateString() : '',
-          '引用对话将在下一步（会话摘要）开放',
+          '最近消息摘录',
         ].filter(Boolean).join(' · '),
         keywords: `对话 会话 ${conversation.title ?? ''}`,
-        // P1 范围不含会话摘要索引与 read_conversation：暂时置灰，避免"插了标记但模型读不到"
-        disabled: true,
+        disabled: conversationQuotaReached,
         disabledHint: conversationQuotaReached
           ? `对话引用最多 ${MENTION_LIMITS.conversation} 个`
-          : '引用对话将在下一步（会话摘要）开放',
+          : undefined,
         run: () => insertReference(conversationReference(conversation, pendingReferences)),
       });
     });
@@ -767,8 +857,49 @@ export function ChatComposer({
     // 引用资料：只发正文里真实存在的标记（用户删掉的 `@名称` 不带走引用），
     // 与 store 的目录做交集，避免"幽灵引用"。
     const references = activeReferences(content, pendingReferences);
+    if (queueWhileBusy && queuedItems.length >= MAX_QUEUED_SENDS) {
+      notify({
+        title: '发送队列已满',
+        description: `最多排队 ${MAX_QUEUED_SENDS} 条，请先发送或删除一条`,
+        variant: 'error',
+      });
+      return;
+    }
     if (activeConversationId) {
       useChatAnnotationStore.getState().consumeConversation(activeConversationId);
+    }
+    // 排队发送：当前回合还在跑时先存起来，等这一轮收尾后按顺序发下一轮。
+    // 附件/参考图/资产组/@ 引用都做快照，避免排队期间被清空或串到别的消息。
+    if (queueWhileBusy) {
+      const state = useAgentStore.getState();
+      const attachmentsSnapshot = state.pendingAttachments.map((item) => ({ ...item }));
+      const picUrlsSnapshot = state.pendingPicUrls.length > 0
+        ? [...state.pendingPicUrls]
+        : attachmentsSnapshot.filter((item) => item.kind === 'image').map((item) => item.url);
+      const groupUrls = pendingGroup?.items.map((item) =>
+        item.objectKey.startsWith('http') ? item.objectKey : `/api/files/${item.objectKey}`) || [];
+      const enqueued = enqueueQueuedSend({
+        conversationId: activeConversationId ?? '',
+        content,
+        picUrls: groupUrls.length > 0 ? groupUrls : (picUrlsSnapshot.length > 0 ? picUrlsSnapshot : undefined),
+        assetIds: state.pickedAssetIds.length > 0 ? [...state.pickedAssetIds] : undefined,
+        assetGroupIds: pendingGroup ? [pendingGroup.groupId] : undefined,
+        assetGroupSnapshotIds: pendingGroup ? [pendingGroup.snapshotId] : undefined,
+        attachments: attachmentsSnapshot.length > 0 ? attachmentsSnapshot : undefined,
+        references: references.length > 0 ? references : undefined,
+        routingHint: pendingGroup ? 'intent-video' : undefined,
+      });
+      if (!enqueued) {
+        notify({ title: '加入发送队列失败', variant: 'error' });
+        return;
+      }
+      setText('');
+      setPendingGroup(null);
+      state.clearPendingAttachments();
+      state.clearPendingReferences();
+      state.clearPickedAssetIds();
+      notify({ title: '已加入发送队列', description: '当前回合结束后自动发送' });
+      return;
     }
     setText('');
     // 已发出的素材由 store 在本轮发送后清空（见 sendMessage）：输入框上方只剩「还没发出去的」，
@@ -856,6 +987,8 @@ export function ChatComposer({
 
   /** 生成中心会话资产拖进来的素材，与文件/分镜/项目库三者并列。 */
   const hasAssetDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(AGENT_ASSET_DRAG_MIME);
+  const hasConversationDrag = (e: React.DragEvent) =>
+    e.dataTransfer.types.includes(CONVERSATION_DRAG_MIME);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     if (readOnly) return;
@@ -863,11 +996,13 @@ export function ChatComposer({
     const hasScenes = e.dataTransfer.types.includes(SCENE_DRAG_MIME);
     const hasLibrary = e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME);
     const hasAsset = hasAssetDrag(e);
-    if (!hasFiles && !hasScenes && !hasLibrary && !hasAsset) return;
+    const hasConversation = hasConversationDrag(e);
+    if (!hasFiles && !hasScenes && !hasLibrary && !hasAsset && !hasConversation) return;
     e.preventDefault();
     dragDepthRef.current += 1;
     setDropActive(true);
-    setDragKind(hasScenes ? 'scene' : hasLibrary ? 'library' : hasAsset ? 'asset' : 'file');
+    setDragKind(hasConversation ? 'conversation'
+      : hasScenes ? 'scene' : hasLibrary ? 'library' : hasAsset ? 'asset' : 'file');
   }, [readOnly]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -875,7 +1010,8 @@ export function ChatComposer({
     if (!e.dataTransfer.types.includes('Files')
         && !e.dataTransfer.types.includes(SCENE_DRAG_MIME)
         && !e.dataTransfer.types.includes(PROJECT_LIBRARY_DRAG_MIME)
-        && !hasAssetDrag(e)) return;
+        && !hasAssetDrag(e)
+        && !hasConversationDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }, [readOnly]);
@@ -919,6 +1055,21 @@ export function ChatComposer({
       void projectLibraryDropRef.current(libraryPayload);
       return;
     }
+    const conversationPayload = parseConversationDragPayload(
+      e.dataTransfer.getData(CONVERSATION_DRAG_MIME),
+    );
+    if (conversationPayload) {
+      const conversation = conversations.find((item) => item.id === conversationPayload.id
+        && item.projectId === projectId);
+      if (!conversation) {
+        notify({ title: '该对话不属于当前项目，无法引用', variant: 'error' });
+      } else if (referenceQuotaExceeded(pendingReferences, 'conversation')) {
+        notify({ title: `对话引用最多 ${MENTION_LIMITS.conversation} 个`, variant: 'error' });
+      } else {
+        insertReference(conversationReference(conversation, pendingReferences));
+      }
+      return;
+    }
     const scenePayload = e.dataTransfer.getData(SCENE_DRAG_MIME) || e.dataTransfer.getData('text/plain');
     if (scenePayload) {
       try {
@@ -931,7 +1082,7 @@ export function ChatComposer({
     }
     const files = Array.from(e.dataTransfer.files ?? []);
     if (files.length > 0) void uploadRefImages(files);
-  }, [readOnly, sendMessage, uploadRefImages, addRefImageUrls, pickedReferenceVideos, pickedReferenceAudios, setPickedReferenceMedia]);
+  }, [readOnly, sendMessage, uploadRefImages, addRefImageUrls, pickedReferenceVideos, pickedReferenceAudios, setPickedReferenceMedia, conversations, projectId, pendingReferences]);
 
   const openMenu = () => {
     if (readOnly) return;
@@ -1117,6 +1268,7 @@ export function ChatComposer({
   const hasComposerExtras = !!(
     compressing || clearingContext || compressNotice
     || (!readOnly && hasPendingAnnotations) || (!readOnly && hasSideChatSelections)
+    || queuedItems.length > 0
     || hasAttachmentRow || pendingPicUrls.length > 0 || canvasBinding || canvasExitPending || readOnly
   );
   const collapsed = isComposerCollapsed(compact, focused || engaged)
@@ -1143,20 +1295,20 @@ export function ChatComposer({
       onBlurCapture={() => setEngaged(false)}
       style={{
       width: '100%', maxWidth: collapsed ? DS.maxContentCompact : DS.maxContent, margin: '0 auto',
-      border: `1px solid ${dropActive ? DS.brand : focused ? 'rgba(65,118,230,0.45)' : DS.border}`,
-      borderRadius: 18,
-      // 输入卡是绝对定位盖在消息流上的，拖拽高亮不能靠「加一点蓝的透明色」——
+      border: `1px solid ${dropActive ? DS.brand : focused ? 'color-mix(in srgb, var(--color-primary) 45%, transparent)' : DS.border}`,
+      borderRadius: 16,
+      // 输入卡是绝对定位盖在消息流上的，拖拽高亮不能靠「加一点主色的透明色」——
       // 那样背后只要有图，整张卡就直接透出来，看起来像坏了。落点提示交给边框和光晕，
-      // 底色保持不透明（只做一点点蓝调）。
+      // 底色保持不透明（只做一点点暖调）。
       background: dropActive
-        ? '#f2f6ff'
-        : collapsed ? 'rgba(255, 255, 255, 0.62)' : 'white',
+        ? 'var(--color-primary-tint)'
+        : collapsed ? 'color-mix(in srgb, white 78%, transparent)' : 'white',
       backdropFilter: collapsed ? 'blur(10px)' : undefined,
       WebkitBackdropFilter: collapsed ? 'blur(10px)' : undefined,
       boxShadow: dropActive
-        ? '0 0 0 3px rgba(65,118,230,0.14), 0 0 24px rgba(65,118,230,0.20)'
-        : focused ? '0 0 0 3px rgba(65,118,230,0.10), 0 0 20px rgba(65,118,230,0.18)'
-          : collapsed ? '0 10px 26px -14px rgba(20, 20, 19, 0.35)' : '0 2px 12px rgba(0, 0, 0, 0.06)',
+        ? '0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent), var(--shadow-md)'
+        : focused ? '0 0 0 3px color-mix(in srgb, var(--color-primary) 8%, transparent), var(--shadow-sm)'
+          : collapsed ? 'var(--shadow-md)' : 'var(--shadow-sm)',
       transition: 'border-color 0.2s, box-shadow 0.2s, background-color 240ms ease, padding 240ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 240ms ease, max-width 260ms cubic-bezier(0.22, 1, 0.36, 1)',
       padding: collapsed ? '4px 6px 4px 12px' : '10px 14px 7px',
       display: 'flex',
@@ -1228,6 +1380,7 @@ export function ChatComposer({
         </div>
       )}
       {!readOnly && hasSideChatSelections && <SideChatContextChip />}
+      <SendQueuePanel conversationId={activeConversationId} />
       {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
         || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
         || fileAttachments.length > 0 || pendingGroup || boundGroups.length > 0) && (
@@ -1388,7 +1541,7 @@ export function ChatComposer({
           {(canvasEditContext?.mediaRefs.length ?? 0) > 0 && (
             <button onClick={() => setCanvasMediaOpen(true)} style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '5px 10px', borderRadius: 8, background: 'rgba(65,118,230,0.08)',
+              padding: '5px 10px', borderRadius: 8, background: 'color-mix(in srgb, var(--color-primary) 8%, transparent)',
               color: DS.brand, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
             }}>
               <Paperclip size={13} strokeWidth={2} />
@@ -1433,7 +1586,7 @@ export function ChatComposer({
       {(canvasBinding || canvasExitPending) && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-          borderRadius: 12, background: 'rgba(65,118,230,0.07)',
+          borderRadius: 12, background: 'color-mix(in srgb, var(--color-primary) 7%, transparent)',
           color: DS.brand, fontSize: 13,
         }}>
           <span style={{
@@ -1531,7 +1684,7 @@ export function ChatComposer({
             }
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
           }}
-          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令插入当前回合…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
+          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : dragKind === 'conversation' ? '松开鼠标引用该对话' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令插入当前回合…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
           disabled={readOnly || (busy && !canSteer)}
           rows={collapsed ? 1 : 2}
           style={{
@@ -1633,8 +1786,10 @@ export function ChatComposer({
         <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0 }}>
           <span className={`chat-composer-extra chat-composer-extra--inline${collapsed ? ' is-collapsed' : ''}`}>
           <MicButton
+            ref={micRef}
             onToggle={handleMicToggle}
             onPcm={handlePcm}
+            shortcut={narrowRow ? undefined : 'Ctrl/Cmd+Shift+1'}
             // 录音中不禁用（识别中也能停止）；流式回复中非录音态禁用开始
             disabled={readOnly || (busy && !recording)}
           />
@@ -1645,37 +1800,38 @@ export function ChatComposer({
               title="停止生成"
               aria-label="停止生成"
               style={{
-                height: 38, width: narrowRow ? 38 : undefined,
-                padding: narrowRow ? 0 : '0 16px', borderRadius: 12, border: 'none',
-                background: 'rgba(217, 45, 32, 0.9)', color: 'white', fontSize: 14, fontWeight: 500,
+                height: 36, width: narrowRow ? 36 : undefined,
+                padding: narrowRow ? 0 : '0 18px', borderRadius: 8, border: 'none',
+                background: 'rgba(184, 67, 63, 0.92)', color: 'white', fontSize: 13, fontWeight: 600,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 flexShrink: 0,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgb(217, 45, 32)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(217, 45, 32, 0.9)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-error)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(184, 67, 63, 0.92)'; }}
             ><span style={{ width: 9, height: 9, borderRadius: 2, background: 'white', display: 'inline-block' }} />{!narrowRow && '停止生成'}</button>
           ) : (
             <button
               onClick={handleSend}
               disabled={!canSend}
-              title={canSteerNow ? '插入当前回合' : canSteer ? '停止并发送（带附件或引用）' : '发送'}
-              aria-label={canSteerNow ? '插入并继续' : canSteer ? '停止并发送' : '发送'}
+              title={sendButtonTitle}
+              aria-label={sendButtonLabel}
               style={{
-                height: 38, width: narrowRow ? 38 : undefined,
-                padding: narrowRow ? 0 : '0 22px', borderRadius: 12, border: 'none',
-                background: DS.brand, color: 'white', fontSize: 15, fontWeight: 500,
+                height: 36, width: narrowRow ? 36 : undefined,
+                padding: narrowRow ? 0 : '0 18px', borderRadius: 8, border: 'none',
+                background: canSend ? DS.brand : 'var(--color-surface-cream-strong)',
+                color: canSend ? 'white' : 'var(--color-muted)',
+                fontSize: 13, fontWeight: 600,
                 cursor: canSend ? 'pointer' : 'not-allowed',
-                opacity: canSend ? 1 : 0.45,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 flexShrink: 0,
                 transition: 'background 0.15s',
               }}
               onMouseEnter={(e) => { if (canSend) e.currentTarget.style.background = DS.brandHover; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = DS.brand; }}
+              onMouseLeave={(e) => { if (canSend) e.currentTarget.style.background = DS.brand; }}
             >{narrowRow
-              ? <ArrowUp size={18} strokeWidth={2.2} aria-hidden="true" />
-              : (canSteerNow ? '插入并继续' : canSteer ? '停止并发送' : '发送')}</button>
+              ? <ArrowUp size={17} strokeWidth={2.3} aria-hidden="true" />
+              : sendButtonLabel}</button>
           )}
         </div>
       </div>

@@ -193,3 +193,77 @@
     animation: none;
   }
 }
+
+/* 任务筛选与重试（2026-10-18） */
+.library-task-queue {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.library-task-queue__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--library-line);
+}
+
+.library-task-queue__filters button {
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--library-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.library-task-queue__filters button:hover {
+  background: var(--library-soft);
+  color: var(--library-ink);
+}
+
+.library-task-queue__filters button.is-active {
+  border-color: rgba(200, 121, 88, 0.4);
+  background: rgba(200, 121, 88, 0.1);
+  color: #9a5a3f;
+}
+
+.library-task-queue__filters button.is-retry-all {
+  border-color: rgba(224, 91, 75, 0.35);
+  color: #b23b30;
+}
+
+.library-task-queue__filters button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.library-task-queue__spacer {
+  flex: 1;
+}
+
+.library-task-row__batch {
+  display: block;
+  color: #9a5a3f;
+  font-size: 9.5px;
+}
+
+.library-task-row__retry {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  align-self: center;
+  padding: 4px 7px;
+  border: 1px solid rgba(200, 121, 88, 0.4);
+  border-radius: 7px;
+  background: rgba(200, 121, 88, 0.08);
+  color: #9a5a3f;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.library-task-row__retry:hover {
+  background: rgba(200, 121, 88, 0.16);
+}

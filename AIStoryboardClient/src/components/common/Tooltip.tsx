@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import WarmTooltip, {
   WarmTooltipGroup,
   type WarmTooltipGroupProps,
@@ -11,6 +11,8 @@ export type TooltipSide = WarmTooltipSide;
 export interface TooltipProps {
   /** 标签文案，保持一句短语 */
   label: string;
+  /** 快捷键提示：渲染在气泡右侧的 kbd 里（WarmTooltip 原生能力） */
+  shortcut?: ReactNode;
   side?: TooltipSide;
   /** 传给触发器包裹层（需要用 .tooltip-fill 之类接管布局时用） */
   className?: string;
@@ -38,10 +40,11 @@ const DEFAULTS = {
 
 // 暖机 tooltip：同一 TooltipGroup 内第一个标签冷启动等 400ms，
 // 之后 300ms 暖窗内移到相邻触发器立即展开。
-export function Tooltip({ label, side = 'top', className, disabled, children }: TooltipProps) {
+export function Tooltip({ label, shortcut, side = 'top', className, disabled, children }: TooltipProps) {
   return (
     <WarmTooltip
       content={label}
+      shortcut={shortcut}
       side={side}
       className={className}
       disabled={disabled}

@@ -37,12 +37,20 @@ public class GeminiRouteAdapter implements ChatImageVendorAdapter {
 
     @Override
     public RouteResult forward(String path, String requestBody, Channel channel, String apiKey) throws Exception {
+        return forward(path, requestBody, channel, apiKey, null);
+    }
+
+    @Override
+    public RouteResult forward(String path, String requestBody, Channel channel, String apiKey,
+                               Integer timeoutMs) throws Exception {
         int imageN = path.contains("images/generations") ? readImageN(requestBody) : 1;
         if (imageN > 1) {
-            return forwardGeminiImageMulti(channel, apiKey, requestBody, imageN);
+            return forwardGeminiImageMulti(channel, apiKey, requestBody, imageN, timeoutMs);
         }
         String geminiBody = geminiConverter.toGeminiRequest(requestBody);
-        HttpResponse<String> resp = upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody);
+        HttpResponse<String> resp = timeoutMs == null
+                ? upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody)
+                : upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody, timeoutMs);
         if (resp.statusCode() == 200) {
             return new RouteResult(200, geminiConverter.toOpenAiResponse(resp.body()));
         }
@@ -52,9 +60,17 @@ public class GeminiRouteAdapter implements ChatImageVendorAdapter {
     @Override
     public void stream(String path, String requestBody, Channel channel, String apiKey,
                        Consumer<byte[]> sink) throws Exception {
+        stream(path, requestBody, channel, apiKey, sink, null);
+    }
+
+    @Override
+    public void stream(String path, String requestBody, Channel channel, String apiKey,
+                       Consumer<byte[]> sink, Integer timeoutMs) throws Exception {
         // gemini 无原生 SSE 透传路径：降级非流式，转成 OpenAI 格式一次性写回
         String geminiBody = geminiConverter.toGeminiRequest(requestBody);
-        HttpResponse<String> resp = upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody);
+        HttpResponse<String> resp = timeoutMs == null
+                ? upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody)
+                : upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody, timeoutMs);
         byte[] out = (resp.statusCode() == 200
                 ? geminiConverter.toOpenAiResponse(resp.body())
                 : resp.body()).getBytes(StandardCharsets.UTF_8);
@@ -62,13 +78,16 @@ public class GeminiRouteAdapter implements ChatImageVendorAdapter {
     }
 
     /** Gemini 图片多图：循环 N 次 generateContent，逐次转 OpenAI 格式并合并 data[]；单张失败跳过，全部失败回首个错误 */
-    private RouteResult forwardGeminiImageMulti(Channel channel, String apiKey, String requestBody, int n) throws Exception {
+    private RouteResult forwardGeminiImageMulti(Channel channel, String apiKey, String requestBody,
+                                                int n, Integer timeoutMs) throws Exception {
         String geminiBody = geminiConverter.toGeminiRequest(requestBody);
         ArrayNode merged = objectMapper.createArrayNode();
         int firstErrorStatus = 0;
         String firstErrorBody = null;
         for (int i = 0; i < n; i++) {
-            HttpResponse<String> resp = upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody);
+            HttpResponse<String> resp = timeoutMs == null
+                    ? upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody)
+                    : upstreamClient.postGemini(channel.getBaseUrl(), apiKey, geminiBody, timeoutMs);
             if (resp.statusCode() == 200) {
                 JsonNode oai = objectMapper.readTree(geminiConverter.toOpenAiResponse(resp.body()));
                 JsonNode data = oai.path("data");

@@ -27,9 +27,24 @@ public interface ChatImageVendorAdapter {
     RouteResult forward(String path, String requestBody, Channel channel, String apiKey) throws Exception;
 
     /**
+     * 带超时覆盖的同步转发（渠道/路由配置了 timeout_ms 时使用）。
+     * 默认忽略 timeout，兼容不关心超时的适配器。
+     */
+    default RouteResult forward(String path, String requestBody, Channel channel, String apiKey,
+                                Integer timeoutMs) throws Exception {
+        return forward(path, requestBody, channel, apiKey);
+    }
+
+    /**
      * 流式转发（chat SSE）：逐块回调 sink。不支持 SSE 透传的渠道可降级一次性写回。
      * 编排器负责渠道轮换与客户端中断判定；本方法只做单渠道转发。
      */
     void stream(String path, String requestBody, Channel channel, String apiKey,
                 Consumer<byte[]> sink) throws Exception;
+
+    /** 带超时覆盖的流式转发；默认忽略 timeout。 */
+    default void stream(String path, String requestBody, Channel channel, String apiKey,
+                        Consumer<byte[]> sink, Integer timeoutMs) throws Exception {
+        stream(path, requestBody, channel, apiKey, sink);
+    }
 }

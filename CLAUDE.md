@@ -440,6 +440,22 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
   `DELETE /api/agent/memories/{memoryId}`，以及项目级 `GET/DELETE /projects/{projectId}/memories`；
   V42 migration 已在本地 `newworkflow` / `ai_storyboard` 执行，其他环境仍需手动执行。
   个人信息从弹窗改为独立路由 `/account`，账号信息、密码和记忆管理（查看/编辑/删除）都在该页。
+  2026-10-18 起 `/account` 为左侧菜单：个人信息（名称/邮箱/生成数据/余额占位/改密）、
+  余额明细（摘要 + 空变动记录，当前无计费数据）、记忆管理、通用设置、帮助与反馈；
+  管理员额外看到「反馈收件箱」。通用设置按账号持久化在
+  `public.user_settings`（手动迁移 `db/migration/V49__user_settings_and_feedback.sql`，
+  项目未接 Flyway，需 psql 执行）：`defaultApprovalMode`（新会话默认审批模式）、
+  `busySendBehavior`（`queue` 排队 / `steer` 插队）、`workStepDisplay`（`thinking` / `standard` / `detailed`）；
+  接口 `GET/PUT /api/user/settings`。**新会话默认审批模式只有一个入口**：`agentStore` 的
+  `newConversation` / 删除当前会话 / 切换会话回退值都读 `accountSettingsStore` 的
+  `defaultApprovalMode`，禁止再写死 `DEFAULT_AGENT_APPROVAL_MODE`（否则设置完全访问后点「新对话」
+  又回到方案批准）。设置同时缓存到 `localStorage` 并监听 `storage` 事件，多标签页即时同步。
+  排队发送是前端会话级队列（`sendQueueStore` + sessionStorage）：
+  输入框上方 `SendQueuePanel` 支持置顶、上下移、删除、清空；当前回合终态后逐条取出作为普通 turn 发送，
+  不进入当前上下文，也不新增后端排队接口。帮助与反馈写 `public.user_feedback`（不收集联系方式），
+  截图先走 `POST /api/files/upload`，提交接口 `POST /api/user/feedback`；管理员用
+  `GET /api/user/feedback` 查看收件箱、`PATCH /api/user/feedback/{id}` 标记已处理（仅 `ROLE_ADMIN`）。
+  均经 8080 → 8082，**不经过 8083 LLM 网关**（8083 只做模型协议转换）。
   不做自动灌对话、不使用 embedding（字段预留，后续接 pgvector）。
 - `project_creative_contexts` 保存项目级目标、创意方向、风格、参考、硬/软约束、反馈和模型偏好；
   不保存跨项目记忆，也不引入建筑等垂直领域字段。
@@ -698,6 +714,7 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - **前端唯一真源是正文**：store 的 `pendingReferences` 只是目录，发送时用 `activeReferences(content,…)` 过滤「token 是否还在正文里」，插入时同口径清理。因此 `interruptAndSend` 不传 opts 也不丢引用；删掉标记=撤销引用。
 - **蓝色标记靠镜像层**：`ComposerMentionHighlight` 在 textarea 底下渲染同一段文本，两层共用 `COMPOSER_TEXT_METRICS`（字体/行高/换行/padding 一致），输入框外层因此有 `.chat-composer-input` 包裹层。
 - **项目库文档必须转存才能读**：`AgentDocumentService` 只认同会话 + `url` 前缀 `/api/files/files/` 的 reference 资产，`/api/library/media/**` 判「文档不存在」。`library_file` 引用由后端按 `mediaId` 归属校验 + 取字节 + 转存会话资产（`LibraryReferenceAssetService`），之后才走摘要与 `read_document`。**新通路必须保留这道转存。**
+- **会话引用（P2，2026-10-18 开放）**：`AgentReferenceRequest.kind=conversation` 由 `ConversationReferenceService` 解析，只允许「同一用户 + 同一项目」；取最近 30 条 user/assistant 消息做确定性摘录（单条 600 字、总 3200 字，不含工具事件/metadata），注入 `<turn-references>` 的 `kind=conversation` 行。越权、跨项目、临时会话、已删除会话一律 `kind=unresolved` 并给原因，不编造内容。前端 `@` 菜单「对话」组已启用；左侧会话列表可拖进输入框，写入 `application/x-moon-conversation` 负载并插入 `@对话《标题》`，不自动发送。摘要不是 LLM 生成。回归：`ConversationReferenceServiceTest`、`TurnContextMiddlewareReferenceTest`、`ChatComposer.test.tsx`、`AgentConversationList.test.tsx`。
 - **`<turn-references>` 不可信**：token/name 来自用户输入或标题，注入前折叠换行、去尖括号；`＋ → 上传分镜` 已统一为插入 `@分镜N`（不再勾完即发）。
 - 回归点：`ChatComposer.test.tsx`、`mentionReferences.test.ts`、`ComposerMentionHighlight.test.tsx`、`MessageBubbleMention.test.tsx`、`agentStore.test.ts`（`@ 引用资料`）、后端 `AgentReferencePassThroughTest`。
 
@@ -745,4 +762,8 @@ docker compose --env-file .env ps
 - **Frontend**: Functional components with hooks; Zustand for global state; Axios instances with interceptors for auth token injection
 - **API responses**: Wrapped in `ApiResponse<T>` with `code`, `message`, `data`
 - **Auth**: JWT access token (short-lived) + refresh token; `JwtAuthenticationFilter` on all routes except `/api/auth/**` and `/api/files/**`
+- **多标签页登录态**: 前端 Access Token 只存内存，不落 localStorage/SessionStorage；新标签页先通过同源
+  `BroadcastChannel`（`moon-auth-session`）向已登录标签页借 token，借不到才走 `/api/auth/refresh`
+  Cookie。`refreshAccessToken(force)` 只有 401 重试才强制轮换。改动这段逻辑时必须保留多标签页回退，
+  否则第三方 Cookie 策略或刷新轮换时序会让第二个标签页直接掉回 `/login`。
 - **CORS**: Configured in `SecurityConfig` via `CorsConfigurationSource` bean

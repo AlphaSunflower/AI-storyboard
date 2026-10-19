@@ -40,7 +40,11 @@ public class GenerationOutputServiceImpl implements GenerationOutputService {
         validate(event);
         String existing = repository.findExistingOutput(
                 event.producer(), event.generationRecordId(), event.resultIndex()).orElse(null);
-        if (existing != null) return assetCatalogService.get(event.ownerUserId(), existing).asset();
+        if (existing != null) {
+            repository.attachOutputConversation(existing, metadataString(event, "conversationId"));
+            repository.attachOutputScene(existing, metadataString(event, "sceneId"));
+            return assetCatalogService.get(event.ownerUserId(), existing).asset();
+        }
 
         String objectKey = objectKey(event.resultUrl());
         String mediaType = event.mediaType() == null || event.mediaType().isBlank()
@@ -78,7 +82,9 @@ public class GenerationOutputServiceImpl implements GenerationOutputService {
                         MediaRole.REFERENCE,
                         true,
                         null,
-                        0
+                        0,
+                        metadataString(event, "conversationId"),
+                        metadataString(event, "sceneId")
                 ),
                 idempotencyKey);
         if (event.groupId() != null && !event.groupId().isBlank()) {

@@ -84,7 +84,7 @@ export function FullAccessConfirmDialog({
               id="full-access-title"
               style={{
                 margin: 0,
-                color: 'rgb(15,17,21)',
+                color: 'var(--color-ink)',
                 fontSize: 17,
                 lineHeight: 1.35,
                 fontWeight: 650,
@@ -97,7 +97,7 @@ export function FullAccessConfirmDialog({
               id="full-access-description"
               style={{
                 margin: '7px 0 0',
-                color: 'rgb(96,100,108)',
+                color: 'var(--color-muted)',
                 fontSize: 13,
                 lineHeight: 1.65,
               }}

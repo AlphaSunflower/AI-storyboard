@@ -104,7 +104,7 @@ export function ContextUsageRing({
             cy={center}
             r={radius}
             fill="none"
-            stroke={`rgba(65, 118, 230, 0.18)`}
+            stroke={`color-mix(in srgb, var(--color-primary) 18%, transparent)`}
             strokeWidth={stroke}
           />
           <circle

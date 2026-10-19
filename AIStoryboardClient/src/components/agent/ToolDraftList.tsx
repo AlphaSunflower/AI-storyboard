@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { AgentMessageMetadata, AgentTaskCardRef, AgentTaskView, AgentToolDraft } from '../../api/agent';
 import { useAgentStore } from '../../stores/agentStore';
+import { useWorkStepDisplay } from '../../stores/accountSettingsStore';
 import {
   collectDraftRenderIntents,
   collectRenderIntents,
@@ -202,11 +203,13 @@ function TaskGraphDetail({ draft }: { draft: AgentToolDraft }) {
  * （无障碍与 `queryByText` 都依赖这一点），用 rAF 延迟挂载的过渡会让这一步变成异步。
  * 所以入场用纯 CSS 关键帧，收起即时。
  */
-function ToolDraftRow({ toolCallId, draft, nestedTasks = [] }: {
+function ToolDraftRow({ toolCallId, draft, nestedTasks = [], display = 'detailed' }: {
   toolCallId: string;
   draft: AgentToolDraft;
   /** 归属该工具卡的后台任务（复合旅程的父任务与逐步骤子任务）。 */
   nestedTasks?: AgentTaskView[];
+  /** 工作步骤展示级别：标准只保留动作名 + 状态，详细才展开入参/输出。 */
+  display?: 'thinking' | 'standard' | 'detailed';
 }) {
   const [expanded, setExpanded] = useState(false);
   const intent = parseRenderIntent(draft.render);
@@ -218,6 +221,33 @@ function ToolDraftRow({ toolCallId, draft, nestedTasks = [] }: {
   // 展开后完整输出就在下面，摘要行再重复一遍是冗余；折叠态才需要它做一行速览。
   const preview = expanded ? '' : toolPreviewText(draft);
   const rawName = draft.name || 'tool';
+  const compact = display !== 'detailed';
+
+  if (compact) {
+    return (
+      <article
+        className="tool-node tool-node--compact"
+        data-tone={tone}
+        data-tool-call-id={toolCallId}
+        data-tool-status={draft.status}
+        style={toolTimelineStyle(tone) as CSSProperties}
+      >
+        <span className="tool-node__dot" aria-hidden="true" />
+        <div className="tool-node__body">
+          <div className="tool-node__toggle" style={{ cursor: 'default' }}>
+            <span className="tool-node__icon" aria-hidden="true">
+              <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+            </span>
+            <span className="tool-node__title">{toolDisplayName(draft.name)}</span>
+            <span className="tool-node__chip">
+              <span className="tool-node__chip-dot" aria-hidden="true" />
+              {toolStatusLabel(draft.status)}
+            </span>
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <article
@@ -313,6 +343,7 @@ export function ToolDraftList({ drafts, liveAssistantId }: {
   drafts?: Record<string, AgentToolDraft>;
   liveAssistantId?: string;
 }) {
+  const display = useWorkStepDisplay();
   const liveDrafts = useAgentStore((state) => {
     const conversationId = state.activeConversationId;
     if (!conversationId) return undefined;
@@ -328,6 +359,22 @@ export function ToolDraftList({ drafts, liveAssistantId }: {
   // 只有「确实渲染了工具卡」的 toolCallId 才会折叠步骤，未命中时任务保持既有独立卡片。
   const nested = foldTasksByToolCallId(Object.values(tasks), entries.map(([toolCallId]) => toolCallId));
   if (entries.length === 0) return null;
+
+  // 只看见思考：保留「调用工具」这个状态字眼，但不暴露工具名、入参、输出和步骤。
+  if (display === 'thinking') {
+    const running = entries.some(([, draft]) => draft.status === 'node_started'
+      || draft.status === 'node_running');
+    return (
+      <div className="tool-timeline tool-timeline--minimal" data-tool-draft-list="">
+        <div className="tool-timeline__head">
+          <span className="tool-timeline__head-icon" aria-hidden="true">
+            <Wrench size={12} strokeWidth={2} />
+          </span>
+          <span>{running ? '正在调用工具…' : `已调用 ${entries.length} 个工具`}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -347,6 +394,7 @@ export function ToolDraftList({ drafts, liveAssistantId }: {
           toolCallId={toolCallId}
           draft={draft}
           nestedTasks={nested.get(toolCallId) ?? []}
+          display={display}
         />
       ))}
     </div>

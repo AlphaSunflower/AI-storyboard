@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LLM 网关管理后台</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261019b">
 </head>
 <body>
 
@@ -33,13 +33,17 @@
     <aside class="sidebar">
       <div class="sidebar-brand"><span class="brand-dot"></span><span>LLM 网关</span></div>
       <nav class="nav">
-        <a class="nav-item" data-section="dashboard" href="#/dashboard" data-icon="📊">仪表盘</a>
-        <a class="nav-item" data-section="channels" href="#/channels" data-icon="🔌">渠道管理</a>
-        <a class="nav-item" data-section="routes" href="#/routes" data-icon="🔀">模型路由</a>
-        <a class="nav-item" data-section="api-keys" href="#/api-keys" data-icon="🔑">API Key</a>
-        <a class="nav-item" data-section="logs" href="#/logs" data-icon="📋">调用日志</a>
-        <a class="nav-item" data-section="users" href="#/users" data-icon="👤">用户管理</a>
-        <a class="nav-item" data-section="config" href="#/config" data-icon="⚙">系统配置</a>
+        <div class="nav-section">运行</div>
+        <a class="nav-item" data-section="dashboard" href="#/dashboard"><span class="nav-label">仪表盘</span></a>
+        <a class="nav-item" data-section="channels" href="#/channels"><span class="nav-label">渠道管理</span></a>
+        <a class="nav-item" data-section="routes" href="#/routes"><span class="nav-label">模型路由</span></a>
+        <a class="nav-item" data-section="models" href="#/models"><span class="nav-label">模型配置</span></a>
+        <a class="nav-item" data-section="yaml" href="#/yaml"><span class="nav-label">配置即代码</span></a>
+        <a class="nav-item" data-section="api-keys" href="#/api-keys"><span class="nav-label">API Key</span></a>
+        <a class="nav-item" data-section="logs" href="#/logs"><span class="nav-label">调用日志</span></a>
+        <div class="nav-section">系统</div>
+        <a class="nav-item" data-section="users" href="#/users"><span class="nav-label">用户管理</span></a>
+        <a class="nav-item" data-section="config" href="#/config"><span class="nav-label">系统配置</span></a>
       </nav>
       <div class="sidebar-user">
         <span class="user-name" id="sidebar-username">-</span>
@@ -51,6 +55,8 @@
       <section id="view-dashboard" class="view"></section>
       <section id="view-channels" class="view"></section>
       <section id="view-routes" class="view"></section>
+      <section id="view-models" class="view"></section>
+      <section id="view-yaml" class="view"></section>
       <section id="view-api-keys" class="view"></section>
       <section id="view-logs" class="view"></section>
       <section id="view-users" class="view"></section>
@@ -77,7 +83,7 @@
       <p class="plainkey-name" id="plainkey-name"></p>
       <div class="plainkey-box"><code id="plainkey-value"></code></div>
       <button type="button" class="btn btn-primary btn-block" id="plainkey-copy">复制 Key</button>
-      <p class="plainkey-warn">⚠ 该 Key 仅显示这一次，关闭后无法再次查看，请立即复制并妥善保存。</p>
+      <p class="plainkey-warn">该 Key 仅显示这一次，关闭后无法再次查看，请立即复制并妥善保存。</p>
       <button type="button" class="btn btn-ghost btn-block" id="plainkey-close">我知道了，关闭</button>
     </div>
   </div>
@@ -85,6 +91,6 @@
   <!-- ===== toast 容器 ===== -->
   <div id="toast-box" class="toast-box"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20261019b"></script>
 </body>
 </html>

@@ -45,6 +45,10 @@ public class ChannelServiceImpl implements ChannelService {
         channel.setModels(request.getModels());
         channel.setEnabled(request.getEnabled() == null ? true : request.getEnabled());
         channel.setPriority(request.getPriority() == null ? 0 : request.getPriority());
+        channel.setWeight(request.getWeight() == null ? 1 : Math.max(1, request.getWeight()));
+        channel.setTimeoutMs(request.getTimeoutMs() == null || request.getTimeoutMs() <= 0
+                ? null : request.getTimeoutMs());
+        channel.setMaxRetries(request.getMaxRetries() == null ? 0 : Math.max(0, request.getMaxRetries()));
         channel.setCreatedAt(OffsetDateTime.now());
         channel.setUpdatedAt(OffsetDateTime.now());
         channelMapper.insert(channel);
@@ -75,6 +79,10 @@ public class ChannelServiceImpl implements ChannelService {
         if (request.getModels() != null) channel.setModels(request.getModels());  // models 可更新为空串清空
         if (request.getEnabled() != null) channel.setEnabled(request.getEnabled());
         if (request.getPriority() != null) channel.setPriority(request.getPriority());
+        if (request.getWeight() != null) channel.setWeight(Math.max(1, request.getWeight()));
+        if (request.getTimeoutMs() != null) channel.setTimeoutMs(
+                request.getTimeoutMs() <= 0 ? null : request.getTimeoutMs());
+        if (request.getMaxRetries() != null) channel.setMaxRetries(Math.max(0, request.getMaxRetries()));
         channel.setUpdatedAt(OffsetDateTime.now());
         channelMapper.updateById(channel);
         // enabled/priority/baseUrl/models 任一变化都会影响模型目录；渠道是按类型共享的，只能全量失效

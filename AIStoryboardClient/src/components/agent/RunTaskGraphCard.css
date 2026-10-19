@@ -4,7 +4,7 @@
   border: 1px solid var(--tc-rail, #e5e0d8);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(204, 120, 92, 0.045), transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 4.5%, transparent), transparent 42%),
     var(--tc-surface, #faf9f5);
   box-shadow: 0 1px 0 rgba(20, 20, 19, 0.03);
 }
@@ -78,9 +78,9 @@
 }
 
 .run-task-graph__stat--repair {
-  border-color: rgba(204, 120, 92, 0.28);
-  color: var(--color-primary, #cc785c);
-  background: rgba(204, 120, 92, 0.08);
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  color: var(--color-primary, var(--color-primary));
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 }
 
 .run-task-graph__stat--ok {
@@ -115,8 +115,8 @@
 }
 
 .run-task-graph__node[data-status='RUNNING'] {
-  border-left-color: var(--color-primary, #cc785c);
-  background: rgba(204, 120, 92, 0.035);
+  border-left-color: var(--color-primary, var(--color-primary));
+  background: color-mix(in srgb, var(--color-primary) 3.5%, transparent);
 }
 
 .run-task-graph__node[data-status='COMPLETED'] {
@@ -136,7 +136,7 @@
 .run-task-graph__node[data-repair] {
   border-style: dashed;
   border-left-style: solid;
-  background: rgba(204, 120, 92, 0.035);
+  background: color-mix(in srgb, var(--color-primary) 3.5%, transparent);
 }
 
 .run-task-graph__dot {
@@ -150,8 +150,8 @@
 }
 
 .run-task-graph__dot[data-status='RUNNING'] {
-  background: var(--color-primary, #cc785c);
-  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.14);
+  background: var(--color-primary, var(--color-primary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
   animation: run-task-graph-pulse 1.2s ease-in-out infinite;
 }
 
@@ -189,7 +189,7 @@
 .run-task-graph__role--writing { color: #7b5a3a; background: rgba(123, 90, 58, 0.11); }
 .run-task-graph__role--visual { color: #6a5477; background: rgba(106, 84, 119, 0.1); }
 .run-task-graph__role--review { color: #2f6b4e; background: rgba(63, 127, 95, 0.1); }
-.run-task-graph__role--repair { color: var(--color-primary, #cc785c); background: rgba(204, 120, 92, 0.11); }
+.run-task-graph__role--repair { color: var(--color-primary, var(--color-primary)); background: color-mix(in srgb, var(--color-primary) 11%, transparent); }
 
 .run-task-graph__id {
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -199,11 +199,11 @@
 
 .run-task-graph__badge {
   padding: 0 5px;
-  border: 1px dashed rgba(204, 120, 92, 0.45);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 45%, transparent);
   border-radius: 3px;
   font-size: 9px;
   line-height: 1.55;
-  color: var(--color-primary, #cc785c);
+  color: var(--color-primary, var(--color-primary));
 }
 
 .run-task-graph__status {
@@ -217,8 +217,8 @@
 }
 
 .run-task-graph__status[data-status='RUNNING'] {
-  color: var(--color-primary, #cc785c);
-  background: rgba(204, 120, 92, 0.1);
+  color: var(--color-primary, var(--color-primary));
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
 }
 
 .run-task-graph__status[data-status='COMPLETED'] {

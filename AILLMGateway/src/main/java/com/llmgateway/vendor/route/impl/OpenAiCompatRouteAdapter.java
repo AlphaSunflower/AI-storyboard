@@ -29,15 +29,29 @@ public class OpenAiCompatRouteAdapter implements ChatImageVendorAdapter {
 
     @Override
     public RouteResult forward(String path, String requestBody, Channel channel, String apiKey) {
-        HttpResponse<String> resp = upstreamClient.postJson(channel.getBaseUrl(), path, apiKey, requestBody);
+        return forward(path, requestBody, channel, apiKey, null);
+    }
+
+    @Override
+    public RouteResult forward(String path, String requestBody, Channel channel, String apiKey, Integer timeoutMs) {
+        HttpResponse<String> resp = timeoutMs == null
+                ? upstreamClient.postJson(channel.getBaseUrl(), path, apiKey, requestBody)
+                : upstreamClient.postJson(channel.getBaseUrl(), path, apiKey, requestBody, timeoutMs);
         return new RouteResult(resp.statusCode(), resp.body());
     }
 
     @Override
     public void stream(String path, String requestBody, Channel channel, String apiKey,
                        Consumer<byte[]> sink) throws Exception {
-        HttpResponse<java.io.InputStream> resp = upstreamClient.postJsonStream(
-                channel.getBaseUrl(), path, apiKey, requestBody);
+        stream(path, requestBody, channel, apiKey, sink, null);
+    }
+
+    @Override
+    public void stream(String path, String requestBody, Channel channel, String apiKey,
+                       Consumer<byte[]> sink, Integer timeoutMs) throws Exception {
+        HttpResponse<java.io.InputStream> resp = timeoutMs == null
+                ? upstreamClient.postJsonStream(channel.getBaseUrl(), path, apiKey, requestBody)
+                : upstreamClient.postJsonStream(channel.getBaseUrl(), path, apiKey, requestBody, timeoutMs);
         if (resp.statusCode() != 200) {
             String err = new String(resp.body().readAllBytes(), StandardCharsets.UTF_8);
             throw new RuntimeException("upstream " + resp.statusCode() + ": " + err);

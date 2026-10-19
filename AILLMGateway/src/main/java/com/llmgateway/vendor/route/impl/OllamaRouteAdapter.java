@@ -54,6 +54,12 @@ public class OllamaRouteAdapter implements ChatImageVendorAdapter {
 
     @Override
     public RouteResult forward(String path, String requestBody, Channel channel, String apiKey) throws Exception {
+        return forward(path, requestBody, channel, apiKey, null);
+    }
+
+    @Override
+    public RouteResult forward(String path, String requestBody, Channel channel, String apiKey,
+                               Integer timeoutMs) throws Exception {
         if (path.contains("images/")) {
             return unsupported(path);
         }
@@ -61,7 +67,9 @@ public class OllamaRouteAdapter implements ChatImageVendorAdapter {
         String model = body.path("model").asText("");
         String type = resolveType(requestBody);
         String ollamaBody = converter.toOllamaChatRequest(requestBody, loadDefaults(model, type), imageResolver());
-        HttpResponse<String> resp = upstreamClient.postJson(channel.getBaseUrl(), "/chat", apiKey, ollamaBody);
+        HttpResponse<String> resp = timeoutMs == null
+                ? upstreamClient.postJson(channel.getBaseUrl(), "/chat", apiKey, ollamaBody)
+                : upstreamClient.postJson(channel.getBaseUrl(), "/chat", apiKey, ollamaBody, timeoutMs);
         if (resp.statusCode() == 200) {
             return new RouteResult(200, converter.toOpenAiChatResponse(resp.body(), model));
         }
@@ -71,6 +79,12 @@ public class OllamaRouteAdapter implements ChatImageVendorAdapter {
     @Override
     public void stream(String path, String requestBody, Channel channel, String apiKey,
                        Consumer<byte[]> sink) throws Exception {
+        stream(path, requestBody, channel, apiKey, sink, null);
+    }
+
+    @Override
+    public void stream(String path, String requestBody, Channel channel, String apiKey,
+                       Consumer<byte[]> sink, Integer timeoutMs) throws Exception {
         if (path.contains("images/")) {
             throw new BusinessException(40001, "Ollama 不支持该端点: " + path);
         }
@@ -78,7 +92,9 @@ public class OllamaRouteAdapter implements ChatImageVendorAdapter {
         String model = body.path("model").asText("");
         String type = resolveType(requestBody);
         String ollamaBody = converter.toOllamaChatRequest(requestBody, loadDefaults(model, type), imageResolver());
-        HttpResponse<InputStream> resp = upstreamClient.postJsonStream(channel.getBaseUrl(), "/chat", apiKey, ollamaBody);
+        HttpResponse<InputStream> resp = timeoutMs == null
+                ? upstreamClient.postJsonStream(channel.getBaseUrl(), "/chat", apiKey, ollamaBody)
+                : upstreamClient.postJsonStream(channel.getBaseUrl(), "/chat", apiKey, ollamaBody, timeoutMs);
         if (resp.statusCode() != 200) {
             String err = new String(resp.body().readAllBytes(), StandardCharsets.UTF_8);
             throw new RuntimeException("upstream " + resp.statusCode() + ": " + err);

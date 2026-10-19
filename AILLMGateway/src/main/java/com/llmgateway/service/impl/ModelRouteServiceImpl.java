@@ -12,6 +12,7 @@ import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.ModelCatalogCache;
 import com.llmgateway.service.ModelRouteService;
+import com.llmgateway.service.ParamOverrideSupport;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,12 @@ public class ModelRouteServiceImpl implements ModelRouteService {
             throw new BusinessException(40401, "渠道不存在");
         }
         String type = normalizeType(request.getType());
+        Long duplicate = routeMapper.selectCount(new LambdaQueryWrapper<ModelRoute>()
+                .eq(ModelRoute::getModelName, request.getModelName().trim())
+                .eq(ModelRoute::getChannelId, request.getChannelId()));
+        if (duplicate != null && duplicate > 0) {
+            throw new BusinessException(40001, "该模型在该渠道已存在路由，请直接编辑");
+        }
 
         // 设为默认时，先清掉同类型其它路由的默认标记
         if (Boolean.TRUE.equals(request.getIsDefault())) {
@@ -77,6 +84,13 @@ public class ModelRouteServiceImpl implements ModelRouteService {
         route.setType(type);
         route.setDefaultParams(request.getDefaultParams());
         route.setIsDefault(Boolean.TRUE.equals(request.getIsDefault()));
+        route.setEnabled(request.getEnabled() == null ? true : request.getEnabled());
+        route.setPriority(request.getPriority() == null ? 0 : request.getPriority());
+        route.setWeight(normalizeWeight(request.getWeight()));
+        route.setUpstreamModel(blankToNull(request.getUpstreamModel()));
+        route.setTimeoutMs(normalizeTimeout(request.getTimeoutMs()));
+        route.setMaxRetries(normalizeRetries(request.getMaxRetries()));
+        route.setParamOverrides(normalizeOverrides(request.getParamOverrides()));
         route.setCreatedAt(OffsetDateTime.now());
         route.setUpdatedAt(OffsetDateTime.now());
         routeMapper.insert(route);
@@ -100,6 +114,8 @@ public class ModelRouteServiceImpl implements ModelRouteService {
         if (route == null) throw new BusinessException(40401, "路由不存在");
         // 记住改 type 前的旧类型：旧类型的列表缓存里还有这条路由，只清新类型会残留到 TTL 过期
         String previousType = route.getType();
+        String previousModel = route.getModelName();
+        String previousChannel = route.getChannelId();
         if (request.getModelName() != null) route.setModelName(request.getModelName().trim());
         if (request.getChannelId() != null) {
             if (channelMapper.selectById(request.getChannelId()) == null) {
@@ -109,6 +125,13 @@ public class ModelRouteServiceImpl implements ModelRouteService {
         }
         if (request.getDefaultParams() != null) route.setDefaultParams(request.getDefaultParams());
         if (request.getType() != null) route.setType(normalizeType(request.getType()));
+        if (request.getEnabled() != null) route.setEnabled(request.getEnabled());
+        if (request.getPriority() != null) route.setPriority(request.getPriority());
+        if (request.getWeight() != null) route.setWeight(normalizeWeight(request.getWeight()));
+        if (request.getUpstreamModel() != null) route.setUpstreamModel(blankToNull(request.getUpstreamModel()));
+        if (request.getTimeoutMs() != null) route.setTimeoutMs(normalizeTimeout(request.getTimeoutMs()));
+        if (request.getMaxRetries() != null) route.setMaxRetries(normalizeRetries(request.getMaxRetries()));
+        if (request.getParamOverrides() != null) route.setParamOverrides(normalizeOverrides(request.getParamOverrides()));
 
         // isDefault 变更处理
         if (request.getIsDefault() != null) {
@@ -119,6 +142,19 @@ public class ModelRouteServiceImpl implements ModelRouteService {
         }
 
         route.setUpdatedAt(OffsetDateTime.now());
+        // 只在「模型/渠道被改动」时检查重复：存量库里可能已有重复行（历史数据），
+        // 编辑其中一条不应被另一条卡死；导入时也走 update，必须能幂等更新。
+        boolean targetChanged = !Objects.equals(previousModel, route.getModelName())
+                || !Objects.equals(previousChannel, route.getChannelId());
+        if (targetChanged) {
+            Long duplicate = routeMapper.selectCount(new LambdaQueryWrapper<ModelRoute>()
+                    .eq(ModelRoute::getModelName, route.getModelName())
+                    .eq(ModelRoute::getChannelId, route.getChannelId())
+                    .ne(ModelRoute::getId, id));
+            if (duplicate != null && duplicate > 0) {
+                throw new BusinessException(40001, "该模型在该渠道已存在路由，请直接编辑那一条");
+            }
+        }
         routeMapper.updateById(route);
 
         // 同步 Redis
@@ -327,5 +363,39 @@ public class ModelRouteServiceImpl implements ModelRouteService {
         String t = type.trim().toLowerCase();
         if (!ROUTE_TYPES.contains(t)) throw new BusinessException(40001, "type 仅支持 text/image/video/vision");
         return t;
+    }
+
+    private int normalizeWeight(Integer weight) {
+        if (weight == null) return 1;
+        if (weight < 1) throw new BusinessException(40001, "weight 必须大于等于 1");
+        return weight;
+    }
+
+    private Integer normalizeTimeout(Integer timeoutMs) {
+        if (timeoutMs == null) return null;
+        if (timeoutMs <= 0) throw new BusinessException(40001, "timeoutMs 必须大于 0");
+        return timeoutMs;
+    }
+
+    private int normalizeRetries(Integer retries) {
+        if (retries == null) return 0;
+        if (retries < 0) throw new BusinessException(40001, "maxRetries 不能为负数");
+        return Math.min(retries, 5);
+    }
+
+    /** 空串表示清空；非空必须是合法覆盖 JSON，避免保存后在运行时静默失效。 */
+    private String normalizeOverrides(String overrides) {
+        if (overrides == null) return null;
+        if (overrides.isBlank()) return null;
+        try {
+            ParamOverrideSupport.parse(overrides);
+            return overrides;
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(40001, e.getMessage());
+        }
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

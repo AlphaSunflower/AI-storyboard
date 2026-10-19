@@ -21,14 +21,19 @@ import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore'
 import { useAuthStore } from '../stores/authStore';
 import type { ProjectResponse } from '../api/projects';
 import { EMBEDDED_APP_READY_MESSAGE } from '../lib/embeddedAppMessages';
+import '../styles/editor.css';
 
 export function EditorPage() {
   const { loadProjects, checkDraft, loadProject, fetchAiModels, createProject, selectScene } = useProjectStore();
+  const scenes = useProjectStore((s) => s.scenes);
+  const selectedSceneId = useProjectStore((s) => s.selectedSceneId);
   const isMobile = useIsMobile();
   const embedded = new URLSearchParams(window.location.search).get('embedded') === '1';
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [draftProject, setDraftProject] = useState<ProjectResponse | null>(null);
-  const [middleWidth, setMiddleWidth] = useState(380);
+  const [middleWidth, setMiddleWidth] = useState(() =>
+    Math.min(400, Math.max(320, Math.round((typeof window !== 'undefined' ? window.innerWidth : 1440) * 0.3))),
+  );
   // 手机端状态
   const [mobileView, setMobileView] = useState<'list' | 'preview'>('list');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -89,7 +94,7 @@ export function EditorPage() {
       }
       checkDraft()
         .then((draft) => {
-          if (draft) {
+          if (draft && !requestedProjectId) {
             setDraftProject(draft);
             setShowDraftBanner(true);
           }
@@ -120,6 +125,14 @@ export function EditorPage() {
     };
   }, [fetchAiModels]);
 
+  // 打开项目后默认选中第一镜：右侧预览立即有内容，而不是一块空白等用户点。
+  useEffect(() => {
+    const sceneList = Array.isArray(scenes) ? scenes : [];
+    if (sceneList.length === 0) return;
+    if (selectedSceneId && sceneList.some((scene) => scene.id === selectedSceneId)) return;
+    selectScene(sceneList[0].id);
+  }, [scenes, selectedSceneId, selectScene]);
+
   const handleRecoverDraft = () => {
     if (draftProject) {
       loadProject(draftProject.id);
@@ -138,7 +151,7 @@ export function EditorPage() {
 
     const onMouseMove = (ev: MouseEvent) => {
       const newWidth = startWidth + ev.clientX - startX;
-      setMiddleWidth(Math.min(600, Math.max(380, newWidth)));
+      setMiddleWidth(Math.min(560, Math.max(320, newWidth)));
     };
 
     const onMouseUp = () => {
@@ -155,7 +168,7 @@ export function EditorPage() {
   /* ═══════════════ 手机端布局（≤768px）═══════════════ */
   if (isMobile) {
     return (
-      <div className="page-in" style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'white', overflow: 'hidden', animation: 'page-in 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+      <div className="editor-shell" style={{ display: 'flex' }}>
         <AmbientGlow />
         <MobileEditorHeader
           showMenu={!embedded}
@@ -210,16 +223,7 @@ export function EditorPage() {
 
   /* ═══════════════ 桌面端布局（>768px）═══════════════ */
   return (
-    <div
-      className="page-in"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        overflow: 'hidden',
-        animation: 'page-in 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
-      }}
-    >
+    <div className="editor-shell">
       {/* 页面氛围光晕（fixed 最底层，pointer-events none） */}
       <AmbientGlow />
       {/* Top bar */}
@@ -238,26 +242,15 @@ export function EditorPage() {
       )}
 
       {/* Three-panel layout */}
-      <div
-        style={{
-          display: 'flex',
-          flex: 1,
-          overflow: 'hidden',
-        }}
-      >
+      <div className="editor-body">
         <LeftSidebar />
         <SceneListPanel width={middleWidth} />
         <div
+          className="editor-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整分镜列表宽度"
           onMouseDown={handleDragStart}
-          style={{
-            width: '4px',
-            cursor: 'col-resize',
-            background: 'transparent',
-            transition: 'background 0.15s',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = 'var(--color-primary)'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'transparent'; }}
         />
         <PreviewPanel />
       </div>

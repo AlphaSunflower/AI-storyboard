@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* 画布子站只有白灰阶：这里只补语义别名与圆角。
-   颜色一律复用 styles.css 的 --n-*/--line/--text/--solid，避免再出现第二套色值。 */
+   颜色一律复用 styles.css 的 --n-* / --line / --text / --solid，避免再出现第二套色值。 */
 :root {
   --radius: 0.625rem;
 }

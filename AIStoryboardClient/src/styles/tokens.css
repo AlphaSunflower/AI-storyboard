@@ -1,19 +1,24 @@
 :root {
-  /* Colors */
+  /* ── Colors ─────────────────────────────────────────────────────────────
+     一处定义：warm editorial（cream / coral / ink）。
+     页面只能通过语义变量取色，不再新增裸 hex（画布子站除外，它有独立世界）。 */
   --color-primary: #cc785c;
   --color-primary-active: #a9583e;
+  --color-primary-soft: #f7e7e0;
+  --color-primary-tint: #fbf1ec;
   --color-primary-disabled: #e6dfd8;
   --color-ink: #141413;
   --color-body: #3d3d3a;
   --color-body-strong: #252523;
   --color-muted: #6c6a64;
-  --color-muted-soft: #8e8b82;
+  --color-muted-soft: #77746c;
   --color-hairline: #e6dfd8;
-  --color-hairline-soft: #ebe6df;
+  --color-hairline-soft: #ece7e0;
   --color-bg: #faf9f5;
   --color-canvas: #faf9f5;
   --color-surface: #faf9f5;
   --color-surface-soft: #f5f0e8;
+  --color-surface-subtle: #f8f4ee;
   --color-surface-card: #efe9de;
   --color-surface-cream-strong: #e8e0d2;
   --color-surface-dark: #181715;
@@ -22,26 +27,33 @@
   --color-on-primary: #ffffff;
   --color-on-dark: #faf9f5;
   --color-on-dark-soft: #a09d96;
-  --color-success: #5db872;
-  --color-warning: #d4a017;
-  --color-error: #c64545;
+  --color-success: #4f8a5b;
+  --color-warning: #a97716;
+  --color-error: #b8433f;
+  --color-info: #4a6b7c;
+  --color-focus-ring: color-mix(in srgb, var(--color-primary) 62%, transparent);
 
-  /* Typography */
-  --font-display: 'Tiempos Headline', 'Cormorant Garamond', Georgia, serif;
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-code: 'JetBrains Mono', 'Fira Code', monospace;
+  /* ── Typography ─────────────────────────────────────────────────────────
+     Product UI 用一套系统无衬线字体；不声明未加载的 webfont，避免跨平台回退不一致。
+     中文回退按 Windows / macOS / Linux 的顺序显式给出。 */
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-display: var(--font-body);
+  --font-code: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
 
-  --text-display-sm: 400 28px/1.2 var(--font-display);
-  --text-title-lg: 500 22px/1.3 var(--font-body);
-  --text-title-md: 500 18px/1.4 var(--font-body);
-  --text-title-sm: 500 16px/1.4 var(--font-body);
-  --text-body-md: 400 16px/1.55 var(--font-body);
-  --text-body-sm: 400 14px/1.55 var(--font-body);
-  --text-caption: 500 13px/1.4 var(--font-body);
-  --text-caption-upper: 500 12px/1.4 var(--font-body);
-  --text-button: 500 14px/1 var(--font-body);
+  --text-display-sm: 600 30px/1.18 var(--font-display);
+  --text-title-lg: 600 22px/1.3 var(--font-body);
+  --text-title-md: 600 17px/1.4 var(--font-body);
+  --text-title-sm: 600 14px/1.4 var(--font-body);
+  --text-body-lg: 400 15px/1.65 var(--font-body);
+  --text-body-md: 400 14px/1.6 var(--font-body);
+  --text-body-sm: 400 13px/1.55 var(--font-body);
+  --text-caption: 500 12px/1.4 var(--font-body);
+  --text-caption-upper: 500 11px/1.4 var(--font-body);
+  --text-button: 600 13px/1 var(--font-body);
 
-  /* Spacing */
+  /* ── Spacing（4px 基数，页面只用这几档） ─────────────────────────────── */
+  --space-2xs: 4px;
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;
@@ -49,10 +61,24 @@
   --space-xl: 32px;
   --space-xxl: 48px;
 
-  /* Border Radius */
+  /* ── Radius（规则：控件 8 / 面板 12 / 浮层 16 / 胶囊 999） ─────────────── */
   --rounded-sm: 6px;
   --rounded-md: 8px;
   --rounded-lg: 12px;
   --rounded-xl: 16px;
+  --rounded-2xl: 20px;
   --rounded-pill: 9999px;
+
+  /* ── Elevation（暖色阴影，不用纯黑） ─────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgba(20, 20, 19, 0.05);
+  --shadow-sm: 0 2px 8px -2px rgba(20, 20, 19, 0.08), 0 1px 2px rgba(20, 20, 19, 0.04);
+  --shadow-md: 0 8px 24px -12px rgba(20, 20, 19, 0.18), 0 2px 6px -2px rgba(20, 20, 19, 0.06);
+  --shadow-lg: 0 24px 56px -24px rgba(20, 20, 19, 0.28), 0 6px 16px -8px rgba(20, 20, 19, 0.10);
+  --shadow-popover: 0 16px 40px -16px rgba(20, 20, 19, 0.22), 0 2px 8px -2px rgba(20, 20, 19, 0.08);
+
+  /* ── Controls ─────────────────────────────────────────────────────────── */
+  --control-sm: 28px;
+  --control-md: 34px;
+  --control-lg: 40px;
+  --control-xl: 46px;
 }

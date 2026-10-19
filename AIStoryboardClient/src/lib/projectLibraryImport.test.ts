@@ -63,6 +63,22 @@ describe('importMediaToProjectLibrary', () => {
     expect(useLibraryTaskStore.getState().tasks.some((task) => task.kind === 'analysis')).toBe(false);
   });
 
+  it('passes the source conversation so output lands in that conversation folder', async () => {
+    const register = vi.spyOn(libraryApi, 'registerGeneratedOutput').mockResolvedValue({
+      data: { code: 0, message: '', data: asset },
+    } as never);
+
+    await importMediaToProjectLibrary({
+      projectId: 'project-1',
+      producer: 'moon-chat',
+      conversationId: 'conv-1',
+      url: '/api/files/images/storyboard.png',
+      mediaType: 'IMAGE',
+    });
+
+    expect(register.mock.calls[0]?.[0]?.metadata).toEqual({ conversationId: 'conv-1' });
+  });
+
   it('uses the shared idempotency key so import and lookup agree', async () => {
     const recordId = await projectLibraryGenerationRecordId('moon-chat', '/api/files/images/storyboard.png');
     const register = vi.spyOn(libraryApi, 'registerGeneratedOutput').mockResolvedValue({

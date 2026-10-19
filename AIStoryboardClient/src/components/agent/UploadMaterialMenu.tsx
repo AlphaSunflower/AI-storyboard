@@ -50,7 +50,7 @@ function MenuItem({ icon, label, index, onClick }: {
       className="chat-plus-menu__item"
       onClick={onClick}
       style={{ ...menuItem, '--item-index': index } as React.CSSProperties}
-      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(65,118,230,0.06)'; }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 6%, transparent)'; }}
       onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
     >
       {icon}
@@ -69,7 +69,7 @@ const menuItem: React.CSSProperties = {
   border: 'none',
   borderRadius: 8,
   background: 'transparent',
-  color: 'rgb(15,17,21)',
+  color: 'var(--color-ink)',
   fontSize: 14,
   textAlign: 'left',
   cursor: 'pointer',

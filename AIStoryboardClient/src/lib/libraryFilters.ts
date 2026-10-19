@@ -1,5 +1,5 @@
 /** `ALL` 保留为历史值（旧版工作台/URL），新代码使用 `PROJECT`。 */
-export type LibraryScopeView = 'PROJECT' | 'ALL' | 'GLOBAL' | 'OUTPUT' | 'TRASH';
+export type LibraryScopeView = 'PROJECT' | 'ALL' | 'GLOBAL' | 'OUTPUT' | 'DUPLICATES' | 'UNUSED' | 'TRASH';
 
 export function libraryAssetScope(
   scopeView: LibraryScopeView,
@@ -15,6 +15,8 @@ export function scopeFromQuery(value: string | null): LibraryScopeView {
     case 'ALL': return 'ALL';
     case 'GLOBAL': return 'GLOBAL';
     case 'OUTPUT': return 'OUTPUT';
+    case 'DUPLICATES': return 'DUPLICATES';
+    case 'UNUSED': return 'UNUSED';
     case 'GROUPS': return 'PROJECT';
     case 'TAGS': return 'ALL';
     case 'TRASH': return 'TRASH';

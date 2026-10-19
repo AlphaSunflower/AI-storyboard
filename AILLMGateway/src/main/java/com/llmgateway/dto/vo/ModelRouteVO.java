@@ -10,6 +10,13 @@ public record ModelRouteVO(
         String type,
         String defaultParams,
         Boolean isDefault,
+        Boolean enabled,
+        Integer priority,
+        Integer weight,
+        String upstreamModel,
+        Integer timeoutMs,
+        Integer maxRetries,
+        String paramOverrides,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {}

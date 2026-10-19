@@ -22,6 +22,14 @@ describe('ChatAppActions', () => {
     expect(onOpen).toHaveBeenCalledWith('library');
   });
 
+  it('exposes the shortcut keys on the tooltip triggers', () => {
+    render(<ChatAppActions onOpen={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: '画布' }).getAttribute('aria-keyshortcuts')).toContain('Shift+8');
+    expect(screen.getByRole('button', { name: '编辑器' }).getAttribute('aria-keyshortcuts')).toContain('Shift+7');
+    expect(screen.getByRole('button', { name: '项目库' }).getAttribute('aria-keyshortcuts')).toContain('Shift+9');
+  });
+
   it('turns the canvas action into an exit action while locked', () => {
     const onExit = vi.fn();
     render(<ChatAppActions onOpen={vi.fn()} canvasPhase="locked" onExitCanvas={onExit} />);

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, ChevronUp, LoaderCircle, Moon } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, LoaderCircle } from 'lucide-react';
+import MoonLogo from './MoonLogo';
 import './ChatDockShell.css';
 
 export type ChatDockPresentation = 'pill' | 'open' | 'history' | 'hidden';
@@ -106,7 +107,7 @@ export function ChatDockShell({
               aria-label={`打开 Moon 智能体：${title}`}
               aria-controls="moon-chat-dock-content"
             >
-              <span className="chat-dock-shell__pill-icon"><Moon size={17} strokeWidth={1.9} /></span>
+              <span className="chat-dock-shell__pill-icon"><MoonLogo variant="mark" size={21} tone="light" animated /></span>
               <span className="chat-dock-shell__pill-title">{title}</span>
               <span className="chat-dock-shell__pill-status">
                 {streaming && <LoaderCircle size={13} className="is-spinning" />}
@@ -149,7 +150,7 @@ export function ChatDockShell({
                 onClick={onRestore}
                 aria-label="显示 Moon 智能体"
               >
-                <Moon size={15} strokeWidth={1.9} />
+                <MoonLogo variant="mark" size={19} tone="light" animated />
               </button>
             )}
           </div>

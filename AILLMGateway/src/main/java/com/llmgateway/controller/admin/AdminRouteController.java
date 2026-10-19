@@ -1,10 +1,14 @@
 package com.llmgateway.controller.admin;
 
 import com.llmgateway.dto.ApiResponse;
+import com.llmgateway.dto.admin.RequestPreviewRequest;
 import com.llmgateway.dto.admin.RouteRequest;
 import com.llmgateway.dto.vo.ModelRouteVO;
+import com.llmgateway.dto.vo.RequestPreviewVO;
 import com.llmgateway.entity.ModelRoute;
+import com.llmgateway.service.ModelFallbackService;
 import com.llmgateway.service.ModelRouteService;
+import com.llmgateway.service.RequestPreviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,11 +21,23 @@ import java.util.List;
 public class AdminRouteController {
 
     private final ModelRouteService routeService;
+    private final ModelFallbackService fallbackService;
+    private final RequestPreviewService previewService;
+
+    /** 请求预览：不调用上游，展示 Spec + 路由覆盖后的最终请求 */
+    @PostMapping("/preview")
+    public ApiResponse<RequestPreviewVO> preview(@RequestBody RequestPreviewRequest request) {
+        return ApiResponse.ok(previewService.preview(request));
+    }
 
     /** 创建路由：modelName + channelId 必填，且渠道必须存在 */
     @PostMapping
     public ApiResponse<ModelRouteVO> create(@RequestBody RouteRequest request) {
-        return ApiResponse.ok(toVO(routeService.create(request)));
+        ModelRoute route = routeService.create(request);
+        if (request.getFallbacks() != null) {
+            fallbackService.replace(route.getModelName(), route.getType(), request.getFallbacks());
+        }
+        return ApiResponse.ok(toVO(route));
     }
 
     /** 路由列表（第一版返回原始行，不做渠道名 join） */
@@ -32,7 +48,11 @@ public class AdminRouteController {
 
     @PutMapping("/{id}")
     public ApiResponse<ModelRouteVO> update(@PathVariable String id, @RequestBody RouteRequest request) {
-        return ApiResponse.ok(toVO(routeService.update(id, request)));
+        ModelRoute route = routeService.update(id, request);
+        if (request.getFallbacks() != null) {
+            fallbackService.replace(route.getModelName(), route.getType(), request.getFallbacks());
+        }
+        return ApiResponse.ok(toVO(route));
     }
 
     @DeleteMapping("/{id}")
@@ -43,6 +63,8 @@ public class AdminRouteController {
 
     private ModelRouteVO toVO(ModelRoute e) {
         return new ModelRouteVO(e.getId(), e.getModelName(), e.getChannelId(), e.getType(),
-                e.getDefaultParams(), e.getIsDefault(), e.getCreatedAt(), e.getUpdatedAt());
+                e.getDefaultParams(), e.getIsDefault(), e.getEnabled(), e.getPriority(), e.getWeight(),
+                e.getUpstreamModel(), e.getTimeoutMs(), e.getMaxRetries(), e.getParamOverrides(),
+                e.getCreatedAt(), e.getUpdatedAt());
     }
 }

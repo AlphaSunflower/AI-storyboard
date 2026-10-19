@@ -7,6 +7,11 @@ import { useChatAnnotationStore } from '../../stores/chatAnnotationStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSideChatSelectionStore } from '../../stores/sideChatSelectionStore';
 import {
+  DEFAULT_ACCOUNT_SETTINGS,
+  useAccountSettingsStore,
+} from '../../stores/accountSettingsStore';
+import { useSendQueueStore } from '../../stores/sendQueueStore';
+import {
   PROJECT_LIBRARY_DRAG_MIME,
   serializeDragPayload,
 } from '../../lib/projectLibraryDrag';
@@ -16,6 +21,7 @@ import {
 } from '../../lib/agentAssetDrag';
 import { defaultGenerationPreferences } from '../../lib/generationPreferences';
 import { ChatComposer } from './ChatComposer';
+import { SendQueueRunner } from './SendQueueRunner';
 
 beforeEach(() => {
   useSideChatSelectionStore.getState().clear();
@@ -101,7 +107,7 @@ describe('ChatComposer project library drops', () => {
 
     // 输入卡绝对定位盖在消息流上，高亮底色只要带一点透明，背后有图就整块透出来。
     expect(card.style.background).not.toMatch(/rgba\([^)]*0\.0\d/);
-    expect(card.style.border).toContain('65, 118, 230');
+    expect(card.style.border).toContain('var(--color-primary)');
   });
 
   it('adds a dropped generation-center image to the composer references', async () => {
@@ -1071,7 +1077,7 @@ describe('ChatComposer compact mode', () => {
     const send = screen.getByRole('button', { name: '发送' });
 
     expect(card?.style.flexDirection).toBe('row');
-    expect(card?.style.background).toContain('rgba(255, 255, 255, 0.62)');
+    expect(card?.style.background).toContain('78%');
     expect(card?.style.backdropFilter).toContain('blur');
     // 输入框外面包了一层 `.chat-composer-input`（承载 `@` 标记的镜像高亮层），
     // 这一层才是卡片这一行里的兄弟节点；收缩态的可伸缩性挂在这一层上。
@@ -1390,14 +1396,16 @@ describe('ChatComposer @ 引用资料', () => {
     ]);
   });
 
-  it('引用对话暂时置灰（会话摘要未上线），点击不登记引用', async () => {
+  it('引用对话已开放：点击登记 conversation 引用', async () => {
     render(<ChatComposer />);
     typeMention();
 
     const option = await screen.findByRole('option', { name: /对话《分镜重做》/ });
-    expect((option as HTMLButtonElement).disabled).toBe(true);
+    expect((option as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(option);
-    expect(useAgentStore.getState().pendingReferences).toEqual([]);
+    expect(useAgentStore.getState().pendingReferences).toEqual([
+      expect.objectContaining({ kind: 'conversation', id: 'conversation-2' }),
+    ]);
   });
 
   it('会话再多也只内联最近 8 个，其余折成一行说明（菜单不再被撑高）', async () => {
@@ -1530,5 +1538,87 @@ describe('ChatComposer @ 引用资料', () => {
     await waitFor(() => expect(useAgentStore.getState().pendingAttachments).toHaveLength(1));
     expect(useAgentStore.getState().pendingReferences).toEqual([]);
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+  });
+});
+
+describe('ChatComposer send queue', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    useSendQueueStore.setState({ queues: {} });
+    useAccountSettingsStore.setState({
+      settings: { ...DEFAULT_ACCOUNT_SETTINGS, busySendBehavior: 'queue' },
+    });
+    useProjectStore.setState({ currentProject: { id: 'p-queue', name: '队列项目' } as never });
+    useAgentStore.setState({
+      activeConversationId: 'conversation-queue',
+      streaming: true,
+      waitingHumanInput: null,
+      waitingVideoPlan: null,
+      agentVideoTask: null,
+      canvasBinding: null,
+      canvasExitPending: false,
+      pendingAttachments: [],
+      pendingPicUrls: [],
+      pickedAssetIds: [],
+      pendingReferences: [],
+      refImageUrls: [],
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useSendQueueStore.setState({ queues: {} });
+    useAccountSettingsStore.setState({ settings: DEFAULT_ACCOUNT_SETTINGS });
+    useAgentStore.setState({ streaming: false });
+    useProjectStore.setState({ currentProject: null });
+    window.sessionStorage.clear();
+  });
+
+  it('enqueues the message and renders the queue panel while busy', async () => {
+    render(<ChatComposer />);
+
+    const input = screen.getByPlaceholderText('可输入新指令插入当前回合…');
+    fireEvent.change(input, { target: { value: '排队一条消息' } });
+    fireEvent.click(screen.getByRole('button', { name: '排队发送' }));
+
+    expect(useSendQueueStore.getState().queues['conversation-queue']).toHaveLength(1);
+    expect(screen.getByRole('region', { name: '发送队列' })).toBeTruthy();
+    expect(screen.getByText('排队一条消息')).toBeTruthy();
+  });
+
+  it('reorders and removes queued messages from the panel', () => {
+    const enqueue = useSendQueueStore.getState().enqueue;
+    enqueue({ conversationId: 'conversation-queue', content: '消息 A' });
+    enqueue({ conversationId: 'conversation-queue', content: '消息 B' });
+    enqueue({ conversationId: 'conversation-queue', content: '消息 C' });
+    render(<ChatComposer />);
+
+    expect(screen.getByText('还有 1 条')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '置顶队列消息 2' }));
+    expect(useSendQueueStore.getState().queues['conversation-queue'].map((item) => item.content))
+      .toEqual(['消息 B', '消息 A', '消息 C']);
+
+    fireEvent.click(screen.getByRole('button', { name: '删除队列消息 1' }));
+    expect(useSendQueueStore.getState().queues['conversation-queue'].map((item) => item.content))
+      .toEqual(['消息 A', '消息 C']);
+  });
+
+  it('flushes the queue head once the current turn finishes', async () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never });
+    render(<><ChatComposer /><SendQueueRunner /></>);
+
+    const input = screen.getByPlaceholderText('可输入新指令插入当前回合…');
+    fireEvent.change(input, { target: { value: '回合结束后发送' } });
+    fireEvent.click(screen.getByRole('button', { name: '排队发送' }));
+    expect(useSendQueueStore.getState().queues['conversation-queue']).toHaveLength(1);
+
+    act(() => useAgentStore.setState({ streaming: false }));
+
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(
+      '回合结束后发送',
+      expect.objectContaining({}),
+    ));
+    expect(useSendQueueStore.getState().queues['conversation-queue']).toBeUndefined();
   });
 });

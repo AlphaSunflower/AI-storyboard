@@ -292,6 +292,7 @@ export function AssetDetailPane({ target, onClose, onDeleted }: AssetDetailPaneP
         producer,
         url: activeUrl,
         mediaType: mediaKind === 'video' ? 'VIDEO' : 'IMAGE',
+        conversationId: producer === 'moon-chat' ? activeConversationId ?? undefined : undefined,
         label: mediaKind === 'video' ? 'Moon 生成视频' : 'Moon 生成图片',
       });
       setImportState('done');

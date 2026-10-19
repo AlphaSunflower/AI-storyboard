@@ -111,8 +111,49 @@ describe('GenerationRecordsPanel', () => {
     expect(screen.getByText('生成链路')).toBeTruthy();
     expect(screen.getByText('来源素材 1')).toBeTruthy();
     expect(screen.getByText('结果素材 1')).toBeTruthy();
-    expect(screen.getByText('由「图生图节点」提交')).toBeTruthy();
+    expect(screen.getByText(/由「图生图节点」提交/)).toBeTruthy();
     expect(screen.getAllByText('把猫变成蓝色').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps the drawer as a list and opens the detail in a dialog', () => {
+    render(<GenerationRecordsPanel onClose={() => undefined} />);
+    const row = screen.getByRole('button', { name: /生成图片/ });
+    expect(row.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(screen.queryByRole('dialog', { name: /生成记录详情/ })).toBeNull();
+
+    fireEvent.click(row);
+
+    const dialog = screen.getByRole('dialog', { name: '生成记录详情：生成图片' });
+    expect(within(dialog).getByText('生成链路')).toBeTruthy();
+    expect(within(dialog).getByText(/由「图生图节点」提交/)).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭生成记录详情' }));
+    expect(screen.queryByRole('dialog', { name: /生成记录详情/ })).toBeNull();
+    // 抽屉本身仍是列表：关掉详情后记录还在，没有被详情列替换。
+    expect(screen.getByRole('button', { name: /生成图片/ })).toBeTruthy();
+  });
+
+  it('closes the detail dialog with Escape or a backdrop click', () => {
+    render(<GenerationRecordsPanel onClose={() => undefined} />);
+    fireEvent.click(screen.getByRole('button', { name: /生成图片/ }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /生成记录详情/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /生成图片/ }));
+    const modal = document.querySelector('.generation-record-modal');
+    expect(modal).toBeTruthy();
+    fireEvent.mouseDown(modal!);
+    expect(screen.queryByRole('dialog', { name: /生成记录详情/ })).toBeNull();
+  });
+
+  it('does not dismiss the drawer when interacting with the detail dialog', () => {
+    const onClose = vi.fn();
+    render(<GenerationRecordsPanel onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: /生成图片/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '生成记录详情：生成图片' });
+    fireEvent.pointerDown(dialog);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('opens and closes a full image preview from a result thumbnail', () => {

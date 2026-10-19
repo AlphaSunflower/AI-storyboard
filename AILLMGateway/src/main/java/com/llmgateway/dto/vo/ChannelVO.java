@@ -14,6 +14,11 @@ public record ChannelVO(
         String models,
         Boolean enabled,
         Integer priority,
+        Integer weight,
+        Integer timeoutMs,
+        Integer maxRetries,
+        String lastError,
+        OffsetDateTime lastCheckedAt,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
 ) {}

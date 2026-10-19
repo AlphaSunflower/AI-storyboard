@@ -73,6 +73,21 @@ describe('Tooltip', () => {
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
 
+  it('renders the shortcut kbd inside the tooltip', () => {
+    render(
+      <Tooltip label="搜索对话" shortcut="Ctrl/Cmd+F">
+        <button type="button" aria-label="搜索">S</button>
+      </Tooltip>,
+    );
+
+    act(() => { fireEvent.pointerOver(triggerFor('搜索'), { pointerType: 'mouse' }); });
+    act(() => { vi.advanceTimersByTime(400); });
+
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip.textContent).toContain('搜索对话');
+    expect(tooltip.querySelector('kbd')?.textContent).toBe('Ctrl/Cmd+F');
+  });
+
   it('leaves the trigger clickable', () => {
     const onRefresh = vi.fn();
     render(<Toolbar onRefresh={onRefresh} />);

@@ -21,7 +21,7 @@ const STATUS_INK = {
   running: '#2f5fc4',
   failed: '#b42318',
   warn: '#8a5a00',
-  idle: 'rgb(96, 100, 108)',
+  idle: 'var(--color-muted)',
 } as const;
 
 /** 与工具卡同一套骨架变量：两个组件都注入这一份，保证是同一族视觉语言。 */
@@ -39,7 +39,7 @@ export const toolTimelineBaseVars: Record<string, string> = {
   '--tc-brand': DS.brand,
   '--tc-brand-ink': STATUS_INK.running,
   '--tc-dot-halo': '#ffffff',
-  '--tc-dot-pulse': 'rgba(65, 118, 230, 0.30)',
+  '--tc-dot-pulse': 'color-mix(in srgb, var(--color-primary) 30%, transparent)',
   '--tc-warn': STATUS_INK.warn,
   '--tc-warn-bg': 'rgba(212, 160, 23, 0.16)',
 };
@@ -53,9 +53,9 @@ export const TOOL_TONE_VARS: Record<ToolTone, Record<string, string>> = {
   },
   running: {
     '--tc-dot': DS.brand,
-    '--tc-dot-pulse': 'rgba(65, 118, 230, 0.30)',
+    '--tc-dot-pulse': 'color-mix(in srgb, var(--color-primary) 30%, transparent)',
     '--tc-chip-ink': STATUS_INK.running,
-    '--tc-chip-bg': 'rgba(65, 118, 230, 0.10)',
+    '--tc-chip-bg': 'color-mix(in srgb, var(--color-primary) 10%, transparent)',
   },
   failed: {
     '--tc-dot': '#d92d20',

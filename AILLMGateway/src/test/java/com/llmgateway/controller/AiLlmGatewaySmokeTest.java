@@ -26,8 +26,10 @@ import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.ImageEditService;
 import com.llmgateway.service.KeyService;
 import com.llmgateway.service.ModelParamsService;
+import com.llmgateway.service.ModelFallbackService;
 import com.llmgateway.service.ModelRouteService;
 import com.llmgateway.service.OllamaModelSyncService;
+import com.llmgateway.service.RequestPreviewService;
 import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.SysConfigService;
 import com.llmgateway.service.UpstreamClient;
@@ -91,6 +93,10 @@ class AiLlmGatewaySmokeTest {
     private ChannelService channelService;
     @MockitoBean
     private ModelRouteService routeService;
+    @MockitoBean
+    private ModelFallbackService modelFallbackService;
+    @MockitoBean
+    private RequestPreviewService requestPreviewService;
     @MockitoBean
     private KeyService keyService;
     @MockitoBean

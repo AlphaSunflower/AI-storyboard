@@ -117,6 +117,7 @@
 .image-more-menu,
 .quick-split-flyout-card,
 .generation-records-panel,
+.generation-record-dialog,
 .task-queue-panel,
 .asset-drawer-panel,
 .floating-drawer,
@@ -142,7 +143,6 @@
 }
 
 .task-queue-item,
-.generation-record-card,
 .video-gate__option,
 .multi-angle-dialog__modes button {
   background-color: rgba(255, 255, 255, .045) !important;
@@ -151,13 +151,11 @@
 }
 
 .task-queue-item:hover,
-.generation-record-card:hover,
 .video-gate__option:hover:not(.is-disabled),
 .multi-angle-dialog__modes button:hover {
   background-color: rgba(255, 255, 255, .085) !important;
 }
 
-.generation-record-card.is-active,
 .video-gate__option.is-selected {
   background-color: rgba(255, 255, 255, .1) !important;
   border-color: rgba(255, 255, 255, .32) !important;
@@ -372,4 +370,103 @@
     --glass-blur-lg: 20px;
     --glass-saturate: 140%;
   }
+}
+
+/* ── 8. 节点内部：一律实底，不做玻璃化 ──────────────────────────────────
+   节点卡片、节点里的参数面板 / 菜单 / 工具栏 / 输入控件都叠在画布点阵、连线
+   和其他节点之上；半透明 + 磨砂会让参数小字直接糊掉（用户实测“看不到信息”）。
+   画布外壳（项目栏 / 工具岛 / 抽屉 / 对话框）仍保留玻璃态。
+   本节必须放在文件最后：同为 !important 时后加载者生效。 */
+
+.node-card {
+  background-color: #1a1a1c !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.node-float-panel,
+.gen-composer,
+.gen-settings,
+.gen-ref-picker,
+.gen-toolbar,
+.image-edit-panel,
+.video-editor-panel,
+.redraw-prompt-panel,
+.redraw-toolstrip,
+.redraw-canvas-picker,
+.image-result-toolbar,
+.video-node-toolbar,
+.annotation-toolbar,
+.reference-strip,
+.image-more-menu,
+.quick-split-flyout-card,
+.crop-editor__panel,
+.connection-node-menu,
+.grouped-node-menu {
+  background-color: #202022 !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  border-color: rgba(255, 255, 255, .15) !important;
+  border-top-color: rgba(255, 255, 255, .18) !important;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, .5) !important;
+}
+
+/* 节点里的输入 / 分段 / 开关：实底，不再和节点背景融成一片 */
+.gen-settings__field select,
+.gen-settings__field input,
+.gen-ref-picker > button,
+.gen-ref-picker__library > button,
+.gen-segmented button,
+.gen-toolbar button,
+.gen-settings-row__toggle,
+.gen-composer .rt-input--gen,
+.gen-composer .batch-refine-items input,
+.image-edit-panel input,
+.image-edit-panel select,
+.image-edit-panel textarea,
+.video-editor-panel input,
+.video-editor-panel select,
+.video-editor-panel textarea,
+.redraw-prompt-panel input,
+.redraw-prompt-panel textarea {
+  background-color: #2a2a2c !important;
+  background-image: none !important;
+  border-color: rgba(255, 255, 255, .16) !important;
+  box-shadow: none !important;
+}
+
+.gen-segmented button:hover,
+.gen-toolbar button:hover,
+.gen-settings-row__toggle:hover {
+  background-color: #333335 !important;
+}
+
+.gen-segmented button.is-active,
+.gen-toolbar button.is-active,
+.gen-settings-row__toggle.is-active {
+  background-color: #3d3d3f !important;
+  border-color: rgba(255, 255, 255, .34) !important;
+  color: #f4f4f5 !important;
+}
+
+/* 节点上的浮动小钮（「+」、画质角标、播放键、空态提示）：同样实底 */
+.node-side-plus,
+.media-quality-badge,
+.video-big-play,
+.video-controls button,
+.image-fullscreen > button,
+.node-upload--generate,
+.empty-node-note {
+  background-color: #232325 !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  border-color: rgba(255, 255, 255, .22) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .38) !important;
+}
+
+.node-side-plus:hover {
+  background-color: #313133 !important;
 }

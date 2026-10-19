@@ -23,5 +23,12 @@ public class CallLog {
     private String videoUrl;
     /** 视频任务 ID：下载端点按 taskId+channelId 精确定位限时直链（同渠道并发任务不串号） */
     private String taskId;
+    /** 实际发给上游的模型名（配置了上游映射时与 model 不同） */
+    private String upstreamModel;
+    /** 第几次尝试（从 1 开始；含渠道切换与重试） */
+    private Integer attempt;
+    private Integer promptTokens;
+    private Integer completionTokens;
+    private Integer totalTokens;
     private OffsetDateTime createdAt;
 }

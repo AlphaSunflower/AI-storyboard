@@ -16,6 +16,17 @@ public interface GatewayRoutingService {
     }
 
     /**
+     * 强制指定渠道的同步路由（仅管理后台「测试这一行路由」使用）。
+     *
+     * <p>普通路由按 model 选候选渠道，测不出「这条路由绑定的渠道」；传 forcedChannelId 后
+     * 只把请求发给该渠道，即使它被停用或不是优先级最高的候选，保证测试结果与列表行一致。
+     * 默认实现忽略强制渠道，兼容未覆盖此方法的实现。
+     */
+    default RouteResult route(String path, String requestBody, String callId, String forcedChannelId) {
+        return route(path, requestBody, callId);
+    }
+
+    /**
      * 处理 OpenAI 兼容 chat 流式请求（stream=true）：上游 SSE 响应逐块透传。
      *
      * <p>openai_compatible 渠道原生 SSE 透传；gemini 渠道降级为非流式

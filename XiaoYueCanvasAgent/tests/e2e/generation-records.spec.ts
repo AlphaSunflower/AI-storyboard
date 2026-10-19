@@ -138,13 +138,20 @@ test('keeps active work in the queue and exposes provenance in generation record
   expect(desktopPanelBox).not.toBeNull();
   expect(Math.abs((desktopPanelBox!.x + desktopPanelBox!.width) - (anchorBox!.x + anchorBox!.width)))
     .toBeLessThanOrEqual(8);
-  expect(desktopPanelBox!.y).toBeGreaterThanOrEqual(anchorBox!.y + anchorBox!.height);
+  // 抽屉挂在入口正下方：留 2px 容差，避免边框/亚像素导致的 1px 抖动。
+  expect(desktopPanelBox!.y).toBeGreaterThanOrEqual(anchorBox!.y + anchorBox!.height - 2);
   expect(desktopPanelBox!.x).toBeGreaterThan(anchorBox!.x - desktopPanelBox!.width);
   await page.getByRole('button', { name: /生成图片/ }).click();
-  await expect(page.getByText('生成链路')).toBeVisible();
-  await expect(page.getByText('来源素材 1')).toBeVisible();
-  await expect(page.getByText('由「图生图节点」提交')).toBeVisible();
-  await expect(page.locator('.generation-record-card > strong')).toHaveCSS('color', 'rgb(244, 244, 245)');
+  const detailDialog = page.getByRole('dialog', { name: /生成记录详情/ });
+  await expect(detailDialog).toBeVisible();
+  await expect(detailDialog.getByText('生成链路')).toBeVisible();
+  await expect(detailDialog.getByText('来源素材 1')).toBeVisible();
+  await expect(detailDialog.getByText('由「图生图节点」提交', { exact: false })).toBeVisible();
+  await expect(page.locator('.generation-record-row__head > strong')).toHaveCSS('color', 'rgb(244, 244, 245)');
+  // 详情走弹窗：抽屉仍是列表宽度，不再为详情让出一半宽度
+  const drawerWithDetail = await page.locator('.generation-records-panel').boundingBox();
+  expect(drawerWithDetail).not.toBeNull();
+  expect(drawerWithDetail!.width).toBeLessThanOrEqual(470);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const panelBox = await page.locator('.generation-records-panel').boundingBox();
@@ -153,4 +160,15 @@ test('keeps active work in the queue and exposes provenance in generation record
   expect(panelBox!.y).toBeGreaterThanOrEqual(0);
   expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(391);
   expect(panelBox!.y + panelBox!.height).toBeLessThanOrEqual(845);
+
+  const dialogBox = await detailDialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox!.x).toBeGreaterThanOrEqual(0);
+  expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+  expect(dialogBox!.x + dialogBox!.width).toBeLessThanOrEqual(391);
+  expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(845);
+
+  await detailDialog.getByRole('button', { name: '关闭生成记录详情' }).click();
+  await expect(detailDialog).toBeHidden();
+  await expect(page.getByRole('button', { name: /生成图片/ })).toBeVisible();
 });

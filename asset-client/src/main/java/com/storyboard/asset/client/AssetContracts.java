@@ -100,8 +100,19 @@ public final class AssetContracts {
             String sourceType,
             String sourceId,
             OffsetDateTime createdAt,
-            OffsetDateTime updatedAt
+            OffsetDateTime updatedAt,
+            /** 产出素材所属对话；一个对话对应「产出素材」里的一个文件夹。上传素材为 null。 */
+            String conversationId,
+            /** 产出素材来源镜头；同一对话 + 同一镜头的多次生成归为一组版本。 */
+            String sceneId,
+            /** 挑片星级 0–5。 */
+            Integer rating,
+            /** 挑片旗标：pick / reject；空为未标记。 */
+            String flag,
+            /** 挑片色标：red / yellow / green / blue / purple。 */
+            String colorLabel
     ) {
+        /** 兼容既有调用：不带目录路径的 19 参构造。 */
         public AssetSummary(
                 String id,
                 String ownerUserId,
@@ -126,8 +137,149 @@ public final class AssetContracts {
         ) {
             this(id, ownerUserId, scope, ownerProjectId, type, aiKind, name, description,
                     aiDescription, manualOverride, metadataState, status, coverUrl, version, tags,
-                    projects, null, List.of(), sourceType, sourceId, createdAt, updatedAt);
+                    projects, null, List.of(), sourceType, sourceId, createdAt, updatedAt, null, null,
+                    0, null, null);
         }
+
+        /** 兼容既有调用：带目录路径但没有对话归属的 21 参构造。 */
+        public AssetSummary(
+                String id,
+                String ownerUserId,
+                AssetScope scope,
+                String ownerProjectId,
+                AssetType type,
+                AiAssetKind aiKind,
+                String name,
+                String description,
+                String aiDescription,
+                boolean manualOverride,
+                MetadataState metadataState,
+                AssetStatus status,
+                String coverUrl,
+                long version,
+                List<TagRef> tags,
+                List<ProjectLinkRef> projects,
+                String folderId,
+                List<String> folderPath,
+                String sourceType,
+                String sourceId,
+                OffsetDateTime createdAt,
+                OffsetDateTime updatedAt
+        ) {
+            this(id, ownerUserId, scope, ownerProjectId, type, aiKind, name, description,
+                    aiDescription, manualOverride, metadataState, status, coverUrl, version, tags,
+                    projects, folderId, folderPath, sourceType, sourceId, createdAt, updatedAt, null, null,
+                    0, null, null);
+        }
+    }
+
+    /** 「产出素材」按对话聚合出来的虚拟文件夹。conversationId 为空表示未归属对话的生成结果。 */
+    public record OutputConversationSummary(
+            String conversationId,
+            long assetCount,
+            long imageCount,
+            long videoCount,
+            long documentCount,
+            String coverUrl,
+            List<String> previewUrls,
+            String lastAssetName,
+            OffsetDateTime lastGeneratedAt
+    ) {
+    }
+
+    /** 资产组的使用侧信息：成员数量、快照次数和最近一次快照时间。 */
+    public record LibraryGroupInsight(
+            String groupId,
+            long version,
+            long mediaCount,
+            long snapshotCount,
+            OffsetDateTime lastSnapshotAt
+    ) {
+    }
+
+    /** 同一份对象（sha256 相同）被多个素材引用时的一组重复项。 */
+    public record DuplicateGroup(
+            String blobId,
+            String sha256,
+            String mimeType,
+            long sizeBytes,
+            String scope,
+            String ownerProjectId,
+            List<AssetSummary> assets
+    ) {
+    }
+
+    /** 合并重复素材：保留 survivor，其余素材的引用迁过去后进回收站。 */
+    public record MergeDuplicatesRequest(
+            String survivorAssetId,
+            List<String> duplicateAssetIds
+    ) {
+    }
+
+    /** 单张/批量挑片标记；null 表示清空该标记。 */
+    public record AssetMarkRequest(
+            Integer rating,
+            String flag,
+            String colorLabel
+    ) {
+    }
+
+    public record BulkMarkRequest(
+            List<String> assetIds,
+            Integer rating,
+            String flag,
+            String colorLabel
+    ) {
+    }
+
+    /** 可保存的筛选视图：filters/sort 直接存前端当前筛选条件。 */
+    public record LibrarySavedView(
+            String id,
+            String ownerUserId,
+            AssetScope scope,
+            String ownerProjectId,
+            String name,
+            Map<String, Object> filters,
+            Map<String, Object> sort,
+            String viewMode,
+            boolean pinned,
+            OffsetDateTime createdAt,
+            OffsetDateTime updatedAt
+    ) {
+    }
+
+    public record SaveViewRequest(
+            String projectId,
+            String name,
+            Map<String, Object> filters,
+            Map<String, Object> sort,
+            String viewMode,
+            Boolean pinned
+    ) {
+    }
+
+    public record UpdateSavedViewRequest(
+            String name,
+            Map<String, Object> filters,
+            Map<String, Object> sort,
+            String viewMode,
+            Boolean pinned
+    ) {
+    }
+
+    /** 素材的一条使用位置（分镜 / 对话 / 资产组 / 画布）。 */
+    public record UsageRef(String id, String title, String detail) {
+    }
+
+    /** 素材被哪些业务对象引用；total 为四类引用数之和。 */
+    public record AssetUsage(
+            String assetId,
+            int total,
+            List<UsageRef> scenes,
+            List<UsageRef> conversations,
+            List<UsageRef> groups,
+            List<UsageRef> canvases
+    ) {
     }
 
     public record AssetDetail(AssetSummary asset, List<MediaRef> media, List<ProjectLinkRef> linkedProjects) {

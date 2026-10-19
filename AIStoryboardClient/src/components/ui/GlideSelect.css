@@ -1,8 +1,8 @@
 .glide-select {
-  --gs-accent: rgb(65, 118, 230);
+  --gs-accent: var(--color-primary);
   --gs-surface: #ffffff;
-  --gs-highlight: rgba(65, 118, 230, 0.10);
-  --gs-text: rgb(15, 17, 21);
+  --gs-highlight: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --gs-text: var(--color-ink);
   --gs-radius: 10px;
   --gs-inner-radius: 6px;
   --gs-chip: 32px;

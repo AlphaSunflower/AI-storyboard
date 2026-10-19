@@ -3,7 +3,8 @@ import { AgentConversationList } from './AgentConversationList';
 import { DS } from './ChatComposer';
 import { ProjectDropdown } from '../layout/ProjectDropdown';
 import { Tooltip, TooltipGroup } from '../common/Tooltip';
-import { Moon, User, LogOut } from 'lucide-react';
+import MoonLogo from './MoonLogo';
+import { User, LogOut } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -36,7 +37,7 @@ export function MobileSidebarContent({
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <span style={{ fontSize: 17, fontWeight: 700, color: DS.ink, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Moon size={15} strokeWidth={1.8} /> Moon 智能体
+          <MoonLogo size={26} showText textColor={DS.ink} animated />
         </span>
         <button
           onClick={onClose}

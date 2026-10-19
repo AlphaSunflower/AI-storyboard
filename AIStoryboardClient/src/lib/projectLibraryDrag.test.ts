@@ -34,6 +34,7 @@ describe('project library drag protocol', () => {
   it('round-trips conversation media for a library drop destination', () => {
     const payload = {
       projectId: 'project-1',
+      conversationId: 'conv-1',
       mediaType: 'VIDEO' as const,
       url: '/api/files/videos/generated.mp4',
       name: '生成视频',

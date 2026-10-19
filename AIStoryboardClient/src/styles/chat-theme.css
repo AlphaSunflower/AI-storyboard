@@ -1,0 +1,70 @@
+/* ============================================================================
+   /chat 局部主题：白底 + 蓝品牌（DeepSeek 风格）
+   ----------------------------------------------------------------------------
+   只覆盖聊天页作用域内的语义变量，不影响 /editor 的暖色 token。
+   - 页面与消息区：纯白
+   - 侧栏：冷灰 #f7f8fa
+   - 品牌与选中：蓝 #4d6bfe
+   端口到 body 的浮层（项目下拉、提示卡）通过 body:has(.chat-page-shell) 继承同一套变量。
+   ========================================================================== */
+
+.chat-page-shell,
+body:has(.chat-page-shell) {
+  --color-primary: #4d6bfe;
+  --color-primary-active: #3b57dd;
+  --color-primary-soft: #eef2ff;
+  --color-primary-tint: #f5f7ff;
+  --color-primary-disabled: #e5e7eb;
+
+  --color-ink: #0f1115;
+  --color-body: #3f434a;
+  --color-body-strong: #1f2329;
+  --color-muted: #5f6670;
+  --color-muted-soft: #737b86;
+
+  --color-hairline: #e5e7eb;
+  --color-hairline-soft: #eef0f2;
+
+  --color-bg: #ffffff;
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f7f8fa;
+  --color-surface-subtle: #f9fafb;
+  --color-surface-card: #f3f4f6;
+  --color-surface-cream-strong: #e5e7eb;
+
+  --color-success: #12b76a;
+  --color-warning: #d97706;
+  --color-error: #d92d20;
+  --color-info: #475467;
+  --color-focus-ring: rgba(77, 107, 254, 0.42);
+
+  color-scheme: light;
+}
+
+/* 聊天页内的滚动条用冷灰，不跟暖色编辑器的米色。 */
+.chat-page-shell * {
+  scrollbar-color: #d5d8de transparent;
+}
+
+.chat-page-shell *::-webkit-scrollbar-thumb {
+  background-color: #d5d8de;
+}
+
+.chat-page-shell *::-webkit-scrollbar-thumb:hover {
+  background-color: #bcc1ca;
+}
+
+/* 选区高亮：蓝底，和 DeepSeek 一致。 */
+.chat-page-shell ::selection {
+  background: rgba(77, 107, 254, 0.2);
+  color: var(--color-ink);
+}
+
+/* 窄屏时输入卡几乎占满底部：把生成中心浮球抬到输入卡上方，避免压住发送区。 */
+@media (max-width: 1200px) {
+  .chat-page-shell .generation-center {
+    bottom: 220px !important;
+  }
+}
+

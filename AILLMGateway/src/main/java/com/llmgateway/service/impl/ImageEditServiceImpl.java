@@ -1,16 +1,13 @@
 package com.llmgateway.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.entity.Channel;
-import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
-import com.llmgateway.mapper.ChannelMapper;
-import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
+import com.llmgateway.service.ChannelKeyService;
 import com.llmgateway.service.ImageEditService;
-import com.llmgateway.service.KeyService;
+import com.llmgateway.service.RouteResolver;
 import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.UpstreamClient;
 import com.storyboard.common.image.SeedreamImageProtocol;
@@ -33,7 +30,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.imageio.ImageIO;
@@ -55,11 +51,10 @@ public class ImageEditServiceImpl implements ImageEditService {
     private static final String EDIT_PATH = "/images/edits";
     private static final String DOUBAO_MODEL_PREFIX = "doubao-seedream-";
 
-    private final ModelRouteMapper routeMapper;
-    private final ChannelMapper channelMapper;
-    private final KeyService keyService;
     private final UpstreamClient upstreamClient;
     private final CallLogService callLogService;
+    private final RouteResolver routeResolver;
+    private final ChannelKeyService channelKeyService;
 
     @Value("${gateway.vendor.doubao.image-edit-path:/images/generations}")
     private String doubaoImageEditPath;
@@ -81,31 +76,23 @@ public class ImageEditServiceImpl implements ImageEditService {
             model = parseModelField(multipartBody);
             if (model == null || model.isBlank()) throw new BusinessException(40001, "model 不能为空");
 
-            // 2. 查该模型的所有路由（一个模型可指向多个渠道，按 priority 轮换）
-            List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                    .eq(ModelRoute::getModelName, model));
-            if (routes == null || routes.isEmpty()) {
-                throw new BusinessException(40401, "no route for model: " + model);
-            }
-
-            // 3. 候选渠道（路由指向的 enabled 渠道，按 priority 升序）
-            List<Channel> candidates = routes.stream()
-                    .map(r -> channelMapper.selectById(r.getChannelId()))
-                    .filter(c -> c != null && Boolean.TRUE.equals(c.getEnabled()))
-                    .sorted(Comparator.comparingInt(c -> c.getPriority() == null ? 0 : c.getPriority()))
-                    .toList();
+            // 2. 按统一路由规则取候选（启停/优先级/权重与 chat/image 一致）
+            List<RouteResolver.RouteCandidate> candidates = routeResolver.resolve(model, null);
             if (candidates.isEmpty()) {
                 throw new BusinessException(50301, "no available channel for model: " + model);
             }
 
-            // 4. 逐个渠道尝试（失败切下一个）
-            for (Channel channel : candidates) {
+            // 3. 逐个渠道尝试（失败切下一个）；multipart 体不做上游模型/参数改写（见文档限制）
+            int attempt = 0;
+            for (RouteResolver.RouteCandidate candidate : candidates) {
+                Channel channel = candidate.channel();
+                attempt++;
                 try {
                     channelId = channel.getId();
-                    String apiKey = keyService.decrypt(channel.getApiKey());
+                    ChannelKeyService.KeySelection key = channelKeyService.select(channel);
                     RouteResult resp = isDoubaoModel(model)
-                            ? editDoubao(channel, apiKey, model, multipartBody)
-                            : editOpenAiCompatible(channel, apiKey, upstreamContentType, multipartBody);
+                            ? editDoubao(channel, key.plainKey(), model, multipartBody)
+                            : editOpenAiCompatible(channel, key.plainKey(), upstreamContentType, multipartBody);
                     int status = resp.status();
                     if (status >= 400) {
                         String error = upstreamClient.extractError(resp.body());
@@ -113,13 +100,19 @@ public class ImageEditServiceImpl implements ImageEditService {
                         // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传（带上游真实状态码，避免被 200 包装致 Backend 误判成功）
                         if (status != 429 && status < 500) {
                             callLogService.log(model, channelId, "error",
-                                    System.currentTimeMillis() - start, error, null, null);
+                                    System.currentTimeMillis() - start, error, null, null, null,
+                                    model, attempt, null, null);
                             return resp;
+                        }
+                        if (status == 429 || status == 401 || status == 403 || status >= 500) {
+                            channelKeyService.markFailure(key.keyId(), status);
                         }
                         continue;
                     }
+                    channelKeyService.markSuccess(key.keyId());
                     callLogService.log(model, channelId, "success",
-                            System.currentTimeMillis() - start, null, null, null);
+                            System.currentTimeMillis() - start, null, null, null, null,
+                            model, attempt, null, null);
                     return resp;
                 } catch (BusinessException be) {
                     throw be;

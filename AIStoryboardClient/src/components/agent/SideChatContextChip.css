@@ -11,9 +11,9 @@
   align-items: center;
   gap: 7px;
   padding: 0 11px;
-  border: 1px solid rgba(65, 118, 230, 0.16);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 16%, transparent);
   border-radius: 10px;
-  background: rgba(65, 118, 230, 0.055);
+  background: color-mix(in srgb, var(--color-primary) 5.5%, transparent);
   color: #315fc4;
   font-size: 12px;
   font-weight: 580;
@@ -25,8 +25,8 @@
 
 .side-chat-context:hover .side-chat-context__chip,
 .side-chat-context:focus-within .side-chat-context__chip {
-  border-color: rgba(65, 118, 230, 0.3);
-  background: rgba(65, 118, 230, 0.08);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 }
 
 .side-chat-context__popover {
@@ -139,7 +139,7 @@
 }
 
 .side-chat-context__item button:focus-visible {
-  outline: 2px solid rgba(65, 118, 230, 0.42);
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 42%, transparent);
   outline-offset: 1px;
 }
 

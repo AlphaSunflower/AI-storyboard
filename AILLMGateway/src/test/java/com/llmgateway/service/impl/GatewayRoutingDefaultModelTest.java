@@ -8,11 +8,14 @@ import com.llmgateway.entity.Channel;
 import com.llmgateway.entity.ModelParams;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.mapper.ChannelMapper;
+import com.llmgateway.mapper.ModelFallbackMapper;
 import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
+import com.llmgateway.service.ChannelKeyService;
 import com.llmgateway.service.KeyService;
 import com.llmgateway.service.ModelCatalogCache;
+import com.llmgateway.service.RouteResolver;
 import com.llmgateway.service.UpstreamClient;
 import com.llmgateway.vendor.route.RouteVendorRegistry;
 import org.junit.jupiter.api.Test;
@@ -57,7 +60,8 @@ class GatewayRoutingDefaultModelTest {
 
         GatewayRoutingServiceImpl service = new GatewayRoutingServiceImpl(
                 routeMapper, channelMapper, modelParamsMapper, keyService, upstreamClient,
-                routeRegistry, callLogService, new ModelCatalogCache(redisTemplate)
+                routeRegistry, callLogService, new ModelCatalogCache(redisTemplate),
+                mock(RouteResolver.class), mock(ChannelKeyService.class), mock(ModelFallbackMapper.class)
         );
 
         JsonNode data = new ObjectMapper().readTree(service.fetchModels("text")).path("data");
@@ -93,7 +97,8 @@ class GatewayRoutingDefaultModelTest {
         GatewayRoutingServiceImpl service = new GatewayRoutingServiceImpl(
                 routeMapper, channelMapper, modelParamsMapper, mock(KeyService.class),
                 mock(UpstreamClient.class), mock(RouteVendorRegistry.class),
-                mock(CallLogService.class), new ModelCatalogCache(redisTemplate));
+                mock(CallLogService.class), new ModelCatalogCache(redisTemplate),
+                mock(RouteResolver.class), mock(ChannelKeyService.class), mock(ModelFallbackMapper.class));
 
         JsonNode data = new ObjectMapper().readTree(service.fetchModels("text")).path("data");
         assertThat(find(data, "deepseek-v4-flash").path("is_default").asBoolean()).isTrue();

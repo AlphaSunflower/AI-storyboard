@@ -4,6 +4,7 @@ import { AgentConversationList } from './AgentConversationList';
 import { useAgentStore } from '../../stores/agentStore';
 import { useToastStore } from '../../stores/toastStore';
 import { agentApi } from '../../api/agent';
+import { CONVERSATION_DRAG_MIME } from '../../lib/mentionReferences';
 
 function conversation(id: string, title: string) {
   return {
@@ -50,6 +51,22 @@ describe('AgentConversationList generation markers', () => {
     render(<AgentConversationList />);
 
     expect(screen.getByLabelText('有新回复')).toBeTruthy();
+  });
+
+  it('把非当前会话拖进输入框时写入 conversation 拖拽负载', () => {
+    render(<AgentConversationList />);
+    const item = screen.getByText('对话二').closest('.conversation-item');
+    expect(item).toBeTruthy();
+    const setData = vi.fn();
+    fireEvent.dragStart(item!, {
+      dataTransfer: { setData, effectAllowed: '' },
+    });
+
+    expect(setData).toHaveBeenCalledWith(
+      CONVERSATION_DRAG_MIME,
+      expect.stringContaining('"id":"c2"'),
+    );
+    expect(setData).toHaveBeenCalledWith('text/plain', '@对话《对话二》');
   });
 });
 

@@ -10,24 +10,89 @@ html, body, #root {
   height: 100%;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font: var(--text-body-md);
   color: var(--color-body);
   background: var(--color-canvas);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 所有界面文字默认左对齐：只有显式的居中容器才居中，避免再被模板遗留继承干扰。 */
+#root {
+  text-align: left;
 }
 
 button {
   cursor: pointer;
   font: var(--text-button);
+  color: inherit;
 }
 
 input, textarea, select {
   font: var(--text-body-md);
+  color: var(--color-ink);
 }
 
 a {
   color: var(--color-primary);
+  text-underline-offset: 3px;
+}
+
+h1, h2, h3, h4 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+[data-numeric],
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 键盘焦点是产品表面的一部分：所有可交互元素统一珊瑚色焦点环，不依赖浏览器默认。 */
+:where(button, a, input, textarea, select, summary, [role='button'], [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 26%, transparent);
+  color: var(--color-ink);
+}
+
+/* 滚动条跟随暖色表面，不再露出浏览器灰蓝。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d8d1c6 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: #d8d1c6;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #c4bcb0;
 }
 
 /* lucide 图标与行内文字基线对齐（inline 渲染时默认偏上，统一 middle 视觉居中）
@@ -36,4 +101,12 @@ svg[class*="lucide"] {
   display: inline-block;
   vertical-align: middle;
   flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
 }

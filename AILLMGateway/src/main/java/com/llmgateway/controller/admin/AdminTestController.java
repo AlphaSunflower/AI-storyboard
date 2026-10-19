@@ -188,9 +188,11 @@ public class AdminTestController {
         }
     }
 
-    /** POST /admin/routes/{id}/test：按模型类型走真实网关链路。
+    /** POST /admin/routes/{id}/test：按模型类型走真实网关链路，并锁定该行绑定的渠道。
      *  text/vision → /chat/completions；image → /images/generations；video → VideoGatewayService.create（创建任务 2xx 即成功，不轮询）。
-     *  均与线上调用同路径（视频会落 created 日志，其余落 success/error 日志，可复核）。 */
+     *  均与线上调用同路径（视频会落 created 日志，其余落 success/error 日志，可复核）。
+     *  强制渠道：同模型多条路由时，普通路由会打到优先级最高的渠道，测不出「这一行」；
+     *  这里把 route.channelId 传下去，结果与列表行一一对应。 */
     @PostMapping("/routes/{id}/test")
     public ApiResponse<Map<String, Object>> testRoute(@PathVariable String id) {
         ModelRoute route = routeService.getById(id);
@@ -203,19 +205,23 @@ public class AdminTestController {
             if ("video".equals(type)) {
                 // 视频：走 VideoGatewayService 创建任务（与 /v1/videos 同链路，按 model 分发 MiniMax/Laozhang）
                 VideoResult vr = videoGatewayService.create(String.format(
-                        "{\"model\":\"%s\",\"prompt\":\"a cat walking\"}", route.getModelName()));
+                        "{\"model\":\"%s\",\"prompt\":\"a cat walking\"}", route.getModelName()), route.getChannelId());
                 status = vr.status();
                 respBody = vr.body();
             } else if ("image".equals(type)) {
-                // 生图：走通用路由转发 /images/generations（OpenAI 图片格式）
+                // 生图：走通用路由转发 /images/generations（OpenAI 图片格式）。
+                // 不写死 size/n：不同厂商默认值不同（豆包要 1K/2K/4K，不认 n），
+                // 让模型/渠道自己兜底，避免「测试」本身因参数不兼容失败。
                 RouteResult rr = gatewayRoutingService.route("/images/generations", String.format(
-                        "{\"model\":\"%s\",\"prompt\":\"a red apple\",\"size\":\"1024x1024\",\"n\":1}", route.getModelName()));
+                        "{\"model\":\"%s\",\"prompt\":\"a red apple\"}",
+                        route.getModelName()), null, route.getChannelId());
                 status = rr.status();
                 respBody = rr.body();
             } else {
                 // 文本/理解：走通用路由转发 /chat/completions
                 RouteResult rr = gatewayRoutingService.route("/chat/completions", String.format(
-                        "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}", route.getModelName()));
+                        "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}",
+                        route.getModelName()), null, route.getChannelId());
                 status = rr.status();
                 respBody = rr.body();
             }
@@ -223,12 +229,13 @@ public class AdminTestController {
             // 2xx 判成功（gemini 转换后无 choices 键，不能用 choices 判定；视频创建 2xx 即任务创建成功）
             boolean ok = status >= 200 && status < 300;
             String error = ok ? null : upstreamClient.extractError(respBody);
-            log.info("【路由测试】完成: model={} type={} ok={} http={} cost={}ms{}", route.getModelName(), type, ok,
-                    status, durationMs, error == null ? "" : " error=" + error);
+            log.info("【路由测试】完成: model={} type={} channel={} ok={} http={} cost={}ms{}", route.getModelName(), type,
+                    route.getChannelId(), ok, status, durationMs, error == null ? "" : " error=" + error);
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("ok", ok);
             map.put("status", status);
             map.put("durationMs", durationMs);
+            map.put("channelId", route.getChannelId());
             if (!ok) {
                 map.put("error", error);
             }
@@ -236,11 +243,13 @@ public class AdminTestController {
         } catch (Exception e) {
             // route()/videoGatewayService 抛业务异常（无路由/渠道全挂等）也按失败结果返回
             long durationMs = System.currentTimeMillis() - start;
-            log.warn("【路由测试】异常: model={} type={} cost={}ms error={}", route.getModelName(), type, durationMs, e.getMessage());
+            log.warn("【路由测试】异常: model={} type={} channel={} cost={}ms error={}", route.getModelName(), type,
+                    route.getChannelId(), durationMs, e.getMessage());
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("ok", false);
             map.put("status", 500);
             map.put("durationMs", durationMs);
+            map.put("channelId", route.getChannelId());
             map.put("error", e.getMessage());
             return ApiResponse.ok(map);
         }

@@ -4,6 +4,7 @@ import com.storyboard.asset.client.AssetContracts.AssetDetail;
 import com.storyboard.asset.client.AssetContracts.AssetScope;
 import com.storyboard.asset.client.AssetContracts.AssetSummary;
 import com.storyboard.asset.client.AssetContracts.AssetType;
+import com.storyboard.asset.client.AssetContracts.AssetUsage;
 import com.storyboard.asset.client.AssetContracts.AssignTagsRequest;
 import com.storyboard.asset.client.AssetContracts.BulkAssetIdsRequest;
 import com.storyboard.asset.client.AssetContracts.BulkAssetOperationResult;
@@ -67,17 +68,52 @@ public class LibraryAssetController {
             @RequestParam(defaultValue = "false") boolean deleted,
             @RequestParam(defaultValue = "false") boolean includeGlobal,
             @RequestParam(required = false) LibraryOrigin origin,
+            @RequestParam(required = false) String conversationId,
+            @RequestParam(required = false) Integer minRating,
+            @RequestParam(required = false) String flag,
+            @RequestParam(required = false) String colorLabel,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "40") int size
     ) {
         return ApiResponse.ok(catalogService.list(
                 auth.getName(), scope, projectId, folderId, q, type, tagIds, tagMode, deleted,
-                includeGlobal, origin, page, size));
+                includeGlobal, origin, conversationId, minRating, flag, colorLabel, page, size));
     }
 
     @GetMapping("/{id}")
     public ApiResponse<AssetDetail> get(Authentication auth, @PathVariable String id) {
         return ApiResponse.ok(catalogService.get(auth.getName(), id));
+    }
+
+    /** 素材使用位置：分镜 / 对话 / 资产组 / 画布。 */
+    @GetMapping("/{id}/usage")
+    public ApiResponse<AssetUsage> usage(Authentication auth, @PathVariable String id) {
+        return ApiResponse.ok(catalogService.getUsage(auth.getName(), id));
+    }
+
+    /** 未被分镜、资产组、画布引用的素材（不含资产组本身）。 */
+    @GetMapping("/unused")
+    public ApiResponse<PageResponse<AssetSummary>> unused(
+            Authentication auth,
+            @RequestParam String projectId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "40") int size
+    ) {
+        return ApiResponse.ok(catalogService.listUnused(auth.getName(), projectId, page, size));
+    }
+
+    /** 智能搜索：关键词 / 主色 / 找相似。 */
+    @GetMapping("/search")
+    public ApiResponse<List<AssetSummary>> search(
+            Authentication auth,
+            @RequestParam String projectId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String color,
+            @RequestParam(required = false) String similarTo,
+            @RequestParam(defaultValue = "30") int limit
+    ) {
+        return ApiResponse.ok(catalogService.search(
+                auth.getName(), projectId, q, color, similarTo, limit));
     }
 
     @GetMapping("/analysis-tasks")
@@ -146,6 +182,25 @@ public class LibraryAssetController {
             @RequestBody DuplicateAssetsRequest request
     ) {
         return ApiResponse.ok(catalogService.duplicate(auth.getName(), request));
+    }
+
+    /** 单张素材挑片标记：rating/flag/colorLabel 整组覆盖。 */
+    @PostMapping("/{id}/mark")
+    public ApiResponse<AssetSummary> mark(
+            Authentication auth,
+            @PathVariable String id,
+            @RequestBody com.storyboard.asset.client.AssetContracts.AssetMarkRequest request
+    ) {
+        return ApiResponse.ok(catalogService.mark(auth.getName(), id, request));
+    }
+
+    /** 批量挑片标记。 */
+    @PostMapping("/bulk/mark")
+    public ApiResponse<BulkAssetOperationResult> bulkMark(
+            Authentication auth,
+            @RequestBody com.storyboard.asset.client.AssetContracts.BulkMarkRequest request
+    ) {
+        return ApiResponse.ok(catalogService.bulkMark(auth.getName(), request));
     }
 
     @PostMapping("/{id}/projects")

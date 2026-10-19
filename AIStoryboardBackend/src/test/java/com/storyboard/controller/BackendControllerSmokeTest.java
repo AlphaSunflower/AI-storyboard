@@ -36,6 +36,8 @@ import com.storyboard.mapper.SceneReferenceImageMapper;
 import com.storyboard.mapper.SceneMaterialGroupSnapshotMapper;
 import com.storyboard.mapper.SceneAssetLinkMapper;
 import com.storyboard.mapper.UserMapper;
+import com.storyboard.mapper.UserFeedbackMapper;
+import com.storyboard.mapper.UserSettingsMapper;
 import com.storyboard.security.JwtTokenProvider;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.AuthService;
@@ -58,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -144,6 +147,10 @@ class BackendControllerSmokeTest {
     private SceneAssetLinkMapper sceneAssetLinkMapper;
     @MockitoBean
     private UserMapper userMapper;
+    @MockitoBean
+    private UserSettingsMapper userSettingsMapper;
+    @MockitoBean
+    private UserFeedbackMapper userFeedbackMapper;
 
     private static final String AUTH = "X-Internal-Token";
     private static final String SECRET = "test-internal-secret";
@@ -177,8 +184,8 @@ class BackendControllerSmokeTest {
         mockMvc.perform(get("/api/user/profile"))
             .andExpect(status().isUnauthorized());
 
-        when(userService.getProfile(anyString())).thenReturn(new ProfileResponse("u1", "n", "a@b.c"));
-        when(userService.updateProfile(anyString(), any())).thenReturn(new ProfileResponse("u1", "n2", "a@b.c"));
+        when(userService.getProfile(anyString())).thenReturn(new ProfileResponse("u1", "n", "a@b.c", "member"));
+        when(userService.updateProfile(anyString(), any())).thenReturn(new ProfileResponse("u1", "n2", "a@b.c", "member"));
         when(userService.getStats(anyString())).thenReturn(new UserStatsResponse(1, 2, 3));
 
         mockMvc.perform(get("/api/user/profile").with(user("u1")))
@@ -191,6 +198,17 @@ class BackendControllerSmokeTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(200));
         mockMvc.perform(get("/api/user/stats").with(user("u1")))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.projectCount").value(3));
+    }
+
+    @Test
+    void feedbackInbox_isAdminOnly() throws Exception {
+        when(userService.listFeedback(anyInt())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/user/feedback").with(user("u1")))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/user/feedback").with(user("admin").roles("ADMIN")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(200));
     }
 
     @Test

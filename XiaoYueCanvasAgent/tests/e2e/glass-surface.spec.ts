@@ -2,11 +2,14 @@ import { expect, test, type Locator } from '@playwright/test';
 import { prepareCanvasApp } from './support/canvasAuth';
 
 /**
- * 玻璃态表层回归：画布组件必须是「半透明 + backdrop 模糊」的玻璃面，
- * 而 Moon 智能体面板（.chat-workspace）必须保持原来的实底、不做玻璃——这是产品约定。
+ * 玻璃态表层回归：
+ * - 画布外壳（项目栏 / 工具岛 / 视图条 / 抽屉 / 菜单 / 对话框）必须是「半透明 + backdrop 模糊」的玻璃面；
+ * - 画布节点内部（节点卡片、参数面板、节点上的浮动小钮）必须是不透明实底——节点会叠在点阵、
+ *   连线和别的节点上，半透明会让里面的参数文字读不出来（2026-10-19 用户实测）；
+ * - Moon 智能体面板（.chat-workspace）保持原来的实底、不做玻璃——这是产品约定。
  *
- * 只看计算样式，不看像素：以后再加一层主题覆盖时，如果把这些面又压回不透明，
- * 这条用例会直接挂，而不是等人肉发现「玻璃没了」。
+ * 只看计算样式，不看像素：以后再加一层主题覆盖时，如果把这些面又压回错误的状态，
+ * 这条用例会直接挂，而不是等人肉发现。
  */
 
 const glassStyle = (locator: Locator) => locator.evaluate((element) => {
@@ -27,6 +30,14 @@ const expectGlass = async (locator: Locator, label: string) => {
   const style = await glassStyle(locator);
   expect(style.blur, `${label} 没有 backdrop 模糊`).toContain('blur');
   expect(style.alpha, `${label} 不是半透明底（${style.background}）`).toBeLessThan(1);
+};
+
+/** 节点内部：不允许模糊，且必须是实底。 */
+const expectOpaque = async (locator: Locator, label: string) => {
+  await expect(locator).toBeVisible();
+  const style = await glassStyle(locator);
+  expect(style.blur, `${label} 不应再做玻璃化`).toBe('none');
+  expect(style.alpha, `${label} 应为实底（${style.background}）`).toBe(1);
 };
 
 test.beforeEach(async ({ page }) => {
@@ -66,7 +77,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('canvas chrome is glass, Moon agent panel stays opaque', async ({ page }) => {
+test('canvas chrome is glass, node internals and Moon agent panel stay opaque', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/?token=test-token&userId=test-user');
   // 种一个本地项目 + 空画布（与其它画布用例相同的离线启动方式）
@@ -115,10 +126,10 @@ test('canvas chrome is glass, Moon agent panel stays opaque', async ({ page }) =
   expect(moon.blur, 'Moon 智能体面板不该被玻璃化').toBe('none');
   expect(moon.alpha, 'Moon 智能体面板应保持不透明底').toBe(1);
 
-  // 节点卡片
+  // 节点卡片：改成实底，不再透出画布点阵
   await page.locator('.canvas-tool-island').getByRole('button', { name: '文字', exact: true }).click();
   await page.waitForTimeout(400);
-  await expectGlass(page.locator('.node-card').first(), '节点卡片');
+  await expectOpaque(page.locator('.node-card').first(), '节点卡片');
 
   // 左栏浮层：项目库抽屉 / 生成记录 / 任务队列（三者共用左侧浮层位，逐个开）
   await page.getByRole('button', { name: '项目库' }).click();

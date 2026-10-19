@@ -34,6 +34,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/error").permitAll()
                         .requestMatchers("/api/library/media/*/content").permitAll()
+                        .requestMatchers("/api/library/media/thumbnails").permitAll()
                         .requestMatchers("/api/internal/**").hasRole("INTERNAL")
                         .anyRequest().authenticated())
                 .addFilterBefore(authenticationFilter, UsernamePasswordAuthenticationFilter.class);

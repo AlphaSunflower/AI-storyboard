@@ -103,19 +103,17 @@ export function ApprovalModeSelector({
           disabled={disabled}
           onClick={() => setOpen((value) => !value)}
           style={{
-            height: 36,
+            height: 34,
             maxWidth: 154,
             padding: '0 9px',
-            border: fullAccessActive
-              ? '1px solid rgba(234,88,12,0.26)'
-              : '1px solid rgba(0,0,0,0.08)',
-            borderRadius: 10,
+            border: '1px solid rgba(0,0,0,0.09)',
+            borderRadius: 8,
             background: open
-              ? 'rgba(65,118,230,0.08)'
-              : fullAccessActive ? 'rgba(249,115,22,0.10)' : 'transparent',
+              ? 'color-mix(in srgb, var(--color-primary) 7%, transparent)'
+              : 'transparent',
             color: disabled
-              ? 'rgb(152,158,168)'
-              : fullAccessActive ? 'rgb(194,65,12)' : 'rgb(96,100,108)',
+              ? 'var(--color-muted-soft)'
+              : 'var(--color-muted)',
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
@@ -124,7 +122,11 @@ export function ApprovalModeSelector({
             minWidth: 0,
           }}
         >
-          <CurrentIcon size={15} strokeWidth={2} style={{ flexShrink: 0 }} />
+          <CurrentIcon
+            size={15}
+            strokeWidth={2}
+            style={{ flexShrink: 0, color: fullAccessActive ? '#B45309' : undefined }}
+          />
           <span
             style={{
               overflow: 'hidden',
@@ -190,14 +192,14 @@ export function ApprovalModeSelector({
                     style={{
                       color: option.id === 'FULL_ACCESS'
                         ? 'rgb(234,88,12)'
-                        : selected ? 'rgb(65,118,230)' : 'rgb(96,100,108)',
+                        : selected ? 'var(--color-primary)' : 'var(--color-muted)',
                     }}
                   />
                   <span style={{ minWidth: 0 }}>
                     <span
                       style={{
                         display: 'block',
-                        color: option.id === 'FULL_ACCESS' ? 'rgb(194,65,12)' : 'rgb(15,17,21)',
+                        color: option.id === 'FULL_ACCESS' ? 'rgb(194,65,12)' : 'var(--color-ink)',
                         fontSize: 13,
                         fontWeight: 600,
                         lineHeight: 1.35,
@@ -211,7 +213,7 @@ export function ApprovalModeSelector({
                         marginTop: 2,
                         color: option.id === 'FULL_ACCESS'
                           ? 'rgb(194,88,46)'
-                          : 'rgb(152,158,168)',
+                          : 'var(--color-muted-soft)',
                         fontSize: 11,
                         lineHeight: 1.35,
                       }}
@@ -226,7 +228,7 @@ export function ApprovalModeSelector({
                       style={{
                         color: option.id === 'FULL_ACCESS'
                           ? 'rgb(234,88,12)'
-                          : 'rgb(65,118,230)',
+                          : 'var(--color-primary)',
                       }}
                     />
                   ) : <span />}

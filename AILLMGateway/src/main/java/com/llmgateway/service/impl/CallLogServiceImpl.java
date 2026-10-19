@@ -29,18 +29,28 @@ public class CallLogServiceImpl implements CallLogService {
     @Async
     @Override
     public void log(String model, String channelId, String status, long durationMs, String error, String videoUrl, String taskId) {
-        persist(model, channelId, status, durationMs, error, videoUrl, taskId, null);
+        persist(model, channelId, status, durationMs, error, videoUrl, taskId, null, null, null, null, null);
     }
 
     @Async
     @Override
     public void log(String model, String channelId, String status, long durationMs,
                     String error, String videoUrl, String taskId, String callId) {
-        persist(model, channelId, status, durationMs, error, videoUrl, taskId, callId);
+        persist(model, channelId, status, durationMs, error, videoUrl, taskId, callId, null, null, null, null);
+    }
+
+    @Async
+    @Override
+    public void log(String model, String channelId, String status, long durationMs,
+                    String error, String videoUrl, String taskId, String callId,
+                    String upstreamModel, Integer attempt, Integer promptTokens, Integer completionTokens) {
+        persist(model, channelId, status, durationMs, error, videoUrl, taskId, callId,
+                upstreamModel, attempt, promptTokens, completionTokens);
     }
 
     private void persist(String model, String channelId, String status, long durationMs,
-                         String error, String videoUrl, String taskId, String callId) {
+                         String error, String videoUrl, String taskId, String callId,
+                         String upstreamModel, Integer attempt, Integer promptTokens, Integer completionTokens) {
         try {
             CallLog record = new CallLog();
             record.setModel(model);
@@ -51,6 +61,12 @@ public class CallLogServiceImpl implements CallLogService {
             record.setCallId(callId);
             record.setVideoUrl(videoUrl);
             record.setTaskId(taskId);
+            record.setUpstreamModel(upstreamModel);
+            record.setAttempt(attempt);
+            record.setPromptTokens(promptTokens);
+            record.setCompletionTokens(completionTokens);
+            record.setTotalTokens(promptTokens == null && completionTokens == null
+                    ? null : (promptTokens == null ? 0 : promptTokens) + (completionTokens == null ? 0 : completionTokens));
             record.setCreatedAt(OffsetDateTime.now());
             callLogMapper.insert(record);
         } catch (Exception e) {

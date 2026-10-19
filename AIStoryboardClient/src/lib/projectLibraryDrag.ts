@@ -19,6 +19,8 @@ export type ProjectLibraryDragPayload =
 
 export interface ChatMediaDragPayload {
   projectId: string;
+  /** 素材所属对话：拖进项目库时据此归到对应的「产出素材」文件夹。 */
+  conversationId?: string;
   mediaType: Extract<MediaType, 'IMAGE' | 'VIDEO'>;
   url: string;
   name: string;
@@ -83,6 +85,9 @@ export function parseChatMediaDragPayload(raw: string): ChatMediaDragPayload | n
       && typeof value.name === 'string'
       ? {
           projectId: value.projectId,
+          conversationId: typeof value.conversationId === 'string' && value.conversationId
+            ? value.conversationId
+            : undefined,
           mediaType: value.mediaType,
           url: value.url,
           name: value.name,

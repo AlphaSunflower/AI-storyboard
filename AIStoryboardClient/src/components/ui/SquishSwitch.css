@@ -12,7 +12,7 @@
   --ss-r: 19px;
   --ss-thumb-r: 15px;
   --ss-track: rgba(0, 0, 0, 0.16);
-  --ss-track-on: rgb(65, 118, 230);
+  --ss-track-on: var(--color-primary);
   --ss-thumb-color: #ffffff;
   --ss-thumb-on: #ffffff;
   --ss-fade: 320ms;
@@ -39,7 +39,7 @@
 }
 
 .squish-switch:focus-visible .squish-switch__track {
-  box-shadow: 0 0 0 3px rgba(65, 118, 230, 0.24);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 
 .squish-switch[data-held] {

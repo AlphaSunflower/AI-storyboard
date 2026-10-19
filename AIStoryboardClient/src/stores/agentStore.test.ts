@@ -21,12 +21,20 @@ import {
 import { dedupeAttachments, attachmentKey } from '../lib/attachmentDedupe';
 import { collectRenderIntents, parseRenderIntent } from '../lib/renderIntent';
 import { useProjectStore } from './projectStore';
+import {
+  DEFAULT_ACCOUNT_SETTINGS,
+  useAccountSettingsStore,
+} from './accountSettingsStore';
 import { readTurnLastSeq } from './turnResume';
 import { setAccessToken } from '../lib/authSession';
 import { defaultGenerationPreferences } from '../lib/generationPreferences';
 
 beforeEach(() => {
   setAccessToken('test-token');
+});
+
+afterEach(() => {
+  useAccountSettingsStore.setState({ settings: DEFAULT_ACCOUNT_SETTINGS });
 });
 
 function sseEnvelope(
@@ -59,6 +67,7 @@ describe('agentStore createConversation', () => {
     useAgentStore.setState({
       activeConversationId: null,
       conversations: [],
+      pendingApprovalMode: DEFAULT_AGENT_APPROVAL_MODE,
       selectConversation: useAgentStore.getInitialState().selectConversation,
     });
     useProjectStore.setState({ currentProject: null });
@@ -90,6 +99,36 @@ describe('agentStore createConversation', () => {
       DEFAULT_AGENT_APPROVAL_MODE,
     );
     expect(selectConversation).toHaveBeenCalledWith('conversation-1');
+  });
+
+  it('keeps the account-level FULL_ACCESS default for a new conversation', async () => {
+    useAccountSettingsStore.setState({
+      settings: { ...DEFAULT_ACCOUNT_SETTINGS, defaultApprovalMode: 'FULL_ACCESS' },
+      loaded: true,
+    });
+    const conversation: AgentConversation = {
+      id: 'conversation-full',
+      userId: 'user-1',
+      projectId: 'project-1',
+      title: '新对话',
+      status: 'active',
+      approvalMode: 'FULL_ACCESS',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    useProjectStore.setState({
+      currentProject: { id: 'project-1', name: 'Project' } as never,
+    });
+    const createConversation = vi.spyOn(agentApi, 'createConversation')
+      .mockResolvedValue({ data: { data: conversation } } as never);
+    useAgentStore.setState({ selectConversation: vi.fn().mockResolvedValue(undefined) });
+
+    useAgentStore.getState().newConversation();
+    expect(useAgentStore.getState().pendingApprovalMode).toBe('FULL_ACCESS');
+
+    await useAgentStore.getState().createConversation();
+
+    expect(createConversation).toHaveBeenCalledWith('project-1', '新对话', 'FULL_ACCESS');
   });
 
   it('creates the first conversation before sending the first message', async () => {

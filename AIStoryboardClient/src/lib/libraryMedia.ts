@@ -3,6 +3,20 @@ import type { LibraryMedia } from '../api/library';
 
 const LIBRARY_MEDIA_PATH = /\/api\/library\/media\/([^/?#]+)\/content(?:\?|$)/i;
 
+/**
+ * 列表卡片用缩略图：复用 coverUrl 里的文件签名，走 asset-service 的缩略图端点。
+ * 非图片、无签名或外部地址原样返回，避免破坏现有展示。
+ */
+export function libraryThumbnailUrl(coverUrl?: string | null, size = 320): string {
+  if (!coverUrl || !coverUrl.startsWith('/api/files/')) return coverUrl || '';
+  const [path, query = ''] = coverUrl.split('?', 2);
+  if (!/\.(png|jpe?g|webp|gif|bmp)$/i.test(path)) return coverUrl;
+  const token = new URLSearchParams(query).get('token');
+  if (!token) return coverUrl;
+  return `/api/library/media/thumbnails?path=${encodeURIComponent(path)}`
+    + `&token=${encodeURIComponent(token)}&size=${size}`;
+}
+
 export function libraryMediaIdFromUrl(url?: string): string | null {
   if (!url) return null;
   const match = LIBRARY_MEDIA_PATH.exec(url);

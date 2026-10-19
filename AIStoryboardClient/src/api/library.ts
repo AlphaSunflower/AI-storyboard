@@ -42,8 +42,85 @@ export interface LibraryAsset {
   folderPath: string[];
   sourceType: string | null;
   sourceId: string | null;
+  /** 产出素材所属对话；上传素材为 null。 */
+  conversationId?: string | null;
+  /** 产出素材来源镜头；同一对话 + 同一镜头的多次生成归为一组版本。 */
+  sceneId?: string | null;
+  /** 挑片星级 0–5。 */
+  rating?: number;
+  /** 挑片旗标：pick / reject。 */
+  flag?: 'pick' | 'reject' | null;
+  /** 挑片色标。 */
+  colorLabel?: 'red' | 'yellow' | 'green' | 'blue' | 'purple' | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 「产出素材」按对话聚合出来的虚拟文件夹。 */
+export interface OutputConversationSummary {
+  conversationId: string | null;
+  assetCount: number;
+  imageCount: number;
+  videoCount: number;
+  documentCount: number;
+  coverUrl: string | null;
+  previewUrls: string[];
+  lastAssetName: string | null;
+  lastGeneratedAt: string | null;
+}
+
+/** 资产组使用侧信息：成员数、快照次数、最近一次快照时间。 */
+export interface LibraryGroupInsight {
+  groupId: string;
+  version: number;
+  mediaCount: number;
+  snapshotCount: number;
+  lastSnapshotAt: string | null;
+}
+
+/** 同一份文件（sha256 相同）被多个素材引用时的重复组。 */
+export interface DuplicateGroup {
+  blobId: string;
+  sha256: string;
+  mimeType: string;
+  sizeBytes: number;
+  scope: AssetScope;
+  ownerProjectId: string;
+  assets: LibraryAsset[];
+}
+
+export type AssetFlag = 'pick' | 'reject';
+export type AssetColorLabel = 'red' | 'yellow' | 'green' | 'blue' | 'purple';
+
+/** 可保存的筛选视图。 */
+export interface LibrarySavedView {
+  id: string;
+  ownerUserId: string;
+  scope: AssetScope;
+  ownerProjectId: string;
+  name: string;
+  filters: Record<string, unknown>;
+  sort: Record<string, unknown>;
+  viewMode: 'folders' | 'tree';
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 素材的一条使用位置。 */
+export interface UsageRef {
+  id: string;
+  title: string;
+  detail: string | null;
+}
+
+export interface AssetUsage {
+  assetId: string;
+  total: number;
+  scenes: UsageRef[];
+  conversations: UsageRef[];
+  groups: UsageRef[];
+  canvases: UsageRef[];
 }
 
 export interface LibraryMedia {
@@ -204,11 +281,53 @@ export const libraryApi = {
     includeGlobal?: boolean;
     /** 只返回系统生成回写的产出素材。 */
     origin?: 'GENERATED';
+    /** 产出素材看板：按对话过滤；UNASSIGNED = 未归属任何对话的生成结果。 */
+    conversationId?: string;
+    /** 挑片标记过滤。 */
+    minRating?: number;
+    flag?: AssetFlag;
+    colorLabel?: AssetColorLabel;
     page?: number;
     size?: number;
-  }) => client.get<ApiResponse<LibraryPage<LibraryAsset>>>('/library/assets', { params }),
+  }) => client.get<ApiResponse<LibraryPage<LibraryAsset>>>('/library/assets', {
+    params,
+    // Spring 的 List<String> 绑定要求 tagIds=a&tagIds=b；axios 默认会写成 tagIds[]=a。
+    paramsSerializer: { indexes: null },
+  }),
+
+  /** 「产出素材」根视图：一个对话一个虚拟文件夹。 */
+  listOutputConversations: (params: {
+    projectId: string;
+    q?: string;
+    type?: AssetType;
+    tagIds?: string[];
+    tagMode?: TagMode;
+    minRating?: number;
+    flag?: AssetFlag;
+    colorLabel?: AssetColorLabel;
+  }) => client.get<ApiResponse<OutputConversationSummary[]>>('/library/outputs/conversations', {
+    params,
+    paramsSerializer: { indexes: null },
+  }),
 
   getAsset: (id: string) => client.get<ApiResponse<LibraryAssetDetail>>(`/library/assets/${id}`),
+
+  /** 素材使用位置：分镜 / 对话 / 资产组 / 画布。 */
+  getAssetUsage: (assetId: string) =>
+    client.get<ApiResponse<AssetUsage>>(`/library/assets/${assetId}/usage`),
+
+  /** 未被分镜、资产组、画布引用的素材（不含资产组本身）。 */
+  listUnusedAssets: (params: { projectId: string; page?: number; size?: number }) =>
+    client.get<ApiResponse<LibraryPage<LibraryAsset>>>('/library/assets/unused', { params }),
+
+  /** 智能搜索：关键词 / 主色 / 找相似。 */
+  searchAssets: (params: {
+    projectId: string;
+    q?: string;
+    color?: string;
+    similarTo?: string;
+    limit?: number;
+  }) => client.get<ApiResponse<LibraryAsset[]>>('/library/assets/search', { params }),
 
   getMedia: (mediaId: string) =>
     client.get<ApiResponse<LibraryMedia>>(`/library/media/${encodeURIComponent(mediaId)}/metadata`),
@@ -310,6 +429,57 @@ export const libraryApi = {
 
   getGroup: (groupId: string) =>
     client.get<ApiResponse<LibraryAssetGroupDetail>>(`/library/groups/${groupId}`),
+
+  /** 资产组卡片/检查器：成员数、快照次数、最近快照时间。 */
+  listGroupInsights: (projectId: string) =>
+    client.get<ApiResponse<LibraryGroupInsight[]>>('/library/group-insights', {
+      params: { projectId },
+    }),
+
+  /** 重复素材：同一 sha256 被多个素材引用的分组。 */
+  listDuplicates: (params: { projectId: string; page?: number; size?: number }) =>
+    client.get<ApiResponse<LibraryPage<DuplicateGroup>>>('/library/duplicates', { params }),
+
+  /** 合并重复素材：保留 survivor，其余素材的引用迁移后进回收站。 */
+  mergeDuplicates: (data: { survivorAssetId: string; duplicateAssetIds: string[] }) =>
+    client.post<ApiResponse<LibraryAsset>>('/library/duplicates/merge', data),
+
+  /** 单张素材挑片标记：整组覆盖，null 即清除。 */
+  markAsset: (assetId: string, data: {
+    rating?: number;
+    flag?: AssetFlag | null;
+    colorLabel?: AssetColorLabel | null;
+  }) => client.post<ApiResponse<LibraryAsset>>(`/library/assets/${assetId}/mark`, data),
+
+  /** 批量挑片标记。 */
+  bulkMarkAssets: (data: {
+    assetIds: string[];
+    rating?: number;
+    flag?: AssetFlag | null;
+    colorLabel?: AssetColorLabel | null;
+  }) => client.post<ApiResponse<BulkAssetOperationResult>>('/library/assets/bulk/mark', data),
+
+  listSavedViews: (projectId: string) =>
+    client.get<ApiResponse<LibrarySavedView[]>>('/library/views', { params: { projectId } }),
+
+  createSavedView: (data: {
+    projectId: string;
+    name: string;
+    filters: Record<string, unknown>;
+    sort?: Record<string, unknown>;
+    viewMode?: 'folders' | 'tree';
+    pinned?: boolean;
+  }) => client.post<ApiResponse<LibrarySavedView>>('/library/views', data),
+
+  updateSavedView: (viewId: string, data: {
+    name?: string;
+    filters?: Record<string, unknown>;
+    sort?: Record<string, unknown>;
+    viewMode?: 'folders' | 'tree';
+    pinned?: boolean;
+  }) => client.put<ApiResponse<LibrarySavedView>>(`/library/views/${viewId}`, data),
+
+  deleteSavedView: (viewId: string) => client.delete(`/library/views/${viewId}`),
 
   replaceGroupItems: (
     groupId: string,

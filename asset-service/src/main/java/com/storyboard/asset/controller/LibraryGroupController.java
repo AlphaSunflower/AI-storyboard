@@ -7,6 +7,7 @@ import com.storyboard.asset.client.AssetContracts.CreateGroupFromAssetsRequest;
 import com.storyboard.asset.client.AssetContracts.ReplaceGroupItemsRequest;
 import com.storyboard.asset.client.AssetContracts.SnapshotRequest;
 import com.storyboard.asset.client.AssetContracts.GenerationOutputEvent;
+import com.storyboard.asset.client.AssetContracts.LibraryGroupInsight;
 import com.storyboard.asset.dto.AssetGroupDetailResponse;
 import com.storyboard.asset.service.AssetCatalogService;
 import com.storyboard.asset.service.GroupService;
@@ -22,6 +23,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/library")
@@ -54,6 +57,15 @@ public class LibraryGroupController {
     @GetMapping("/groups/{id}")
     public ApiResponse<AssetGroupDetailResponse> getGroup(Authentication auth, @PathVariable String id) {
         return ApiResponse.ok(groupService.get(auth.getName(), id));
+    }
+
+    /** 资产组卡片/检查器用的使用侧信息：成员数、快照次数、最近快照时间。 */
+    @GetMapping("/group-insights")
+    public ApiResponse<List<LibraryGroupInsight>> groupInsights(
+            Authentication auth,
+            @RequestParam String projectId
+    ) {
+        return ApiResponse.ok(catalogService.listGroupInsights(auth.getName(), projectId));
     }
 
     @PostMapping("/groups/from-assets")

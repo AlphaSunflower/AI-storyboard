@@ -888,6 +888,7 @@ export default function App() {
         onRenameProjectById={(projectId, title) => void renameProjectById(projectId, title).catch((error) => notify(error instanceof Error ? error.message : '重命名项目失败'))}
         onDeleteProjectById={(projectId) => void removeProjectById(projectId).catch((error) => notify(error instanceof Error ? error.message : '删除项目失败'))}
         onOpenInspector={() => { setSideView('inspector'); setSideOpen(true); }}
+        onToggleSidePanel={() => setSideOpen((open) => !open)}
         onExportProject={() => void exportPackage()}
         isExporting={isExporting}
         onNotify={notify}
@@ -936,7 +937,7 @@ export default function App() {
             </button>
           </div>
           <div className="chat-topbar-spacer" />
-          <button onClick={() => setSideOpen(false)} aria-label="收起面板"><Maximize2 size={16} /></button>
+          <button onClick={() => setSideOpen(false)} aria-label="收起面板" title="收起面板（B）"><Maximize2 size={16} /></button>
         </header>
         <div className="chat-body">
           {!embeddedWindow && (

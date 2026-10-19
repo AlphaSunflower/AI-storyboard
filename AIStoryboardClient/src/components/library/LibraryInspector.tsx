@@ -9,18 +9,26 @@ import {
   FolderPlus,
   FileText,
   Images,
+  MessageSquare,
   Pencil,
   Sparkles,
   Trash2,
+  X,
+  Search,
 } from 'lucide-react';
 import type {
+  AssetColorLabel,
+  AssetFlag,
+  AssetUsage,
   LibraryAsset,
   LibraryAssetDetail,
   LibraryFolderNode,
+  LibraryGroupInsight,
   LibraryGroupMediaItem,
   LibraryTag,
   MetadataState,
 } from '../../api/library';
+import type { ProjectAssetGroupBinding } from '../../api/agent';
 import { assetUrl } from '../../config';
 import { authorizedFetch } from '../../lib/authSession';
 import { notify } from '../../stores/toastStore';
@@ -66,6 +74,120 @@ export interface LibraryInspectorProps {
   onRequestAiEnrichment: (asset: LibraryAsset) => void;
   onRequestFolderAiEnrichment: (folder: LibraryFolderNode) => void;
   onPreviewDocument?: (target: DocumentPreviewTarget) => void;
+  /** 产出素材的来源对话标题（由页面按 conversationId 合并）。 */
+  conversationTitle?: string;
+  /** 从产出素材跳回 Moon 对话。 */
+  onOpenConversation?: (conversationId: string) => void;
+  /** 资产组被哪些对话使用 + 绑定到当前对话（只对 GROUP 素材有值）。 */
+  groupUsage?: GroupUsagePanelProps;
+  /** 挑片标记：星级 / 旗标 / 色标。 */
+  onMark?: (asset: LibraryAsset, marks: {
+    rating?: number;
+    flag?: AssetFlag | null;
+    colorLabel?: AssetColorLabel | null;
+  }) => void;
+  /** 素材使用位置；null 表示已查询但没有引用，undefined 表示尚未查询。 */
+  usage?: AssetUsage | null;
+  usageLoading?: boolean;
+  /** 智能搜索：找相似素材。 */
+  onFindSimilar?: (asset: LibraryAsset) => void;
+}
+
+/** 资产组使用情况面板的入参；项目库资产组浏览区和检查器共用。 */
+export interface GroupUsagePanelProps {
+  insight?: LibraryGroupInsight;
+  bindings: ProjectAssetGroupBinding[];
+  /** 页面已经格式化好的「最近快照」文案。 */
+  lastSnapshotLabel?: string;
+  /** 当前项目可选的对话（标题来自 MoonAgent）。 */
+  conversations: Array<{ id: string; title: string }>;
+  selectedConversationId: string;
+  /** Moon 里当前打开的对话，仅用于在下拉里标「当前」。 */
+  currentConversationId?: string;
+  busy?: boolean;
+  onSelectConversation: (conversationId: string) => void;
+  onBind: () => void;
+  onUnbind: (conversationId: string, title: string) => void;
+  onOpenConversation: (conversationId: string) => void;
+}
+
+/** 资产组使用情况：被哪些对话绑定、快照是否过期、绑定到所选对话。 */
+export function GroupUsagePanel({
+  insight,
+  bindings,
+  lastSnapshotLabel,
+  conversations,
+  selectedConversationId,
+  currentConversationId,
+  busy,
+  onSelectConversation,
+  onBind,
+  onUnbind,
+  onOpenConversation,
+}: GroupUsagePanelProps) {
+  return (
+    <section className="library-group-usage">
+      <div className="library-group-usage__facts">
+        <span><b>{bindings.length}</b> 个对话在使用</span>
+        <span><b>{insight?.mediaCount ?? 0}</b> 项素材</span>
+        <span>最近快照 <b>{lastSnapshotLabel || '暂无'}</b></span>
+      </div>
+      <div className="library-group-usage__bindings">
+        {bindings.length === 0 ? (
+          <span className="is-empty">还没有绑定到任何对话</span>
+        ) : bindings.map((binding) => {
+          const title = binding.conversationTitle || `对话 · ${binding.conversationId.slice(0, 8)}`;
+          const stale = insight ? binding.groupVersion !== insight.version : false;
+          return (
+            <span key={binding.conversationId} className="library-group-usage__chip">
+              <button type="button" title="打开对话" onClick={() => onOpenConversation(binding.conversationId)}>
+                <MessageSquare size={12} /> {title}
+              </button>
+              {stale && <em title="绑定后资产组已更新，重新绑定可刷新快照">快照过期</em>}
+              <button
+                type="button"
+                className="is-remove"
+                aria-label={`解除绑定：${title}`}
+                disabled={busy}
+                onClick={() => onUnbind(binding.conversationId, title)}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          );
+        })}
+      </div>
+      {conversations.length === 0 ? (
+        <span className="library-group-usage__hint">
+          这个项目还没有对话，先到 Moon 里创建一个再绑定
+        </span>
+      ) : (
+        <div className="library-group-usage__bind-row">
+          <select
+            aria-label="选择要绑定的对话"
+            value={selectedConversationId}
+            disabled={busy}
+            onChange={(event) => onSelectConversation(event.target.value)}
+          >
+            {conversations.map((conversation) => (
+              <option key={conversation.id} value={conversation.id}>
+                {conversation.title}{conversation.id === currentConversationId ? '（当前）' : ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="library-group-usage__bind"
+            disabled={!selectedConversationId || busy}
+            title="把该资产组绑定到所选 Moon 对话"
+            onClick={onBind}
+          >
+            <Boxes size={13} /> 绑定到所选对话
+          </button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function LibraryInspector(props: LibraryInspectorProps) {
@@ -143,6 +265,13 @@ function AssetInspector({
   onToggleTag,
   onRequestAiEnrichment,
   onPreviewDocument,
+  conversationTitle,
+  onOpenConversation,
+  groupUsage,
+  onMark,
+  usage,
+  usageLoading,
+  onFindSimilar,
 }: LibraryInspectorProps & { detail: LibraryAssetDetail }) {
   const { asset, media } = detail;
   const [tagEditing, setTagEditing] = useState(false);
@@ -213,6 +342,153 @@ function AssetInspector({
         <span>版本 <b>v{asset.version}</b></span>
         <span>媒体 <b>{media.length}</b></span>
       </div>
+      {onMark && asset.type !== 'GROUP' && (
+        <section className="library-inspector__marks">
+          <h3>挑片</h3>
+          <div className="library-marks__rating" role="group" aria-label="星级">
+            {[1, 2, 3, 4, 5].map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={value <= (asset.rating ?? 0) ? 'is-on' : ''}
+                aria-label={`${value} 星`}
+                onClick={() => onMark(asset, {
+                  rating: value,
+                  flag: asset.flag ?? null,
+                  colorLabel: asset.colorLabel ?? null,
+                })}
+              >
+                ★
+              </button>
+            ))}
+            <button
+              type="button"
+              className="is-clear"
+              onClick={() => onMark(asset, {
+                rating: 0,
+                flag: asset.flag ?? null,
+                colorLabel: asset.colorLabel ?? null,
+              })}
+            >
+              清除
+            </button>
+          </div>
+          <div className="library-marks__flags">
+            <button
+              type="button"
+              className={asset.flag === 'pick' ? 'is-on is-pick' : ''}
+              onClick={() => onMark(asset, {
+                rating: asset.rating ?? 0,
+                flag: asset.flag === 'pick' ? null : 'pick',
+                colorLabel: asset.colorLabel ?? null,
+              })}
+            >
+              已选
+            </button>
+            <button
+              type="button"
+              className={asset.flag === 'reject' ? 'is-on is-reject' : ''}
+              onClick={() => onMark(asset, {
+                rating: asset.rating ?? 0,
+                flag: asset.flag === 'reject' ? null : 'reject',
+                colorLabel: asset.colorLabel ?? null,
+              })}
+            >
+              弃用
+            </button>
+          </div>
+          <div className="library-marks__colors">
+            {(['red', 'yellow', 'green', 'blue', 'purple'] as const).map((color) => (
+              <button
+                key={color}
+                type="button"
+                className={`is-${color}${asset.colorLabel === color ? ' is-on' : ''}`}
+                aria-label={`色标 ${color}`}
+                onClick={() => onMark(asset, {
+                  rating: asset.rating ?? 0,
+                  flag: asset.flag ?? null,
+                  colorLabel: asset.colorLabel === color ? null : color,
+                })}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+      {asset.type === 'GROUP' && groupUsage && <GroupUsagePanel {...groupUsage} />}
+      {onFindSimilar && asset.type !== 'GROUP' && (
+        <button
+          type="button"
+          className="library-inspector__similar"
+          onClick={() => onFindSimilar(asset)}
+        >
+          <Search size={13} /> 找相似
+        </button>
+      )}
+      {usage !== undefined || usageLoading ? (
+        <section className="library-inspector__usage">
+          <h3>使用位置{usage ? ` · ${usage.total}` : ''}</h3>
+          {usageLoading ? (
+            <small>正在统计…</small>
+          ) : !usage || usage.total === 0 ? (
+            <small>还没有被分镜、对话、资产组或画布引用</small>
+          ) : (
+            <div className="library-usage-groups">
+              {usage.scenes.length > 0 && (
+                <div>
+                  <span>分镜</span>
+                  {usage.scenes.map((ref) => (
+                    <em key={ref.id} title={ref.detail || undefined}>
+                      {ref.title}{ref.detail ? ` · ${ref.detail}` : ''}
+                    </em>
+                  ))}
+                </div>
+              )}
+              {usage.conversations.length > 0 && (
+                <div>
+                  <span>对话</span>
+                  {usage.conversations.map((ref) => (
+                    <button
+                      key={ref.id}
+                      type="button"
+                      title="打开对话"
+                      onClick={() => onOpenConversation?.(ref.id)}
+                    >
+                      {ref.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {usage.groups.length > 0 && (
+                <div>
+                  <span>资产组</span>
+                  {usage.groups.map((ref) => (
+                    <em key={ref.id}>{ref.title}</em>
+                  ))}
+                </div>
+              )}
+              {usage.canvases.length > 0 && (
+                <div>
+                  <span>画布</span>
+                  {usage.canvases.map((ref) => (
+                    <em key={ref.id}>{ref.title}</em>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      ) : null}
+      {asset.conversationId && (
+        <button
+          type="button"
+          className="library-inspector__conversation"
+          title="回到产出这张素材的对话"
+          onClick={() => onOpenConversation?.(asset.conversationId!)}
+        >
+          <MessageSquare size={13} />
+          <span>{conversationTitle || '产出对话'}</span>
+        </button>
+      )}
       <section className={`library-inspector__tags${tagEditing ? ' is-editing' : ''}`}>
         <header>
           <h3>标签</h3>

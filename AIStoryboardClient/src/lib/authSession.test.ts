@@ -53,6 +53,28 @@ describe('authSession', () => {
     expect(headers.get('Authorization')).toBe('Bearer fresh-token');
   });
 
+  it('uses a token shared by another tab before hitting refresh', async () => {
+    class PeerChannel {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      postMessage(data: { type: string; requestId?: string }) {
+        if (data.type !== 'token-request' || !data.requestId) return;
+        queueMicrotask(() => this.onmessage?.({
+          data: { type: 'token-response', requestId: data.requestId, token: 'peer-token' },
+        } as MessageEvent));
+      }
+      close() { /* noop */ }
+    }
+    vi.stubGlobal('BroadcastChannel', PeerChannel);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authorizedFetch('/api/test');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer peer-token');
+  });
+
   it('purges the legacy localStorage access token on logout', () => {
     localStorage.setItem('accessToken', 'legacy-token');
     localStorage.setItem('user', '{}');

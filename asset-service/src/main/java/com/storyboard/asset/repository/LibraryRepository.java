@@ -44,6 +44,9 @@ import java.util.Set;
 @Repository
 public class LibraryRepository {
 
+    /** 「产出素材」里未归属任何对话的分组的伪 conversationId。 */
+    public static final String UNASSIGNED_CONVERSATION = "UNASSIGNED";
+
     private final NamedParameterJdbcTemplate jdbc;
     private final JdbcClient client;
 
@@ -116,6 +119,49 @@ public class LibraryRepository {
             int page,
             int size
     ) {
+        return searchAssets(userId, scope, projectId, folderId, query, type, tagIds, tagMode, deleted,
+                includeGlobal, origin, null, page, size);
+    }
+
+    public PageResponse<AssetSummary> searchAssets(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            String query,
+            AssetType type,
+            Collection<String> tagIds,
+            TagMode tagMode,
+            boolean deleted,
+            boolean includeGlobal,
+            LibraryOrigin origin,
+            String conversationId,
+            int page,
+            int size
+    ) {
+        return searchAssets(userId, scope, projectId, folderId, query, type, tagIds, tagMode, deleted,
+                includeGlobal, origin, conversationId, null, null, null, page, size);
+    }
+
+    public PageResponse<AssetSummary> searchAssets(
+            String userId,
+            AssetScope scope,
+            String projectId,
+            String folderId,
+            String query,
+            AssetType type,
+            Collection<String> tagIds,
+            TagMode tagMode,
+            boolean deleted,
+            boolean includeGlobal,
+            LibraryOrigin origin,
+            String conversationId,
+            Integer minRating,
+            String flag,
+            String colorLabel,
+            int page,
+            int size
+    ) {
         StringBuilder where = new StringBuilder(" a.owner_user_id = :userId ");
         MapSqlParameterSource params = new MapSqlParameterSource("userId", userId);
         if (deleted) {
@@ -144,6 +190,26 @@ public class LibraryRepository {
         if (origin != null) {
             where.append(" AND a.source_type IN (:originSources) ");
             params.addValue("originSources", origin.sourceTypes());
+        }
+        if (conversationId != null && !conversationId.isBlank()) {
+            if (UNASSIGNED_CONVERSATION.equals(conversationId)) {
+                where.append(" AND a.source_conversation_id IS NULL ");
+            } else {
+                where.append(" AND a.source_conversation_id = :conversationId ");
+                params.addValue("conversationId", conversationId);
+            }
+        }
+        if (minRating != null && minRating > 0) {
+            where.append(" AND a.rating >= :minRating ");
+            params.addValue("minRating", minRating);
+        }
+        if (flag != null && !flag.isBlank()) {
+            where.append(" AND a.flag = :flag ");
+            params.addValue("flag", flag);
+        }
+        if (colorLabel != null && !colorLabel.isBlank()) {
+            where.append(" AND a.color_label = :colorLabel ");
+            params.addValue("colorLabel", colorLabel);
         }
         if (type != null) {
             where.append(" AND a.asset_type = :type ");
@@ -216,6 +282,752 @@ public class LibraryRepository {
                 false, null, page, size);
     }
 
+    /**
+     * 「产出素材」根视图：按对话聚合生成结果，一个对话就是一个虚拟文件夹。
+     * 没有对话归属的历史产出归到 conversationId=null 的未归属分组。
+     */
+    public List<AssetContracts.OutputConversationSummary> listOutputConversations(
+            String userId,
+            String projectId,
+            String query,
+            AssetType type,
+            Collection<String> tagIds,
+            TagMode tagMode
+    ) {
+        return listOutputConversations(userId, projectId, query, type, tagIds, tagMode, null, null, null);
+    }
+
+    public List<AssetContracts.OutputConversationSummary> listOutputConversations(
+            String userId,
+            String projectId,
+            String query,
+            AssetType type,
+            Collection<String> tagIds,
+            TagMode tagMode,
+            Integer minRating,
+            String flag,
+            String colorLabel
+    ) {
+        StringBuilder where = new StringBuilder("""
+                a.owner_user_id = :userId
+                  AND a.scope = 'PROJECT'
+                  AND a.owner_project_id = :projectId
+                  AND a.status = 'ACTIVE'
+                  AND a.source_type IN ('generation', 'canvas-generation')
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource("userId", userId)
+                .addValue("projectId", projectId);
+        if (type != null) {
+            where.append(" AND a.asset_type = :type ");
+            params.addValue("type", type.name());
+        }
+        if (minRating != null && minRating > 0) {
+            where.append(" AND a.rating >= :minRating ");
+            params.addValue("minRating", minRating);
+        }
+        if (flag != null && !flag.isBlank()) {
+            where.append(" AND a.flag = :flag ");
+            params.addValue("flag", flag);
+        }
+        if (colorLabel != null && !colorLabel.isBlank()) {
+            where.append(" AND a.color_label = :colorLabel ");
+            params.addValue("colorLabel", colorLabel);
+        }
+        List<String> terms = query == null ? List.of() : java.util.Arrays.stream(query.trim().split("\\s+"))
+                .filter(term -> !term.isBlank()).limit(12).toList();
+        for (int i = 0; i < terms.size(); i++) {
+            where.append(" AND a.search_text ILIKE :term").append(i).append(" ");
+            params.addValue("term" + i, "%" + terms.get(i).toLowerCase(Locale.ROOT) + "%");
+        }
+        List<String> normalizedTagIds = tagIds == null ? List.of() : tagIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        if (!normalizedTagIds.isEmpty()) {
+            if (tagMode == TagMode.ANY) {
+                where.append(" AND EXISTS (SELECT 1 FROM asset.library_asset_tags lt ")
+                        .append("WHERE lt.asset_id = a.id AND lt.tag_id IN (:tagIds)) ");
+            } else {
+                where.append(" AND (SELECT count(DISTINCT lt.tag_id) FROM asset.library_asset_tags lt ")
+                        .append("WHERE lt.asset_id = a.id AND lt.tag_id IN (:tagIds)) = :tagCount ");
+                params.addValue("tagCount", normalizedTagIds.size());
+            }
+            params.addValue("tagIds", normalizedTagIds);
+        }
+
+        return jdbc.query("""
+                        SELECT a.source_conversation_id AS conversation_id,
+                               count(*) AS asset_count,
+                               count(*) FILTER (WHERE a.asset_type = 'IMAGE') AS image_count,
+                               count(*) FILTER (WHERE a.asset_type = 'VIDEO') AS video_count,
+                               count(*) FILTER (WHERE a.asset_type = 'DOCUMENT') AS document_count,
+                               (array_agg(a.cover_url ORDER BY a.created_at DESC)
+                                   FILTER (WHERE a.cover_url IS NOT NULL AND a.asset_type = 'IMAGE'))[1] AS cover_url,
+                               (array_agg(a.cover_url ORDER BY a.created_at DESC)
+                                   FILTER (WHERE a.cover_url IS NOT NULL AND a.asset_type = 'IMAGE')) AS preview_urls,
+                               (array_agg(a.name ORDER BY a.created_at DESC))[1] AS last_asset_name,
+                               max(a.created_at) AS last_generated_at
+                        FROM asset.library_assets a
+                        WHERE %s
+                        GROUP BY a.source_conversation_id
+                        ORDER BY max(a.created_at) DESC
+                        LIMIT 200
+                        """.formatted(where), params, (rs, rowNum) -> {
+            java.sql.Array previewArray = rs.getArray("preview_urls");
+            List<String> previews = List.of();
+            if (previewArray != null) {
+                Object raw = previewArray.getArray();
+                if (raw instanceof Object[] values) {
+                    previews = java.util.Arrays.stream(values)
+                            .filter(java.util.Objects::nonNull)
+                            .map(Object::toString)
+                            .limit(4)
+                            .toList();
+                }
+            }
+            return new AssetContracts.OutputConversationSummary(
+                    rs.getString("conversation_id"),
+                    rs.getLong("asset_count"),
+                    rs.getLong("image_count"),
+                    rs.getLong("video_count"),
+                    rs.getLong("document_count"),
+                    rs.getString("cover_url"),
+                    previews,
+                    rs.getString("last_asset_name"),
+                    rs.getObject("last_generated_at", OffsetDateTime.class));
+        });
+    }
+
+    /** 资产组使用侧信息：成员数、快照次数、最近快照时间。
+     * 项目视图会连同本人的全局资产组一起返回，与素材列表的 includeGlobal 口径一致。
+     */
+    public List<AssetContracts.LibraryGroupInsight> listGroupInsights(String userId, String projectId) {
+        return jdbc.query("""
+                        SELECT a.id AS group_id,
+                               a.version AS version,
+                               count(DISTINCT gi.media_id) AS media_count,
+                               count(DISTINCT s.id) AS snapshot_count,
+                               max(s.created_at) AS last_snapshot_at
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_group_items gi ON gi.group_id = a.id
+                        LEFT JOIN asset.library_group_snapshots s ON s.group_id = a.id
+                        WHERE a.owner_user_id = :userId
+                          AND a.asset_type = 'GROUP'
+                          AND a.status = 'ACTIVE'
+                          AND ((a.scope = 'PROJECT' AND a.owner_project_id = :projectId)
+                               OR a.scope = 'GLOBAL')
+                        GROUP BY a.id, a.version
+                        """,
+                new MapSqlParameterSource("userId", userId).addValue("projectId", projectId),
+                (rs, rowNum) -> new AssetContracts.LibraryGroupInsight(
+                        rs.getString("group_id"),
+                        rs.getLong("version"),
+                        rs.getLong("media_count"),
+                        rs.getLong("snapshot_count"),
+                        rs.getObject("last_snapshot_at", OffsetDateTime.class)));
+    }
+
+    /** 项目内 sha256 相同、被多个素材引用的重复组（分页）。 */
+    public PageResponse<AssetContracts.DuplicateGroup> listDuplicateGroups(
+            String userId, String projectId, int page, int size
+    ) {
+        int limit = Math.min(50, Math.max(1, size));
+        int offset = (Math.max(1, page) - 1) * limit;
+        MapSqlParameterSource params = new MapSqlParameterSource("userId", userId)
+                .addValue("projectId", projectId);
+        long total = jdbc.queryForObject("""
+                        SELECT count(*) FROM (
+                            SELECT m.blob_id
+                            FROM asset.library_media m
+                            JOIN asset.library_assets a ON a.id = m.asset_id
+                            WHERE a.owner_user_id = :userId
+                              AND a.status = 'ACTIVE'
+                              AND a.asset_type <> 'GROUP'
+                              AND a.scope = 'PROJECT'
+                              AND a.owner_project_id = :projectId
+                              AND m.status = 'ACTIVE'
+                            GROUP BY m.blob_id
+                            HAVING count(DISTINCT m.asset_id) > 1
+                        ) duplicates
+                        """, params, Long.class);
+        if (total == 0) return new PageResponse<>(List.of(), 0, Math.max(1, page), limit);
+        params.addValue("limit", limit).addValue("offset", offset);
+        List<DuplicateBlobRow> blobs = jdbc.query("""
+                        SELECT m.blob_id, b.sha256, b.mime_type, b.size_bytes,
+                               count(DISTINCT m.asset_id) AS asset_count
+                        FROM asset.library_media m
+                        JOIN asset.library_assets a ON a.id = m.asset_id
+                        JOIN asset.library_blobs b ON b.id = m.blob_id
+                        WHERE a.owner_user_id = :userId
+                          AND a.status = 'ACTIVE'
+                          AND a.asset_type <> 'GROUP'
+                          AND a.scope = 'PROJECT'
+                          AND a.owner_project_id = :projectId
+                          AND m.status = 'ACTIVE'
+                        GROUP BY m.blob_id, b.sha256, b.mime_type, b.size_bytes
+                        HAVING count(DISTINCT m.asset_id) > 1
+                        ORDER BY b.size_bytes DESC, asset_count DESC
+                        LIMIT :limit OFFSET :offset
+                        """, params, (rs, rowNum) -> new DuplicateBlobRow(
+                        rs.getString("blob_id"), rs.getString("sha256"), rs.getString("mime_type"),
+                        rs.getLong("size_bytes")));
+        if (blobs.isEmpty()) return new PageResponse<>(List.of(), total, Math.max(1, page), limit);
+        List<String> blobIds = blobs.stream().map(DuplicateBlobRow::blobId).toList();
+        Map<String, List<AssetSummary>> assetsByBlob = new LinkedHashMap<>();
+        jdbc.query("""
+                        SELECT a.*, m.blob_id, %s AS metadata_state
+                        FROM asset.library_assets a
+                        JOIN asset.library_media m ON m.asset_id = a.id
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.owner_user_id = :userId
+                          AND a.status = 'ACTIVE'
+                          AND m.status = 'ACTIVE'
+                          AND m.blob_id IN (:blobIds)
+                        ORDER BY a.created_at
+                        """.formatted(metadataStateSql()),
+                new MapSqlParameterSource("userId", userId).addValue("blobIds", blobIds),
+                (rs, rowNum) -> {
+                    String blobId = rs.getString("blob_id");
+                    AssetSummary asset = hydrate(assetRowMapper().mapRow(rs, rowNum));
+                    assetsByBlob.computeIfAbsent(blobId, ignored -> new ArrayList<>()).add(asset);
+                    return asset;
+                });
+        List<AssetContracts.DuplicateGroup> groups = blobs.stream()
+                .map(blob -> new AssetContracts.DuplicateGroup(
+                        blob.blobId(), blob.sha256(), blob.mimeType(), blob.sizeBytes(),
+                        AssetScope.PROJECT.name(), projectId,
+                        List.copyOf(assetsByBlob.getOrDefault(blob.blobId(), List.of()))))
+                .toList();
+        return new PageResponse<>(groups, total, Math.max(1, page), limit);
+    }
+
+    /** 两个素材是否引用同一个 blob（重复合并的必要条件）。 */
+    public boolean shareBlob(String firstAssetId, String secondAssetId) {
+        Boolean shared = jdbc.queryForObject("""
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM asset.library_media first
+                            JOIN asset.library_media second ON second.blob_id = first.blob_id
+                            WHERE first.asset_id = :firstAssetId
+                              AND second.asset_id = :secondAssetId
+                              AND first.status = 'ACTIVE'
+                              AND second.status = 'ACTIVE'
+                        )
+                        """,
+                new MapSqlParameterSource("firstAssetId", firstAssetId)
+                        .addValue("secondAssetId", secondAssetId),
+                Boolean.class);
+        return Boolean.TRUE.equals(shared);
+    }
+
+    /** 合并前把重复素材独有的媒体文件补到保留素材上，避免合并后丢图。 */
+    public void copyMissingMedia(String survivorAssetId, String duplicateAssetId) {
+        client.sql("""
+                        INSERT INTO asset.library_media(
+                            asset_id, blob_id, sort_order, role, is_primary, constraint_text, status
+                        )
+                        SELECT :survivorAssetId, source.blob_id, source.sort_order, source.role,
+                               FALSE, source.constraint_text, source.status
+                        FROM asset.library_media source
+                        WHERE source.asset_id = :duplicateAssetId
+                          AND source.status = 'ACTIVE'
+                          AND NOT EXISTS (
+                              SELECT 1 FROM asset.library_media existing
+                              WHERE existing.asset_id = :survivorAssetId
+                                AND existing.blob_id = source.blob_id
+                          )
+                        """)
+                .param("survivorAssetId", survivorAssetId)
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+    }
+
+    /** 把重复素材的目录归属迁到保留素材；同一目录已存在时丢弃重复映射。 */
+    public void moveFolderMappings(String survivorAssetId, String duplicateAssetId) {
+        client.sql("""
+                        INSERT INTO asset.library_asset_folders(
+                            owner_user_id, scope, owner_project_id, asset_id, folder_id
+                        )
+                        SELECT owner_user_id, scope, owner_project_id, :survivorAssetId, folder_id
+                        FROM asset.library_asset_folders
+                        WHERE asset_id = :duplicateAssetId
+                        ON CONFLICT DO NOTHING
+                        """)
+                .param("survivorAssetId", survivorAssetId)
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+        client.sql("DELETE FROM asset.library_asset_folders WHERE asset_id = :duplicateAssetId")
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+    }
+
+    public void moveTags(String survivorAssetId, String duplicateAssetId) {
+        client.sql("""
+                        INSERT INTO asset.library_asset_tags(asset_id, tag_id, source)
+                        SELECT :survivorAssetId, tag_id, source
+                        FROM asset.library_asset_tags
+                        WHERE asset_id = :duplicateAssetId
+                        ON CONFLICT (asset_id, tag_id) DO NOTHING
+                        """)
+                .param("survivorAssetId", survivorAssetId)
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+        client.sql("DELETE FROM asset.library_asset_tags WHERE asset_id = :duplicateAssetId")
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+    }
+
+    public void moveProjectLinks(String survivorAssetId, String duplicateAssetId) {
+        client.sql("""
+                        INSERT INTO asset.library_project_links(asset_id, project_id, added_by_user_id)
+                        SELECT :survivorAssetId, project_id, added_by_user_id
+                        FROM asset.library_project_links
+                        WHERE asset_id = :duplicateAssetId
+                        ON CONFLICT (asset_id, project_id) DO NOTHING
+                        """)
+                .param("survivorAssetId", survivorAssetId)
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+        client.sql("DELETE FROM asset.library_project_links WHERE asset_id = :duplicateAssetId")
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+    }
+
+    public void moveGroupItems(String survivorAssetId, String duplicateAssetId) {
+        client.sql("UPDATE asset.library_group_items SET member_asset_id = :survivorAssetId "
+                        + "WHERE member_asset_id = :duplicateAssetId")
+                .param("survivorAssetId", survivorAssetId)
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+    }
+
+    public void moveGroupOutputs(String survivorAssetId, String duplicateAssetId) {
+        client.sql("UPDATE asset.library_group_outputs SET result_asset_id = :survivorAssetId "
+                        + "WHERE result_asset_id = :duplicateAssetId")
+                .param("survivorAssetId", survivorAssetId)
+                .param("duplicateAssetId", duplicateAssetId)
+                .update();
+    }
+
+    public List<AssetContracts.LibrarySavedView> listSavedViews(String userId, String projectId) {
+        return jdbc.query("""
+                        SELECT * FROM asset.library_saved_views
+                        WHERE owner_user_id = :userId
+                          AND scope = 'PROJECT'
+                          AND owner_project_id = :projectId
+                        ORDER BY pinned DESC, updated_at DESC
+                        """,
+                new MapSqlParameterSource("userId", userId).addValue("projectId", projectId),
+                this::savedViewRow);
+    }
+
+    public Optional<AssetContracts.LibrarySavedView> findSavedView(String userId, String viewId) {
+        return jdbc.query("""
+                        SELECT * FROM asset.library_saved_views
+                        WHERE id = :id AND owner_user_id = :userId
+                        """,
+                new MapSqlParameterSource("id", viewId).addValue("userId", userId),
+                this::savedViewRow).stream().findFirst();
+    }
+
+    public String insertSavedView(
+            String userId,
+            String projectId,
+            String name,
+            String normalizedName,
+            String filtersJson,
+            String sortJson,
+            String viewMode,
+            boolean pinned
+    ) {
+        return client.sql("""
+                        INSERT INTO asset.library_saved_views(
+                            owner_user_id, scope, owner_project_id, name, normalized_name,
+                            filters, sort, view_mode, pinned
+                        ) VALUES (
+                            :userId, 'PROJECT', :projectId, :name, :normalizedName,
+                            CAST(:filters AS jsonb), CAST(:sort AS jsonb), :viewMode, :pinned
+                        ) RETURNING id
+                        """)
+                .param("userId", userId)
+                .param("projectId", projectId)
+                .param("name", name)
+                .param("normalizedName", normalizedName)
+                .param("filters", filtersJson)
+                .param("sort", sortJson)
+                .param("viewMode", viewMode)
+                .param("pinned", pinned)
+                .query(String.class)
+                .single();
+    }
+
+    public boolean updateSavedView(
+            String userId,
+            String viewId,
+            String name,
+            String normalizedName,
+            String filtersJson,
+            String sortJson,
+            String viewMode,
+            boolean pinned
+    ) {
+        return client.sql("""
+                        UPDATE asset.library_saved_views
+                        SET name = :name,
+                            normalized_name = :normalizedName,
+                            filters = CAST(:filters AS jsonb),
+                            sort = CAST(:sort AS jsonb),
+                            view_mode = :viewMode,
+                            pinned = :pinned,
+                            updated_at = now()
+                        WHERE id = :id AND owner_user_id = :userId
+                        """)
+                .param("id", viewId)
+                .param("userId", userId)
+                .param("name", name)
+                .param("normalizedName", normalizedName)
+                .param("filters", filtersJson)
+                .param("sort", sortJson)
+                .param("viewMode", viewMode)
+                .param("pinned", pinned)
+                .update() == 1;
+    }
+
+    public boolean deleteSavedView(String userId, String viewId) {
+        return client.sql("DELETE FROM asset.library_saved_views WHERE id = :id AND owner_user_id = :userId")
+                .param("id", viewId)
+                .param("userId", userId)
+                .update() == 1;
+    }
+
+    private AssetContracts.LibrarySavedView savedViewRow(java.sql.ResultSet rs, int rowNum)
+            throws java.sql.SQLException {
+        return new AssetContracts.LibrarySavedView(
+                rs.getString("id"),
+                rs.getString("owner_user_id"),
+                AssetScope.valueOf(rs.getString("scope")),
+                rs.getString("owner_project_id"),
+                rs.getString("name"),
+                parseJsonMap(rs.getString("filters")),
+                parseJsonMap(rs.getString("sort")),
+                rs.getString("view_mode"),
+                rs.getBoolean("pinned"),
+                rs.getObject("created_at", OffsetDateTime.class),
+                rs.getObject("updated_at", OffsetDateTime.class));
+    }
+
+    private static Map<String, Object> parseJsonMap(String json) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(json, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    /**
+     * 素材使用位置：分镜 / 对话 / 资产组 / 画布。
+     * 分镜、对话、画布在 public schema；用 to_regclass 守卫，独立部署时缺少业务表就退化为空。
+     */
+    public AssetContracts.AssetUsage findAssetUsage(AssetSummary asset) {
+        String cover = normalizeUrl(asset.coverUrl());
+        MapSqlParameterSource params = new MapSqlParameterSource("assetId", asset.id())
+                .addValue("cover", cover == null ? "" : cover)
+                .addValue("sourceId", asset.sourceId() == null ? "" : asset.sourceId());
+        java.util.LinkedHashMap<String, AssetContracts.UsageRef> scenes = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, AssetContracts.UsageRef> conversations = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, AssetContracts.UsageRef> groups = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, AssetContracts.UsageRef> canvases = new java.util.LinkedHashMap<>();
+
+        boolean hasScenes = tableExists("public.scenes");
+        if (hasScenes && asset.type() == AssetType.GROUP && tableExists("public.scene_assets")) {
+            addUsage(scenes, jdbc.query("""
+                    SELECT s.id, '分镜 ' || s.scene_number AS title, p.name AS detail
+                    FROM public.scene_assets sa
+                    JOIN public.scenes s ON s.id = sa.scene_id
+                    LEFT JOIN public.projects p ON p.id = s.project_id
+                    WHERE sa.asset_id = :assetId
+                    """, params, usageRefMapper()));
+        }
+        if (hasScenes && cover != null && tableExists("public.scene_reference_images")) {
+            addUsage(scenes, jdbc.query("""
+                    SELECT DISTINCT s.id, '分镜 ' || s.scene_number AS title, p.name AS detail
+                    FROM public.scene_reference_images ri
+                    JOIN public.scenes s ON s.id = ri.scene_id
+                    LEFT JOIN public.projects p ON p.id = s.project_id
+                    WHERE regexp_replace(split_part(ri.image_url, '?', 1), '^https?://[^/]+', '') = :cover
+                    """, params, usageRefMapper()));
+        }
+        if (hasScenes && cover != null) {
+            addUsage(scenes, jdbc.query("""
+                    SELECT DISTINCT s.id, '分镜 ' || s.scene_number AS title, p.name AS detail
+                    FROM public.scenes s
+                    LEFT JOIN public.projects p ON p.id = s.project_id
+                    WHERE regexp_replace(split_part(s.image_url, '?', 1), '^https?://[^/]+', '') = :cover
+                       OR regexp_replace(split_part(COALESCE(s.video_url, ''), '?', 1), '^https?://[^/]+', '') = :cover
+                    """, params, usageRefMapper()));
+        }
+        if (tableExists("public.agent_assets") && tableExists("public.conversations")) {
+            addUsage(conversations, jdbc.query("""
+                    SELECT DISTINCT c.id, c.title, NULL AS detail
+                    FROM public.agent_assets aa
+                    JOIN public.conversations c ON c.id = aa.conversation_id
+                    WHERE (aa.url IS NOT NULL
+                           AND regexp_replace(split_part(aa.url, '?', 1), '^https?://[^/]+', '') = :cover)
+                       OR (:sourceId <> '' AND aa.id = :sourceId)
+                    """, params, usageRefMapper()));
+        }
+        addUsage(groups, jdbc.query("""
+                SELECT ga.id, ga.name AS title, '资产组' AS detail
+                FROM asset.library_group_items gi
+                JOIN asset.library_assets ga ON ga.id = gi.group_id
+                WHERE gi.member_asset_id = :assetId AND ga.id <> :assetId AND ga.status = 'ACTIVE'
+                """, params, usageRefMapper()));
+        if (tableExists("public.canvas_assets")) {
+            boolean hasCanvasTitles = tableExists("public.morrow_canvases");
+            String canvasSql = hasCanvasTitles
+                    ? """
+                    SELECT DISTINCT ca.canvas_id AS id, COALESCE(mc.title, ca.canvas_id) AS title,
+                           '画布' AS detail
+                    FROM public.canvas_assets ca
+                    LEFT JOIN public.morrow_canvases mc ON mc.id = ca.canvas_id
+                    WHERE ca.library_asset_id = :assetId
+                       OR (:cover <> ''
+                           AND regexp_replace(split_part(ca.object_url, '?', 1), '^https?://[^/]+', '') = :cover)
+                    """
+                    : """
+                    SELECT DISTINCT ca.canvas_id AS id, ca.canvas_id AS title, '画布' AS detail
+                    FROM public.canvas_assets ca
+                    WHERE ca.library_asset_id = :assetId
+                       OR (:cover <> ''
+                           AND regexp_replace(split_part(ca.object_url, '?', 1), '^https?://[^/]+', '') = :cover)
+                    """;
+            addUsage(canvases, jdbc.query(canvasSql, params, usageRefMapper()));
+        }
+
+        int total = scenes.size() + conversations.size() + groups.size() + canvases.size();
+        return new AssetContracts.AssetUsage(
+                asset.id(), total,
+                List.copyOf(scenes.values()), List.copyOf(conversations.values()),
+                List.copyOf(groups.values()), List.copyOf(canvases.values()));
+    }
+
+    /** 未被分镜、资产组、画布引用的素材（不含资产组本身）。 */
+    public PageResponse<AssetSummary> searchUnusedAssets(
+            String userId, String projectId, int page, int size
+    ) {
+        int limit = Math.min(100, Math.max(1, size));
+        int offset = (Math.max(1, page) - 1) * limit;
+        StringBuilder where = new StringBuilder("""
+                a.owner_user_id = :userId
+                  AND a.scope = 'PROJECT'
+                  AND a.owner_project_id = :projectId
+                  AND a.status = 'ACTIVE'
+                  AND a.asset_type <> 'GROUP'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM asset.library_group_items gi WHERE gi.member_asset_id = a.id
+                  )
+                """);
+        if (tableExists("public.scenes") && tableExists("public.scene_assets")) {
+            where.append(" AND NOT EXISTS (")
+                    .append("SELECT 1 FROM public.scene_assets sa WHERE sa.asset_id = a.id) ");
+        }
+        if (tableExists("public.scenes") && tableExists("public.scene_reference_images")) {
+            where.append(" AND (a.cover_url IS NULL OR NOT EXISTS (")
+                    .append("SELECT 1 FROM public.scene_reference_images ri ")
+                    .append("WHERE regexp_replace(split_part(ri.image_url, '?', 1), '^https?://[^/]+', '') ")
+                    .append("= regexp_replace(split_part(a.cover_url, '?', 1), '^https?://[^/]+', ''))) ");
+        }
+        if (tableExists("public.scenes")) {
+            where.append(" AND (a.cover_url IS NULL OR NOT EXISTS (")
+                    .append("SELECT 1 FROM public.scenes s ")
+                    .append("WHERE regexp_replace(split_part(s.image_url, '?', 1), '^https?://[^/]+', '') ")
+                    .append("= regexp_replace(split_part(a.cover_url, '?', 1), '^https?://[^/]+', '') ")
+                    .append("OR regexp_replace(split_part(COALESCE(s.video_url, ''), '?', 1), '^https?://[^/]+', '') ")
+                    .append("= regexp_replace(split_part(a.cover_url, '?', 1), '^https?://[^/]+', ''))) ");
+        }
+        if (tableExists("public.canvas_assets")) {
+            where.append(" AND NOT EXISTS (")
+                    .append("SELECT 1 FROM public.canvas_assets ca ")
+                    .append("WHERE ca.library_asset_id = a.id ")
+                    .append("OR (a.cover_url IS NOT NULL ")
+                    .append("AND regexp_replace(split_part(ca.object_url, '?', 1), '^https?://[^/]+', '') ")
+                    .append("= regexp_replace(split_part(a.cover_url, '?', 1), '^https?://[^/]+', ''))) ");
+        }
+        MapSqlParameterSource params = new MapSqlParameterSource("userId", userId)
+                .addValue("projectId", projectId);
+        long total = jdbc.queryForObject(
+                "SELECT count(*) FROM asset.library_assets a WHERE " + where, params, Long.class);
+        params.addValue("limit", limit).addValue("offset", offset);
+        List<AssetSummary> records = jdbc.query("""
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE %s
+                        ORDER BY a.created_at DESC
+                        LIMIT :limit OFFSET :offset
+                        """.formatted(metadataStateSql(), where), params, assetRowMapper())
+                .stream().map(row -> hydrate(row, AssetScope.PROJECT, projectId)).toList();
+        return new PageResponse<>(records, total, Math.max(1, page), limit);
+    }
+
+    /** 智能搜索：按名称/AI 描述/描述做模糊匹配，pg_trgm 负责相似度排序。 */
+    public List<AssetSummary> searchAssetsByText(
+            String userId, String projectId, String text, String type,
+            String excludeId, int limit
+    ) {
+        MapSqlParameterSource params = new MapSqlParameterSource("userId", userId)
+                .addValue("projectId", projectId)
+                .addValue("text", text)
+                .addValue("like", "%" + text + "%")
+                .addValue("type", type == null ? "" : type)
+                .addValue("excludeId", excludeId == null ? "" : excludeId)
+                .addValue("limit", Math.max(1, Math.min(100, limit)));
+        return jdbc.query("""
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.owner_user_id = :userId
+                          AND a.scope = 'PROJECT'
+                          AND a.owner_project_id = :projectId
+                          AND a.status = 'ACTIVE'
+                          AND (:type = '' OR a.asset_type = :type)
+                          AND (:excludeId = '' OR a.id <> :excludeId)
+                          AND (
+                              a.name ILIKE :like
+                              OR COALESCE(a.ai_description, '') ILIKE :like
+                              OR COALESCE(a.description, '') ILIKE :like
+                              OR a.name %% :text
+                              OR COALESCE(a.ai_description, '') %% :text
+                          )
+                        ORDER BY (
+                            similarity(a.name, :text) * 2
+                            + similarity(COALESCE(a.ai_description, ''), :text)
+                            + similarity(COALESCE(a.description, ''), :text)
+                            + CASE WHEN a.name ILIKE :like THEN 0.8 ELSE 0 END
+                        ) DESC, a.updated_at DESC
+                        LIMIT :limit
+                        """.formatted(metadataStateSql()), params, assetRowMapper())
+                .stream().map(row -> hydrate(row, AssetScope.PROJECT, projectId)).toList();
+    }
+
+    /** 颜色搜索候选：只取有主色的图片/视频，距离在 Java 里算。 */
+    public List<ColorCandidate> listColorCandidates(
+            String userId, String projectId, int limit
+    ) {
+        MapSqlParameterSource params = new MapSqlParameterSource("userId", userId)
+                .addValue("projectId", projectId)
+                .addValue("limit", Math.max(1, Math.min(1000, limit)));
+        return jdbc.query("""
+                        SELECT a.*, a.dominant_color, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.owner_user_id = :userId
+                          AND a.scope = 'PROJECT'
+                          AND a.owner_project_id = :projectId
+                          AND a.status = 'ACTIVE'
+                          AND a.dominant_color IS NOT NULL
+                          AND a.asset_type IN ('IMAGE', 'VIDEO')
+                        ORDER BY a.updated_at DESC
+                        LIMIT :limit
+                        """.formatted(metadataStateSql()), params,
+                (rs, rowNum) -> new ColorCandidate(
+                        hydrate(assetRowMapper().mapRow(rs, rowNum), AssetScope.PROJECT, projectId),
+                        rs.getString("dominant_color")));
+    }
+
+    public record ColorCandidate(AssetSummary asset, String color) {
+    }
+
+    /** 找相似候选：同项目同类型，Java 侧算文本/标签相似度。 */
+    public List<AssetSummary> listSearchCandidates(
+            String userId, String projectId, String type, String excludeId, int limit
+    ) {
+        MapSqlParameterSource params = new MapSqlParameterSource("userId", userId)
+                .addValue("projectId", projectId)
+                .addValue("type", type == null ? "" : type)
+                .addValue("excludeId", excludeId == null ? "" : excludeId)
+                .addValue("limit", Math.max(1, Math.min(500, limit)));
+        return jdbc.query("""
+                        SELECT a.*, %s AS metadata_state
+                        FROM asset.library_assets a
+                        LEFT JOIN asset.library_analysis_tasks t ON t.asset_id = a.id
+                        WHERE a.owner_user_id = :userId
+                          AND a.scope = 'PROJECT'
+                          AND a.owner_project_id = :projectId
+                          AND a.status = 'ACTIVE'
+                          AND (:type = '' OR a.asset_type = :type)
+                          AND (:excludeId = '' OR a.id <> :excludeId)
+                        ORDER BY a.updated_at DESC
+                        LIMIT :limit
+                        """.formatted(metadataStateSql()), params, assetRowMapper())
+                .stream().map(row -> hydrate(row, AssetScope.PROJECT, projectId)).toList();
+    }
+
+    public List<String> findDominantColors(List<String> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) return List.of();
+        return jdbc.query("""
+                        SELECT dominant_color FROM asset.library_assets
+                        WHERE id IN (:ids) AND dominant_color IS NOT NULL
+                        """,
+                new MapSqlParameterSource("ids", assetIds),
+                (rs, rowNum) -> rs.getString("dominant_color"));
+    }
+
+    public List<String> findAssetsMissingColor(int limit) {
+        return jdbc.query("""
+                        SELECT cover_url FROM asset.library_assets
+                        WHERE cover_url LIKE '/api/files/%'
+                          AND dominant_color IS NULL
+                          AND status = 'ACTIVE'
+                        ORDER BY updated_at DESC
+                        LIMIT :limit
+                        """,
+                new MapSqlParameterSource("limit", Math.max(1, Math.min(200, limit))),
+                (rs, rowNum) -> rs.getString("cover_url"));
+    }
+
+    public void updateDominantColorByPath(String path, String color) {
+        if (path == null || path.isBlank() || color == null || color.isBlank()) return;
+        jdbc.update("""
+                        UPDATE asset.library_assets
+                        SET dominant_color = :color, updated_at = now()
+                        WHERE cover_url = :path OR cover_url LIKE :prefix
+                        """,
+                new MapSqlParameterSource("color", color)
+                        .addValue("path", path)
+                        .addValue("prefix", path + "?%"));
+    }
+
+    private boolean tableExists(String qualifiedName) {
+        Boolean exists = jdbc.queryForObject(
+                "SELECT to_regclass(:name) IS NOT NULL",
+                new MapSqlParameterSource("name", qualifiedName),
+                Boolean.class);
+        return Boolean.TRUE.equals(exists);
+    }
+
+    private static RowMapper<AssetContracts.UsageRef> usageRefMapper() {
+        return (rs, rowNum) -> new AssetContracts.UsageRef(
+                rs.getString("id"), rs.getString("title"), rs.getString("detail"));
+    }
+
+    private static void addUsage(
+            Map<String, AssetContracts.UsageRef> target,
+            List<AssetContracts.UsageRef> values
+    ) {
+        for (AssetContracts.UsageRef value : values) {
+            if (value.id() != null) target.putIfAbsent(value.id(), value);
+        }
+    }
+
+    private static String normalizeUrl(String url) {
+        if (url == null || url.isBlank()) return null;
+        String clean = url.trim();
+        int query = clean.indexOf('?');
+        if (query >= 0) clean = clean.substring(0, query);
+        return clean.replaceFirst("^https?://[^/]+", "");
+    }
+
     public String insertAsset(
             String ownerUserId,
             AssetScope scope,
@@ -227,14 +1039,49 @@ public class LibraryRepository {
             String sourceType,
             String sourceId
     ) {
+        return insertAsset(ownerUserId, scope, projectId, type, aiKind, name, description,
+                sourceType, sourceId, null, null);
+    }
+
+    public String insertAsset(
+            String ownerUserId,
+            AssetScope scope,
+            String projectId,
+            AssetType type,
+            AiAssetKind aiKind,
+            String name,
+            String description,
+            String sourceType,
+            String sourceId,
+            String conversationId
+    ) {
+        return insertAsset(ownerUserId, scope, projectId, type, aiKind, name, description,
+                sourceType, sourceId, conversationId, null);
+    }
+
+    public String insertAsset(
+            String ownerUserId,
+            AssetScope scope,
+            String projectId,
+            AssetType type,
+            AiAssetKind aiKind,
+            String name,
+            String description,
+            String sourceType,
+            String sourceId,
+            String conversationId,
+            String sceneId
+    ) {
         String searchText = AssetSearchText.build(name, description, null, List.of());
         return client.sql("""
                         INSERT INTO asset.library_assets (
                             owner_user_id, scope, owner_project_id, asset_type, ai_kind,
-                            name, description, source_type, source_id, search_text
+                            name, description, source_type, source_id, source_conversation_id,
+                            source_scene_id, search_text
                         ) VALUES (
                             :ownerUserId, :scope, :projectId, :assetType, :aiKind,
-                            :name, :description, :sourceType, :sourceId, :searchText
+                            :name, :description, :sourceType, :sourceId, :conversationId,
+                            :sceneId, :searchText
                         ) RETURNING id
                         """)
                 .param("ownerUserId", ownerUserId)
@@ -246,6 +1093,8 @@ public class LibraryRepository {
                 .param("description", description)
                 .param("sourceType", sourceType)
                 .param("sourceId", sourceId)
+                .param("conversationId", conversationId)
+                .param("sceneId", sceneId)
                 .param("searchText", searchText)
                 .query(String.class)
                 .single();
@@ -297,11 +1146,13 @@ public class LibraryRepository {
                         INSERT INTO asset.library_assets (
                             owner_user_id, scope, owner_project_id, asset_type, ai_kind,
                             name, description, ai_description, manual_override, status,
-                            source_type, source_id, cover_url, search_text
+                            source_type, source_id, source_conversation_id, source_scene_id, cover_url, search_text,
+                            rating, flag, color_label
                         ) VALUES (
                             :ownerUserId, :scope, :projectId, :assetType, :aiKind,
                             :name, :description, :aiDescription, :manualOverride, 'ACTIVE',
-                            :sourceType, NULL, :coverUrl, :searchText
+                            :sourceType, NULL, :conversationId, :sceneId, :coverUrl, :searchText,
+                            :rating, :flag, :colorLabel
                         ) RETURNING id
                         """)
                 .param("ownerUserId", source.ownerUserId())
@@ -314,7 +1165,12 @@ public class LibraryRepository {
                 .param("aiDescription", source.aiDescription())
                 .param("manualOverride", source.manualOverride())
                 .param("sourceType", source.sourceType())
+                .param("conversationId", source.conversationId())
+                .param("sceneId", source.sceneId())
                 .param("coverUrl", source.coverUrl())
+                .param("rating", source.rating() == null ? 0 : source.rating())
+                .param("flag", source.flag())
+                .param("colorLabel", source.colorLabel())
                 .param("searchText", searchText)
                 .query(String.class)
                 .single();
@@ -426,6 +1282,31 @@ public class LibraryRepository {
                 .param("expectedVersion", expectedVersion)
                 .update();
         return updated == 1;
+    }
+
+    /** 挑片标记：整组覆盖 rating/flag/colorLabel，空值即清除。 */
+    public boolean updateMarks(
+            String userId,
+            String assetId,
+            int rating,
+            String flag,
+            String colorLabel
+    ) {
+        return client.sql("""
+                        UPDATE asset.library_assets
+                        SET rating = :rating,
+                            flag = :flag,
+                            color_label = :colorLabel,
+                            version = version + 1,
+                            updated_at = now()
+                        WHERE id = :id AND owner_user_id = :userId AND status = 'ACTIVE'
+                        """)
+                .param("id", assetId)
+                .param("userId", userId)
+                .param("rating", rating)
+                .param("flag", flag)
+                .param("colorLabel", colorLabel)
+                .update() == 1;
     }
 
     public boolean promote(String userId, String assetId, long expectedVersion) {
@@ -1358,6 +2239,35 @@ public class LibraryRepository {
                 .optional();
     }
 
+    /**
+     * 幂等补写对话归属：历史产出可能先以「未归属」入库，之后同一生成记录再带着
+     * conversationId 回写时把归属补上。只补空值，不覆盖已有归属。
+     */
+    public void attachOutputConversation(String assetId, String conversationId) {
+        if (assetId == null || conversationId == null || conversationId.isBlank()) return;
+        client.sql("""
+                        UPDATE asset.library_assets
+                        SET source_conversation_id = :conversationId
+                        WHERE id = :assetId AND source_conversation_id IS NULL
+                        """)
+                .param("assetId", assetId)
+                .param("conversationId", conversationId)
+                .update();
+    }
+
+    /** 幂等补写镜头归属：同一生成记录后续再回写时补上 source_scene_id。 */
+    public void attachOutputScene(String assetId, String sceneId) {
+        if (assetId == null || sceneId == null || sceneId.isBlank()) return;
+        client.sql("""
+                        UPDATE asset.library_assets
+                        SET source_scene_id = :sceneId
+                        WHERE id = :assetId AND source_scene_id IS NULL
+                        """)
+                .param("assetId", assetId)
+                .param("sceneId", sceneId)
+                .update();
+    }
+
     public void linkGroupOutput(String groupId, String producer, String generationRecordId, int resultIndex, String resultAssetId) {
         client.sql("""
                         INSERT INTO asset.library_group_outputs(
@@ -2022,7 +2932,8 @@ public class LibraryRepository {
                 listTags(row.id()), listProjectLinks(row.id()),
                 folder.map(FolderLocation::folderId).orElse(null),
                 folder.map(FolderLocation::path).orElse(List.of()),
-                row.sourceType(), row.sourceId(), row.createdAt(), row.updatedAt()
+                row.sourceType(), row.sourceId(), row.createdAt(), row.updatedAt(),
+                row.conversationId(), row.sceneId(), row.rating(), row.flag(), row.colorLabel()
         );
     }
 
@@ -2058,10 +2969,17 @@ public class LibraryRepository {
                 rs.getLong("version"),
                 List.of(),
                 List.of(),
+                null,
+                List.of(),
                 rs.getString("source_type"),
                 rs.getString("source_id"),
                 rs.getObject("created_at", OffsetDateTime.class),
-                rs.getObject("updated_at", OffsetDateTime.class)
+                rs.getObject("updated_at", OffsetDateTime.class),
+                rs.getString("source_conversation_id"),
+                rs.getString("source_scene_id"),
+                rs.getInt("rating"),
+                rs.getString("flag"),
+                rs.getString("color_label")
         );
     }
 
@@ -2100,6 +3018,9 @@ public class LibraryRepository {
     }
 
     public record FolderScanAsset(String id, String name) {
+    }
+
+    private record DuplicateBlobRow(String blobId, String sha256, String mimeType, long sizeBytes) {
     }
 
     public record FolderRow(

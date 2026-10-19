@@ -23,7 +23,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { SceneCard } from '../scene/SceneCard';
 import { SceneOutlineRow } from '../scene/SceneOutlineRow';
 import { LiveOrb } from '../ui/live-orb';
-import { Check, ArrowUpDown, List, LayoutGrid } from 'lucide-react';
+import { Check, ArrowUpDown, List, LayoutGrid, Plus, GripVertical } from 'lucide-react';
 
 /** 排序模式下的可拖拽行包裹（大纲视图：拖行即可重排，不需要额外进入排序模式） */
 function SortableOutlineRow({
@@ -46,7 +46,7 @@ function SortableOutlineRow({
         transition,
         display: 'flex',
         alignItems: 'center',
-        gap: 2,
+        gap: 0,
         zIndex: isDragging ? 999 : undefined,
         position: 'relative',
       }}
@@ -58,18 +58,14 @@ function SortableOutlineRow({
         style={{
           display: 'grid',
           placeItems: 'center',
-          width: 14,
+          width: 13,
           flexShrink: 0,
           color: 'var(--color-muted-soft)',
           cursor: 'grab',
           touchAction: 'none',
         }}
       >
-        <svg width="10" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="9" cy="6" r="1.4" /><circle cx="15" cy="6" r="1.4" />
-          <circle cx="9" cy="12" r="1.4" /><circle cx="15" cy="12" r="1.4" />
-          <circle cx="9" cy="18" r="1.4" /><circle cx="15" cy="18" r="1.4" />
-        </svg>
+        <GripVertical size={13} strokeWidth={1.7} aria-hidden="true" />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <SceneOutlineRow
@@ -120,25 +116,19 @@ function SortableSceneCard({
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 4 }}>
         <div
           {...listeners}
+          aria-label={`拖动排序分镜 ${scene.sceneNumber}`}
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 24,
+            width: 20,
             cursor: 'grab',
-            color: 'var(--color-muted)',
+            color: 'var(--color-muted-soft)',
             flexShrink: 0,
             touchAction: 'none',
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="9" cy="6" r="1.5" />
-            <circle cx="15" cy="6" r="1.5" />
-            <circle cx="9" cy="12" r="1.5" />
-            <circle cx="15" cy="12" r="1.5" />
-            <circle cx="9" cy="18" r="1.5" />
-            <circle cx="15" cy="18" r="1.5" />
-          </svg>
+          <GripVertical size={15} strokeWidth={1.7} aria-hidden="true" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <SceneCard
@@ -220,85 +210,33 @@ export function SceneListPanel({ width }: { width: number }) {
 
   return (
     <div
-      style={{
-        width: `${width}px`,
-        minWidth: `${width}px`,
-        borderRight: '1px solid var(--color-hairline)',
-        background: 'var(--color-canvas)',
-        padding: 'var(--space-md)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
+      className="scene-panel"
+      style={{ width: `${width}px`, minWidth: `${width}px` }}
     >
       {/* Header row */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 12,
-        }}
-      >
-        <h2
-          style={{
-            font: 'var(--text-title-sm)',
-            color: 'var(--color-ink)',
-            margin: 0,
-          }}
-        >
-          分镜列表
-        </h2>
-        <div style={{ display: 'flex', gap: 6 }}>
+      <div className="scene-panel__head">
+        <div className="scene-panel__title-wrap">
+          <h2 className="scene-panel__title">分镜列表</h2>
+          <span className="scene-panel__count">{scenes.length}</span>
+        </div>
+        <div className="scene-panel__tools">
           {scenes.length > 0 && !sortMode && (
-            <div
-              role="group"
-              aria-label="分镜视图"
-              style={{
-                display: 'inline-flex',
-                border: '1px solid var(--color-hairline)',
-                borderRadius: 'var(--rounded-md)',
-                overflow: 'hidden',
-                background: 'white',
-              }}
-            >
+            <div className="segmented" role="group" aria-label="分镜视图">
               <button
                 type="button"
+                className="segmented__btn"
                 aria-pressed={viewMode === 'outline'}
                 onClick={() => switchView('outline')}
                 title="大纲视图：一行一镜，密度高"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  height: 28,
-                  padding: '0 9px',
-                  border: 0,
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  background: viewMode === 'outline' ? 'var(--color-primary)' : 'transparent',
-                  color: viewMode === 'outline' ? 'white' : 'var(--color-body)',
-                }}
               >
                 <List size={12} strokeWidth={2} /> 大纲
               </button>
               <button
                 type="button"
+                className="segmented__btn"
                 aria-pressed={viewMode === 'card'}
                 onClick={() => switchView('card')}
                 title="卡片视图：完整信息与重命名"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  height: 28,
-                  padding: '0 9px',
-                  border: 0,
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  background: viewMode === 'card' ? 'var(--color-primary)' : 'transparent',
-                  color: viewMode === 'card' ? 'white' : 'var(--color-body)',
-                }}
               >
                 <LayoutGrid size={12} strokeWidth={2} /> 卡片
               </button>
@@ -306,92 +244,43 @@ export function SceneListPanel({ width }: { width: number }) {
           )}
           {scenes.length > 1 && viewMode === 'card' && (
             <button
+              type="button"
+              className="btn btn--outline btn--sm"
               onClick={() => setSortMode(!sortMode)}
-              style={{
-                padding: '4px 14px',
-                height: 28,
-                fontSize: 12,
-                borderRadius: 'var(--rounded-md)',
-                border: sortMode ? '1px solid var(--color-primary)' : '1px solid var(--color-hairline)',
-                background: sortMode ? 'var(--color-primary)' : 'white',
-                cursor: 'pointer',
-                color: sortMode ? 'white' : 'var(--color-body)',
-                fontWeight: 500,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={(e) => { if (!sortMode) { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; } }}
-              onMouseLeave={(e) => { if (!sortMode) { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.color = 'var(--color-body)'; } }}
+              style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
             >
               {sortMode
-                ? <><Check size={12} strokeWidth={2} /> 完成排序</>
+                ? <><Check size={12} strokeWidth={2} /> 完成</>
                 : <><ArrowUpDown size={12} strokeWidth={2} /> 排序</>}
             </button>
           )}
           {currentProject && !sortMode && (
-              <button
-                onClick={() => addScene(currentProject.id)}
-                style={{
-                  padding: '4px 14px',
-                height: 28,
-                fontSize: 12,
-                borderRadius: 'var(--rounded-md)',
-                border: '1px solid var(--color-hairline)',
-                background: 'white',
-                cursor: 'pointer',
-                color: 'var(--color-body)',
-                fontWeight: 500,
-                transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.color = 'var(--color-body)'; }}
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => addScene(currentProject.id)}
+              style={{ height: 28, padding: '0 10px', fontSize: 11.5 }}
             >
-              + 添加
+              <Plus size={13} strokeWidth={2} /> 添加
             </button>
           )}
         </div>
       </div>
 
       {/* 分镜列表滚动区（仅此区域滚动，「分镜列表」标题行固定） */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div ref={listRef} className="scene-list">
         {/* Empty state */}
         {scenes.length === 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: '100%',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              <LiveOrb
-                variant="webgl"
-                colors={["#A33A18", "#D4682A", "#E8B45A"]}
-                size={80}
-              />
-              <p
-                style={{
-                  color: 'var(--color-muted-soft)',
-                  fontSize: 13,
-                  textAlign: 'center',
-                  animation: 'emptyGuideFloat 2.6s ease-in-out infinite',
-                }}
-              >
-              <span style={{ display: 'block', marginBottom: 8 }}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg></span>
-              暂无分镜
-              <br />
-              请输入剧本并点击"生成分镜脚本"
-              <style>{`
-                @keyframes emptyGuideFloat {
-                  0%, 100% { transform: translateY(0); opacity: 0.75; }
-                  50% { transform: translateY(-6px); opacity: 1; }
-                }
-              `}</style>
-              </p>
-            </div>
+          <div className="scene-empty">
+            <LiveOrb
+              variant="webgl"
+              colors={["#CC785C", "#E8B45A", "#F4E6DE"]}
+              size={64}
+            />
+            <span className="scene-empty__title">还没有分镜</span>
+            <span className="scene-empty__body">
+              在左侧写一段剧本或画面描述，生成后会在这里逐镜列出。
+            </span>
           </div>
         ) : viewMode === 'outline' ? (
           /* 大纲视图：一行一镜，直接拖行重排 */

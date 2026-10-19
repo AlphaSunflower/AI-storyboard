@@ -5,7 +5,9 @@ import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.mapper.ChannelMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
+import com.llmgateway.service.ChannelKeyService;
 import com.llmgateway.service.KeyService;
+import com.llmgateway.service.RouteResolver;
 import com.llmgateway.service.RouteResult;
 import com.llmgateway.service.UpstreamClient;
 import com.storyboard.common.MultipartBuilder;
@@ -77,8 +79,11 @@ class ImageEditServiceDoubaoTest {
                 .file("mask", "mask.png", "image/png", pixel)
                 .build();
 
+        ChannelKeyService channelKeyService = mock(ChannelKeyService.class);
+        when(channelKeyService.select(channel))
+                .thenReturn(new ChannelKeyService.KeySelection(null, "key"));
         ImageEditServiceImpl service = new ImageEditServiceImpl(
-                routeMapper, channelMapper, keyService, upstreamClient, callLogService);
+                upstreamClient, callLogService, new RouteResolver(routeMapper, channelMapper), channelKeyService);
         RouteResult result = service.edit(multipart, "application/octet-stream");
 
         assertEquals(200, result.status());
@@ -136,8 +141,11 @@ class ImageEditServiceDoubaoTest {
                 .file("image", "source.png", "image/png", imageBytes.toByteArray())
                 .build();
 
+        ChannelKeyService channelKeyService = mock(ChannelKeyService.class);
+        when(channelKeyService.select(channel))
+                .thenReturn(new ChannelKeyService.KeySelection(null, "key"));
         ImageEditServiceImpl service = new ImageEditServiceImpl(
-                routeMapper, channelMapper, keyService, upstreamClient, callLogService);
+                upstreamClient, callLogService, new RouteResolver(routeMapper, channelMapper), channelKeyService);
         RouteResult result = service.edit(multipart, "application/octet-stream");
 
         assertEquals(200, result.status());

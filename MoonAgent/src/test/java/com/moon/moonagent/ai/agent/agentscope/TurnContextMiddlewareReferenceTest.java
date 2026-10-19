@@ -36,6 +36,8 @@ class TurnContextMiddlewareReferenceTest {
     private final ConstraintExtractionService constraints = mock(ConstraintExtractionService.class);
     private final AgentDocumentService documents = mock(AgentDocumentService.class);
     private final SceneReferenceService sceneReferences = mock(SceneReferenceService.class);
+    private final ConversationReferenceService conversationReferences =
+            mock(ConversationReferenceService.class);
 
     private TurnContextMiddleware middleware() {
         when(constraints.extract(any())).thenReturn(
@@ -44,6 +46,16 @@ class TurnContextMiddlewareReferenceTest {
         when(creativeContext.promptContext(any(), any())).thenReturn("");
         return new TurnContextMiddleware(
                 workflows, creativeContext, constraints, documents, null, sceneReferences);
+    }
+
+    private TurnContextMiddleware middlewareWithConversations() {
+        when(constraints.extract(any())).thenReturn(
+                new ConstraintLedger(CreativeMode.BALANCED, List.of(), List.of(), List.of()));
+        when(workflows.activeContext(any())).thenReturn("");
+        when(creativeContext.promptContext(any(), any())).thenReturn("");
+        return new TurnContextMiddleware(
+                workflows, creativeContext, constraints, documents, null, sceneReferences,
+                null, null, conversationReferences);
     }
 
     @Test
@@ -138,8 +150,12 @@ class TurnContextMiddlewareReferenceTest {
         when(documents.recentSummaries("c1", 5)).thenReturn(List.of(
                 new DocumentSummaryView("asset-1", "设定.docx", "application/msword", "已有摘要", "ready")));
         when(sceneReferences.resolve(any(), anyList())).thenReturn(List.of());
+        when(conversationReferences.resolve("u1", "project-1", "c9")).thenReturn(
+                new ConversationReferenceService.ConversationReferenceView(
+                        true, "", "c9", "分镜重做", 2,
+                        "【用户】把第三镜改成推镜\n【助手】已改好"));
 
-        String prompt = systemPromptFor(middleware(), List.of(
+        String prompt = systemPromptFor(middlewareWithConversations(), List.of(
                 new AgentReferenceRequest("local_file", "asset-1", "@设定.docx", "设定.docx",
                         "asset-1", null, null, "application/msword", 100L, null),
                 new AgentReferenceRequest("library_file", "media-1", "@项目库.docx", "项目库.docx",
@@ -152,7 +168,8 @@ class TurnContextMiddlewareReferenceTest {
         assertThat(prompt).contains("read_document(assetId=asset-1)");
         assertThat(prompt).contains("kind=library_file mediaId=media-1");
         assertThat(prompt).contains("kind=conversation conversationId=c9 title=分镜重做");
-        assertThat(prompt).contains("摘要能力尚未启用");
+        assertThat(prompt).contains("【用户】把第三镜改成推镜");
+        assertThat(prompt).contains("【助手】已改好");
     }
 
     @Test

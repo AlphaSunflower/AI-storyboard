@@ -24,7 +24,7 @@ export function ProjectContent() {
             onClick={() => loadProject(p.id)}
             className="text-left px-4 py-3 rounded-lg transition-all text-sm"
             style={{
-              background: active ? 'rgba(204,120,92,0.08)' : 'transparent',
+              background: active ? 'color-mix(in srgb, var(--color-primary) 8%, transparent)' : 'transparent',
               color: 'var(--color-ink)',
               border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
               outline: active ? '2px solid var(--color-primary)' : 'none',

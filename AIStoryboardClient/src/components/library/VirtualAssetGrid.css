@@ -1,0 +1,27 @@
+.library-virtual-grid {
+  grid-column: 1 / -1;
+  position: relative;
+  width: 100%;
+}
+
+.library-virtual-grid__row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 0 10px;
+}
+
+.library-virtual-grid__cell {
+  min-width: 0;
+  height: 100%;
+}
+
+.library-virtual-grid__cell > .library-folder-grid__item {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.library-virtual-grid__cell .library-folder-grid__item strong {
+  max-width: 100%;
+}

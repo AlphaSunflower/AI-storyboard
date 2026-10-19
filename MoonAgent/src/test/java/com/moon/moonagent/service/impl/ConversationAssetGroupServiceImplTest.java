@@ -1,6 +1,7 @@
 package com.moon.moonagent.service.impl;
 
 import com.moon.moonagent.dto.response.ConversationAssetGroupVO;
+import com.moon.moonagent.dto.response.ProjectAssetGroupBindingVO;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentConversationAssetGroup;
 import com.moon.moonagent.mapper.AgentConversationAssetGroupMapper;
@@ -73,6 +74,54 @@ class ConversationAssetGroupServiceImplTest {
         assertThat(result).hasSize(1);
         assertThat(result.getFirst().snapshotId()).isEqualTo("s1");
         assertThat(result.getFirst().stale()).isTrue();
+    }
+
+    @Test
+    void listProjectBindingsReturnsConversationTitlesAndFrozenVersions() {
+        AgentConversation first = new AgentConversation();
+        first.setId("c1");
+        first.setUserId("u1");
+        first.setProjectId("p1");
+        first.setTitle("分镜 A");
+        AgentConversation second = new AgentConversation();
+        second.setId("c2");
+        second.setUserId("u1");
+        second.setProjectId("p1");
+        second.setTitle("分镜 B");
+        when(conversationMapper.selectList(any())).thenReturn(List.of(first, second));
+
+        AgentConversationAssetGroup bindingOne = new AgentConversationAssetGroup();
+        bindingOne.setConversationId("c1");
+        bindingOne.setGroupId("g1");
+        bindingOne.setSnapshotId("s1");
+        bindingOne.setGroupVersion(2L);
+        bindingOne.setTarget("AGENT");
+        bindingOne.setUpdatedAt(OffsetDateTime.now());
+        AgentConversationAssetGroup bindingTwo = new AgentConversationAssetGroup();
+        bindingTwo.setConversationId("c2");
+        bindingTwo.setGroupId("g1");
+        bindingTwo.setSnapshotId("s0");
+        bindingTwo.setGroupVersion(1L);
+        bindingTwo.setTarget("AGENT");
+        bindingTwo.setUpdatedAt(OffsetDateTime.now());
+        when(bindingMapper.selectList(any())).thenReturn(List.of(bindingOne, bindingTwo));
+
+        List<ProjectAssetGroupBindingVO> bindings = service.listProjectBindings("u1", "p1");
+
+        assertThat(bindings).hasSize(2);
+        assertThat(bindings)
+                .extracting(ProjectAssetGroupBindingVO::conversationTitle)
+                .containsExactly("分镜 A", "分镜 B");
+        assertThat(bindings)
+                .extracting(ProjectAssetGroupBindingVO::groupVersion)
+                .containsExactly(2L, 1L);
+    }
+
+    @Test
+    void listProjectBindingsSkipsProjectWithoutConversations() {
+        when(conversationMapper.selectList(any())).thenReturn(List.of());
+
+        assertThat(service.listProjectBindings("u1", "p1")).isEmpty();
     }
 
     private static AssetGroupSnapshot snapshot(String id, long version) {

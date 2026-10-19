@@ -23,16 +23,42 @@ public class MediaContentController {
 
     private final MediaContentService mediaContentService;
     private final AssetCatalogService catalogService;
+    private final com.storyboard.asset.service.ThumbnailService thumbnailService;
 
     public MediaContentController(MediaContentService mediaContentService,
-                                  AssetCatalogService catalogService) {
+                                  AssetCatalogService catalogService,
+                                  com.storyboard.asset.service.ThumbnailService thumbnailService) {
         this.mediaContentService = mediaContentService;
         this.catalogService = catalogService;
+        this.thumbnailService = thumbnailService;
     }
 
     @GetMapping("/{mediaId}/metadata")
     public ApiResponse<MediaRef> metadata(Authentication auth, @PathVariable String mediaId) {
         return ApiResponse.ok(catalogService.getMedia(auth.getName(), mediaId));
+    }
+
+    /** 图片缩略图：签名路径 + 尺寸，首次生成后写 MinIO 缓存。 */
+    @GetMapping("/thumbnails")
+    public ResponseEntity<StreamingResponseBody> thumbnail(
+            @RequestParam String path,
+            @RequestParam String token,
+            @RequestParam(defaultValue = "320") int size
+    ) throws Exception {
+        StoredObject object = thumbnailService.open(path, token, size);
+        StreamingResponseBody body = output -> {
+            try (object) {
+                object.stream().transferTo(output);
+            }
+        };
+        String contentType = object.contentType() == null || object.contentType().isBlank()
+                ? MediaType.IMAGE_JPEG_VALUE
+                : object.contentType();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400")
+                .contentType(MediaType.parseMediaType(contentType))
+                .contentLength(object.contentLength())
+                .body(body);
     }
 
     @GetMapping("/{mediaId}/content")

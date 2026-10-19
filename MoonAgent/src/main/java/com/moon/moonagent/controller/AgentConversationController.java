@@ -16,6 +16,7 @@ import com.moon.moonagent.dto.response.AgentSteerResponse;
 import com.moon.moonagent.dto.response.MessagePageVO;
 import com.moon.moonagent.dto.response.MessageSearchHitVO;
 import com.moon.moonagent.dto.response.ProjectOutputMaterialGroup;
+import com.moon.moonagent.dto.response.ProjectAssetGroupBindingVO;
 import com.moon.moonagent.dto.response.ConversationAssetGroupVO;
 import com.storyboard.common.ApiResponse;
 import com.storyboard.asset.client.AssetClient;
@@ -101,6 +102,18 @@ public class AgentConversationController {
             @PathVariable String id
     ) {
         return ApiResponse.ok(conversationAssetGroupService.list(auth.getName(), id));
+    }
+
+    /**
+     * 项目维度的资产组使用情况：每个资产组被哪些对话绑定。
+     * 只读绑定行，不创建快照；项目库用它展示「被谁使用」。
+     */
+    @GetMapping("/projects/{projectId}/asset-group-bindings")
+    public ApiResponse<List<ProjectAssetGroupBindingVO>> listProjectAssetGroupBindings(
+            Authentication auth,
+            @PathVariable String projectId
+    ) {
+        return ApiResponse.ok(conversationAssetGroupService.listProjectBindings(auth.getName(), projectId));
     }
 
     @PostMapping("/conversations/{id}/asset-groups")

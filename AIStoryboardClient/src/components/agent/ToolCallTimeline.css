@@ -466,3 +466,15 @@
     transition: none;
   }
 }
+
+/* 标准/只看见思考：工具行只保留名称与状态，不再呈现可点击的展开态 */
+.tool-node--compact .tool-node__toggle {
+  cursor: default;
+}
+.tool-node--compact .tool-node__toggle:hover {
+  background: transparent;
+}
+.tool-node--compact .tool-node__title {
+  font-weight: 550;
+}
+

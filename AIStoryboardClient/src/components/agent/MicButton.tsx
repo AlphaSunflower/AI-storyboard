@@ -1,9 +1,10 @@
-import { useRef, useEffect } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { useMicVolume } from '../../hooks/useMicVolume';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { Tooltip } from '../common/Tooltip';
 
-const DS_BLUE = 'rgb(65, 118, 230)';
+const DS_BLUE = 'var(--color-primary)';
 
 interface MicButtonProps {
   /** 录音中回调——用于父组件禁用发送等 */
@@ -12,13 +13,25 @@ interface MicButtonProps {
   disabled?: boolean;
   /** 实时 PCM 回调（16kHz mono Int16，录音中每块触发）——流式识别推流用 */
   onPcm?: (pcm16k: Int16Array) => void;
+  /** 快捷键提示：显示在悬浮气泡右侧的 kbd 里 */
+  shortcut?: ReactNode;
+}
+
+/** 快捷键「快捷录音」只需要一个开/关入口，不暴露内部识别细节。 */
+export interface MicButtonHandle {
+  toggle: () => void;
+  /** 浏览器不支持 getUserMedia 时组件会返回 null，调用方据此给可读提示。 */
+  supported: boolean;
 }
 
 /**
  * 麦克风按钮：点击录音，canvas 径向波形随音量变化。
  * 不支持 getUserMedia 时返回 null。
  */
-export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
+export const MicButton = forwardRef<MicButtonHandle, MicButtonProps>(function MicButton(
+  { onToggle, disabled, onPcm, shortcut },
+  ref,
+) {
   const isMobile = useIsMobile();
   const { volume, freqData, isActive, isSupported, toggle } = useMicVolume(64, onPcm);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -85,12 +98,17 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [isActive, freqData, size, canvasSize]);
 
-  if (!isSupported) return null;
-
   const handleClick = async () => {
+    if (disabled) return;
     // 开始/停止录音：onToggle 通知父组件（开始→开流式识别，停止→关流）
     await toggle();
   };
+
+  // 快捷键入口：与点击按钮走同一条开关路径，disabled 时同样不发声、不占麦克风。
+  useImperativeHandle(ref, () => ({
+    supported: isSupported,
+    toggle: () => { void handleClick(); },
+  }), [disabled, isSupported, toggle]);
 
   // 录音上限 60s：超时自动停止（防麦克风长期占用 + 内存无限累积）
   useEffect(() => {
@@ -98,6 +116,8 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
     const timer = setTimeout(() => { void handleClick(); }, 60_000);
     return () => clearTimeout(timer);
   }, [isActive]);
+
+  if (!isSupported) return null;
 
   return (
     <div style={{
@@ -124,12 +144,13 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
       />
 
       {/* 麦克风按钮 */}
-      <Tooltip label={isActive ? '停止录音' : '开始录音'}>
+      <Tooltip label={isActive ? '停止录音' : '开始录音'} shortcut={shortcut}>
       <button
         onClick={handleClick}
         disabled={disabled}
         aria-label={isActive ? '停止录音' : '开始录音'}
-        onMouseEnter={(e) => { if (!disabled && !isActive) e.currentTarget.style.background = 'rgba(65,118,230,0.08)'; }}
+        aria-keyshortcuts="Control+Shift+1 Meta+Shift+1"
+        onMouseEnter={(e) => { if (!disabled && !isActive) e.currentTarget.style.background = 'color-mix(in srgb, var(--color-primary) 8%, transparent)'; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? DS_BLUE : 'transparent'; }}
         style={{
           position: 'relative',
@@ -167,4 +188,4 @@ export function MicButton({ onToggle, disabled, onPcm }: MicButtonProps) {
       </Tooltip>
     </div>
   );
-}
+});

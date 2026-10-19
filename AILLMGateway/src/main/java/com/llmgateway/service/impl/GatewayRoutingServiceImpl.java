@@ -3,20 +3,28 @@ package com.llmgateway.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.llmgateway.entity.Channel;
+import com.llmgateway.entity.ModelFallback;
 import com.llmgateway.entity.ModelParams;
 import com.llmgateway.entity.ModelRoute;
 import com.llmgateway.exception.BusinessException;
 import com.llmgateway.mapper.ChannelMapper;
+import com.llmgateway.mapper.ModelFallbackMapper;
 import com.llmgateway.mapper.ModelParamsMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
+import com.llmgateway.service.ChannelKeyService;
 import com.llmgateway.service.GatewayRoutingService;
 import com.llmgateway.service.KeyService;
 import com.llmgateway.service.ModelCatalogCache;
 import com.llmgateway.service.ModelParamsSpecNormalizer;
+import com.llmgateway.service.ParamOverrideSupport;
 import com.llmgateway.service.RouteResult;
+import com.llmgateway.service.RouteResolver;
+import com.llmgateway.service.SpecRequestMapping;
 import com.llmgateway.service.UpstreamClient;
+import com.llmgateway.service.UsageExtractor;
 import com.llmgateway.vendor.route.ChatImageVendorAdapter;
 import com.llmgateway.vendor.route.RouteVendorRegistry;
 import lombok.RequiredArgsConstructor;
@@ -26,8 +34,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,16 +44,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
- * 路由核心编排器：解析 model → 查 model_route → 取 enabled channel（按 priority 升序）
- * → AES 解密渠道 Key → 按渠道类型经 {@link ChatImageVendorAdapter} 分发（透传 / Gemini 转换）。
- * <p>
- * 厂商协议差异已下沉路由适配器，新增协议无需改本编排器。
+ * 路由核心编排器 v2。
+ *
+ * <p>一次请求的选路：{@link RouteResolver} 按「路由 priority → 渠道 priority → 同层权重随机」
+ * 给出候选；每个候选应用「上游模型名 + 参数覆盖」后发给上游；429/5xx/超时换候选（可重试），
+ * 业务 4xx 直接透传；全部失败后按 {@code model_fallback} 跨模型回退（最多 2 层）。
+ *
+ * <p>Key 选择：优先渠道 Key 池（加权 + 失败冷却），池为空回退 channel.api_key。
+ * 协议差异仍在 {@link ChatImageVendorAdapter}，本类只做编排。
  */
 @Service
 @RequiredArgsConstructor
 public class GatewayRoutingServiceImpl implements GatewayRoutingService {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayRoutingServiceImpl.class);
+    private static final int MAX_FALLBACK_DEPTH = 2;
 
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
@@ -53,9 +67,15 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     private final UpstreamClient upstreamClient;
     private final RouteVendorRegistry routeRegistry;
     private final CallLogService callLogService;
-    /** 模型列表缓存 / 默认模型 / 版本号的唯一持有者（key 命名与失效逻辑都收敛在它里面） */
     private final ModelCatalogCache catalogCache;
+    private final RouteResolver routeResolver;
+    private final ChannelKeyService channelKeyService;
+    private final ModelFallbackMapper modelFallbackMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // ==================================================================
+    // 流式
+    // ==================================================================
 
     @Override
     public void streamChat(String path, String requestBody, java.util.function.Consumer<byte[]> sink) throws Exception {
@@ -65,6 +85,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
     @Override
     public void streamChat(String path, String requestBody,
                            java.util.function.Consumer<byte[]> sink, String callId) throws Exception {
+        streamInternal(path, requestBody, sink, callId, null, 0, new LinkedHashSet<>());
+    }
+
+    private void streamInternal(String path, String requestBody,
+                                java.util.function.Consumer<byte[]> sink, String callId,
+                                String forcedChannelId, int depth, Set<String> visited) throws Exception {
         long start = System.currentTimeMillis();
         String model = null;
         String channelId = null;
@@ -73,63 +99,327 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             String modelName = body.path("model").asText("");
             model = modelName;
             if (modelName.isBlank()) throw new BusinessException(40001, "model 不能为空");
+            if (!visited.add(modelName)) {
+                throw new BusinessException(40001, "fallback loop detected: " + modelName);
+            }
 
-            // 候选渠道（与 route 同规则：model_route → enabled 渠道按 priority 升序）
-            List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                    .eq(ModelRoute::getModelName, modelName));
-            if (routes == null || routes.isEmpty()) {
+            List<RouteResolver.RouteCandidate> candidates = routeResolver.resolve(modelName, forcedChannelId);
+            if (candidates.isEmpty()) {
+                if (forcedChannelId == null && tryStreamFallback(path, requestBody, modelName,
+                        resolveType(modelName), sink, callId, depth, visited)) {
+                    return;
+                }
                 throw new BusinessException(40401, "no route for model: " + modelName);
             }
-            List<Channel> candidates = resolveCandidates(routes);
-            if (candidates.isEmpty()) {
-                throw new BusinessException(50301, "no available channel for model: " + modelName);
-            }
 
-            // 逐个渠道尝试：各渠道协议由适配器转发；客户端中断不是渠道故障，停止不再换下一个
-            Exception lastError = null;
-            for (Channel channel : candidates) {
-                channelId = channel.getId();
-                AtomicBoolean emitted = new AtomicBoolean(false);
-                try {
-                    String apiKey = keyService.decrypt(channel.getApiKey());
-                    routeRegistry.resolve(channel.getType()).stream(path, requestBody, channel, apiKey, bytes -> {
-                        if (bytes != null && bytes.length > 0) emitted.set(true);
-                        sink.accept(bytes);
-                    });
-                    long duration = System.currentTimeMillis() - start;
-                    callLogService.log(model, channelId, "success", duration, null, null, null, callId);
-                    log.info("流式调用完成: model={}, channel={}, duration={}ms, callId={}",
-                            model, channelId, duration, callId);
-                    return;
-                } catch (Exception e) {
-                    if (isClientAbort(e)) {
+            int attempt = 0;
+            String lastError = null;
+            Map<String, String> specCache = new HashMap<>();
+            for (RouteResolver.RouteCandidate candidate : candidates) {
+                int maxAttempts = candidate.maxAttempts();
+                for (int i = 0; i < maxAttempts; i++) {
+                    attempt++;
+                    Channel channel = candidate.channel();
+                    channelId = channel.getId();
+                    ChannelKeyService.KeySelection key = channelKeyService.select(channel);
+                    String mapped = SpecRequestMapping.apply(requestBody, specFor(candidate, specCache),
+                            "openai_compatible".equals(channel.getType()));
+                    String forwarded = ParamOverrideSupport.apply(
+                            mapped, candidate.route().getParamOverrides(), candidate.upstreamModel(),
+                            "openai_compatible".equals(channel.getType()));
+                    AtomicBoolean emitted = new AtomicBoolean(false);
+                    try {
+                        ChatImageVendorAdapter adapter = routeRegistry.resolve(channel.getType());
+                        adapter.stream(path, forwarded, channel, key.plainKey(), bytes -> {
+                            if (bytes != null && bytes.length > 0) emitted.set(true);
+                            sink.accept(bytes);
+                        }, candidate.timeoutMs());
                         long duration = System.currentTimeMillis() - start;
-                        callLogService.log(model, channelId, "error", duration,
-                                "client aborted", null, null, callId);
-                        log.debug("客户端中断流式转发，停止: channel={}, callId={}", channel.getId(), callId);
+                        callLogService.log(model, channelId, "success", duration, null, null, null, callId,
+                                candidate.upstreamModel(), attempt, null, null);
+                        channelKeyService.markSuccess(key.keyId());
                         return;
-                    }
-                    if (emitted.get()) {
+                    } catch (Exception e) {
+                        if (isClientAbort(e)) {
+                            callLogService.log(model, channelId, "error",
+                                    System.currentTimeMillis() - start, "client aborted", null, null, callId,
+                                    candidate.upstreamModel(), attempt, null, null);
+                            log.debug("客户端中断流式转发，停止: channel={}, callId={}", channelId, callId);
+                            return;
+                        }
+                        lastError = e.getMessage();
                         callLogService.log(model, channelId, "error",
-                                System.currentTimeMillis() - start,
-                                "stream failed after partial output", null, null, callId);
-                        throw e;
+                                System.currentTimeMillis() - start, lastError, null, null, callId,
+                                candidate.upstreamModel(), attempt, null, null);
+                        channelKeyService.markFailure(key.keyId(), 500);
+                        if (emitted.get()) {
+                            throw e;   // 已经吐字：无法安全重放，直接失败
+                        }
+                        log.warn("流式渠道失败，尝试下一个: channel={}, callId={}, error={}",
+                                channelId, callId, lastError);
                     }
-                    lastError = e;
-                    log.warn("流式渠道失败，尝试下一个: channel={}, callId={}, error={}",
-                            channel.getId(), callId, e.getMessage());
                 }
             }
-            throw lastError != null ? lastError : new BusinessException(50202, "upstream stream failed");
+
+            if (forcedChannelId == null && tryStreamFallback(path, requestBody, modelName,
+                    resolveType(modelName, candidates), sink, callId, depth, visited)) {
+                return;
+            }
+            throw new BusinessException(50301, "all channels failed for model: " + model
+                    + (lastError == null ? "" : " (" + lastError + ")"));
         } catch (BusinessException be) {
             callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
-                    be.getMessage(), null, null, callId);
+                    be.getMessage(), null, null, callId, null, null, null, null);
             throw be;
         } catch (Exception e) {
             callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
-                    e.getMessage(), null, null, callId);
+                    e.getMessage(), null, null, callId, null, null, null, null);
             throw e;
         }
+    }
+
+    /** 流式回退：仅在尚未向上游写出任何字节时调用 */
+    private boolean tryStreamFallback(String path, String requestBody, String model, String type,
+                                      java.util.function.Consumer<byte[]> sink, String callId,
+                                      int depth, Set<String> visited) {
+        if (depth >= MAX_FALLBACK_DEPTH) return false;
+        for (String fallback : fallbackModels(model, type)) {
+            if (visited.contains(fallback)) continue;
+            try {
+                ObjectNode body = (ObjectNode) objectMapper.readTree(requestBody);
+                body.put("model", fallback);
+                log.info("模型 {} 全部渠道失败，流式回退到 {}", model, fallback);
+                streamInternal(path, objectMapper.writeValueAsString(body), sink, callId, null, depth + 1, visited);
+                return true;
+            } catch (Exception e) {
+                log.warn("流式回退 {} 失败: {}", fallback, e.getMessage());
+            }
+        }
+        return false;
+    }
+
+    // ==================================================================
+    // 同步
+    // ==================================================================
+
+    @Override
+    public RouteResult route(String path, String requestBody) {
+        return route(path, requestBody, null, null);
+    }
+
+    @Override
+    public RouteResult route(String path, String requestBody, String callId) {
+        return route(path, requestBody, callId, null);
+    }
+
+    @Override
+    public RouteResult route(String path, String requestBody, String callId, String forcedChannelId) {
+        return routeInternal(path, requestBody, callId, forcedChannelId, 0, new LinkedHashSet<>());
+    }
+
+    private RouteResult routeInternal(String path, String requestBody, String callId,
+                                      String forcedChannelId, int depth, Set<String> visited) {
+        long start = System.currentTimeMillis();
+        String model = null;
+        String channelId = null;
+        boolean anyAttempt = false;
+        try {
+            JsonNode body = objectMapper.readTree(requestBody);
+            String modelName = body.path("model").asText("");
+            model = modelName;
+            if (modelName.isBlank()) throw new BusinessException(40001, "model 不能为空");
+            if (!visited.add(modelName)) {
+                throw new BusinessException(40001, "fallback loop detected: " + modelName);
+            }
+
+            List<RouteResolver.RouteCandidate> candidates = routeResolver.resolve(modelName, forcedChannelId);
+            if (candidates.isEmpty()) {
+                if (forcedChannelId == null) {
+                    RouteResult fallback = tryFallback(path, requestBody, modelName,
+                            resolveType(modelName), callId, depth, visited);
+                    if (fallback != null) return fallback;
+                }
+                throw new BusinessException(40401, "no route for model: " + modelName);
+            }
+
+            int attempt = 0;
+            String lastError = null;
+            Map<String, String> specCache = new HashMap<>();
+            for (RouteResolver.RouteCandidate candidate : candidates) {
+                int maxAttempts = candidate.maxAttempts();
+                for (int i = 0; i < maxAttempts; i++) {
+                    attempt++;
+                    anyAttempt = true;
+                    Channel channel = candidate.channel();
+                    channelId = channel.getId();
+                    ChannelKeyService.KeySelection key = channelKeyService.select(channel);
+                    String mapped = SpecRequestMapping.apply(requestBody, specFor(candidate, specCache),
+                            "openai_compatible".equals(channel.getType()));
+                    String forwarded = ParamOverrideSupport.apply(
+                            mapped, candidate.route().getParamOverrides(), candidate.upstreamModel(),
+                            "openai_compatible".equals(channel.getType()));
+                    try {
+                        RouteResult fwd = forward(channel, path, forwarded, key.plainKey(), candidate.timeoutMs());
+                        int status = fwd.status();
+                        if (status >= 200 && status < 300) {
+                            fwd = normalizeImageResponse(path, channel, candidate, fwd);
+                            UsageExtractor.Usage usage = UsageExtractor.fromBody(fwd.body());
+                            callLogService.log(model, channelId, "success",
+                                    System.currentTimeMillis() - start, null, null, null, callId,
+                                    candidate.upstreamModel(), attempt,
+                                    usage == null ? null : usage.promptTokens(),
+                                    usage == null ? null : usage.completionTokens());
+                            channelKeyService.markSuccess(key.keyId());
+                            return fwd;
+                        }
+                        String error = upstreamClient.extractError(fwd.body());
+                        lastError = error;
+                        callLogService.log(model, channelId, "error",
+                                System.currentTimeMillis() - start, error, null, null, callId,
+                                candidate.upstreamModel(), attempt, null, null);
+                        if (shouldCoolKey(status)) channelKeyService.markFailure(key.keyId(), status);
+                        log.warn("渠道 {} 返回 {}: {}", channel.getName(), status, error);                        // 429/5xx 继续换渠道/重试；其余 4xx 是业务错误，直接透传
+                        if (status != 429 && status < 500) {
+                            return fwd;
+                        }
+                    } catch (BusinessException be) {
+                        throw be;
+                    } catch (Exception e) {
+                        lastError = e.getMessage();
+                        anyAttempt = true;
+                        callLogService.log(model, channelId, "error",
+                                System.currentTimeMillis() - start, lastError, null, null, callId,
+                                candidate.upstreamModel(), attempt, null, null);
+                        channelKeyService.markFailure(key.keyId(), 500);
+                        log.warn("渠道 {} 调用异常: {}", channel.getName(), lastError);
+                    }
+                }
+            }
+
+            if (forcedChannelId == null) {
+                RouteResult fallback = tryFallback(path, requestBody, modelName,
+                        resolveType(modelName, candidates), callId, depth, visited);
+                if (fallback != null) return fallback;
+            }
+            throw new BusinessException(50301, "all channels failed for model: " + model
+                    + (lastError == null ? "" : " (" + lastError + ")"));
+        } catch (BusinessException be) {
+            if (!anyAttempt) {
+                callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                        be.getMessage(), null, null, callId, null, null, null, null);
+            }
+            throw be;
+        } catch (Exception e) {
+            if (!anyAttempt) {
+                callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
+                        e.getMessage(), null, null, callId, null, null, null, null);
+            }
+            throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
+        }
+    }
+
+    private RouteResult tryFallback(String path, String requestBody, String model, String type,
+                                    String callId, int depth, Set<String> visited) {
+        if (depth >= MAX_FALLBACK_DEPTH) return null;
+        for (String fallback : fallbackModels(model, type)) {
+            if (visited.contains(fallback)) continue;
+            try {
+                ObjectNode body = (ObjectNode) objectMapper.readTree(requestBody);
+                body.put("model", fallback);
+                log.info("模型 {} 全部渠道失败，回退到 {}", model, fallback);
+                return routeInternal(path, objectMapper.writeValueAsString(body), callId, null, depth + 1, visited);
+            } catch (Exception e) {
+                log.warn("回退模型 {} 调用失败: {}", fallback, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private List<String> fallbackModels(String model, String type) {
+        try {
+            return modelFallbackMapper.selectList(new LambdaQueryWrapper<ModelFallback>()
+                            .eq(ModelFallback::getModelName, model)
+                            .eq(ModelFallback::getType, type == null || type.isBlank() ? "text" : type)
+                            .orderByAsc(ModelFallback::getSortOrder))
+                    .stream().map(ModelFallback::getFallbackModel)
+                    .filter(name -> name != null && !name.isBlank())
+                    .toList();
+        } catch (Exception e) {
+            log.warn("读取回退链失败: model={}, error={}", model, e.getMessage());
+            return List.of();
+        }
+    }
+
+    private RouteResult forward(Channel channel, String path, String body, String apiKey, Integer timeoutMs)
+            throws Exception {
+        ChatImageVendorAdapter adapter = routeRegistry.resolve(channel.getType());
+        return adapter.forward(path, body, channel, apiKey, timeoutMs);
+    }
+
+    /**
+     * 按 (模型, 类型) 取一次 Spec，供本次请求做值映射；同类型只查一次库。
+     * 空字符串代表「没有 Spec」，避免每次尝试都回落查库。
+     */
+    private String specFor(RouteResolver.RouteCandidate candidate, Map<String, String> cache) {
+        String type = candidate.type();
+        if (cache.containsKey(type)) return cache.get(type);
+        String schema = null;
+        try {
+            ModelParams mp = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
+                    .eq(ModelParams::getModelName, candidate.modelName())
+                    .eq(ModelParams::getType, type)
+                    .last("LIMIT 1"));
+            schema = mp == null ? null : mp.getParamsSchema();
+        } catch (Exception e) {
+            log.warn("读取模型 Spec 失败，跳过值映射: model={}, type={}, error={}",
+                    candidate.modelName(), type, e.getMessage());
+        }
+        cache.put(type, schema == null ? "" : schema);
+        return schema;
+    }
+
+    /** 图片同步响应归一化（仅 openai_compatible 且配置了 response.sync 时） */
+    private RouteResult normalizeImageResponse(String path, Channel channel,
+                                               RouteResolver.RouteCandidate candidate, RouteResult fwd) {
+        if (!path.contains("images/generations") || "gemini".equals(channel.getType())) return fwd;
+        try {
+            ModelParams mp = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
+                    .eq(ModelParams::getModelName, candidate.modelName())
+                    .eq(ModelParams::getType, candidate.type())
+                    .last("LIMIT 1"));
+            JsonNode spec = mp == null ? null : ModelParamsSpecNormalizer.spec(mp.getParamsSchema());
+            if (spec != null && spec.path("response").path("sync").isObject()) {
+                return new RouteResult(200, ModelParamsSpecNormalizer.normalizeImageSync(fwd.body(), spec));
+            }
+        } catch (Exception e) {
+            log.warn("图片响应归一化失败（按原样透传）: {}", e.getMessage());
+        }
+        return fwd;
+    }
+
+    private String resolveType(String model) {
+        try {
+            List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                    .eq(ModelRoute::getModelName, model));
+            for (ModelRoute route : routes) {
+                if (route.getType() != null && !route.getType().isBlank()) return route.getType();
+            }
+            ModelParams params = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
+                    .eq(ModelParams::getModelName, model).last("LIMIT 1"));
+            return params == null ? "text" : params.getType();
+        } catch (Exception e) {
+            return "text";
+        }
+    }
+
+    private String resolveType(String model, List<RouteResolver.RouteCandidate> candidates) {
+        if (candidates != null && !candidates.isEmpty()) return candidates.get(0).type();
+        return resolveType(model);
+    }
+
+    /** 只有限流/鉴权/服务端错误才让 Key 冷却；内容审核等业务 4xx 不该拖累 Key */
+    private static boolean shouldCoolKey(int status) {
+        return status == 429 || status == 401 || status == 403 || status >= 500;
     }
 
     /** 判断异常链是否为客户端断开（ClientAbortException / AsyncRequestNotUsableException） */
@@ -143,107 +433,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         return false;
     }
 
-    @Override
-    public RouteResult route(String path, String requestBody) {
-        return route(path, requestBody, null);
-    }
-
-    @Override
-    public RouteResult route(String path, String requestBody, String callId) {
-        long start = System.currentTimeMillis();
-        String model = null;
-        String channelId = null;
-        int status = 500;
-        String error = null;
-        try {
-            JsonNode body = objectMapper.readTree(requestBody);
-            String modelName = body.path("model").asText("");
-            model = modelName;
-            if (modelName.isBlank()) throw new BusinessException(40001, "model 不能为空");
-
-            List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                    .eq(ModelRoute::getModelName, model));
-            if (routes == null || routes.isEmpty()) {
-                throw new BusinessException(40401, "no route for model: " + model);
-            }
-            List<Channel> candidates = resolveCandidates(routes);
-            if (candidates.isEmpty()) {
-                throw new BusinessException(50301, "no available channel for model: " + model);
-            }
-
-            // 逐个渠道尝试（失败切下一个）
-            for (Channel channel : candidates) {
-                try {
-                    RouteResult fwd = forward(channel, path, requestBody);
-                    status = fwd.status();
-                    // 图响应归一化（openai_compatible 直传模型配了 response.sync 才处理；gemini 已由 forward 转换不再动）
-                    if (fwd.status() == 200 && path.contains("images/generations") && !"gemini".equals(channel.getType())) {
-                        ModelParams mp = modelParamsMapper.selectOne(new LambdaQueryWrapper<ModelParams>()
-                                .eq(ModelParams::getModelName, model));
-                        com.fasterxml.jackson.databind.JsonNode ispec = mp != null ? ModelParamsSpecNormalizer.spec(mp.getParamsSchema()) : null;
-                        if (ispec != null && ispec.path("response").path("sync").isObject()) {
-                            fwd = new RouteResult(200, ModelParamsSpecNormalizer.normalizeImageSync(fwd.body(), ispec));
-                        }
-                    }
-                    channelId = channel.getId();
-                    String bodyStr = fwd.body();
-                    if (status >= 400) {
-                        error = upstreamClient.extractError(bodyStr);
-                        log.warn("渠道 {} 返回 {}: {}", channel.getName(), status, error);
-                        // 429/5xx 尝试下一个渠道；其余 4xx 业务错误直接透传
-                        if (status != 429 && status < 500) {
-                            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
-                                    error, null, null, callId);
-                            return new RouteResult(status, bodyStr);
-                        }
-                        continue;
-                    }
-                    callLogService.log(model, channelId, "success", System.currentTimeMillis() - start,
-                            null, null, null, callId);
-                    return new RouteResult(status, bodyStr);
-                } catch (BusinessException be) {
-                    throw be;
-                } catch (Exception e) {
-                    error = e.getMessage();
-                    log.warn("渠道 {} 调用异常: {}", channel.getName(), error);
-                }
-            }
-            throw new BusinessException(50301, "all channels failed for model: " + model);
-        } catch (BusinessException be) {
-            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
-                    be.getMessage(), null, null, callId);
-            throw be;
-        } catch (Exception e) {
-            callLogService.log(model, channelId, "error", System.currentTimeMillis() - start,
-                    e.getMessage(), null, null, callId);
-            throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
-        }
-    }
-
-    /** 按渠道类型经适配器转发（openai_compatible 透传 / gemini 转换），协议差异全部下沉适配器 */
-    private RouteResult forward(Channel channel, String path, String requestBody) throws Exception {
-        String apiKey = keyService.decrypt(channel.getApiKey());
-        return routeRegistry.resolve(channel.getType()).forward(path, requestBody, channel, apiKey);
-    }
-
-    /** 路由指向的 enabled 渠道，按 is_default 降序 + priority 升序（默认路由优先） */
-    private List<Channel> resolveCandidates(List<ModelRoute> routes) {
-        return routes.stream()
-                .map(r -> {
-                    Channel ch = channelMapper.selectById(r.getChannelId());
-                    return ch != null ? new Object[]{r, ch} : null;
-                })
-                .filter(arr -> arr != null && Boolean.TRUE.equals(((Channel) arr[1]).getEnabled()))
-                .sorted(Comparator
-                        .<Object[], Boolean>comparing(arr -> Boolean.TRUE.equals(((ModelRoute) arr[0]).getIsDefault())).reversed()
-                        .thenComparingInt(arr -> ((Channel) arr[1]).getPriority() == null ? 0 : ((Channel) arr[1]).getPriority()))
-                .map(arr -> (Channel) arr[1])
-                .toList();
-    }
+    // ==================================================================
+    // 模型目录（保持原有行为）
+    // ==================================================================
 
     @Override
     public String fetchModels(String type) {
-        // 读缓存（miss/Redis 异常一律降级查库）；避免前端每个参数卡片渲染都触发 model_route+channel+model_params 三表全扫
         String cached = catalogCache.readModels(type);
         if (cached != null) return cached;
         List<ModelRoute> routes = routeMapper.selectList(null);
@@ -253,16 +448,13 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 .collect(Collectors.toSet());
         Map<String, String> modelTypeMap = new LinkedHashMap<>();
         for (ModelRoute r : routes) {
+            if (Boolean.FALSE.equals(r.getEnabled())) continue;
             if (r.getChannelId() == null || !enabledChannels.contains(r.getChannelId())) continue;
             String t = r.getType() == null || r.getType().isBlank() ? "text" : r.getType();
             if (type != null && !type.isBlank() && !type.equals(t)) continue;
             modelTypeMap.putIfAbsent(r.getModelName(), t);
         }
-        // 每类型的默认模型：只认「路由默认」（Redis 运行时值优先，其次 model_route.is_default）。
-        // 参数表的 is_default 是历史遗留的第二开关，不再决定列表标记——否则两处会各自为政
-        // （Redis 按 A 生成、列表却标 B，前端就按 B 预选）。
         Map<String, String> defaultByType = resolveDefaultByType(routes, enabledChannels, modelTypeMap);
-        // 按 (model_name|type) 建索引：同一模型可 text/vision 各一套参数
         Map<String, ModelParams> paramsMap = modelParamsMapper.selectList(null).stream()
                 .collect(Collectors.toMap(p -> p.getModelName() + "|" + p.getType(), p -> p, (a, b) -> a));
         List<Map<String, Object>> data = new ArrayList<>();
@@ -281,8 +473,6 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         });
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("object", "list");
-        // 目录版本号随响应下发：消费端（主后端/MoonAgent/画布的 GatewayModelServiceImpl）
-        // 据此判断本地缓存是否过期，前端也能靠它跳过无变化的重渲染
         String version = catalogCache.currentVersion();
         if (version != null) result.put("version", version);
         result.put("data", data);
@@ -295,16 +485,12 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         }
     }
 
-    /**
-     * 解析每种类型的默认模型：先取路由表 is_default（含启用渠道），再用 Redis
-     * {@code gateway:default_model:<type>} 覆盖——Redis 是运行时真正生效的值，
-     * 但只有当它确实出现在本次列表里时才采信（渠道被禁用/路由被删时不误导前端）。
-     */
     private Map<String, String> resolveDefaultByType(List<ModelRoute> routes,
                                                      Set<String> enabledChannels,
                                                      Map<String, String> modelTypeMap) {
         Map<String, String> defaults = new LinkedHashMap<>();
         for (ModelRoute route : routes) {
+            if (Boolean.FALSE.equals(route.getEnabled())) continue;
             if (route.getChannelId() == null || !enabledChannels.contains(route.getChannelId())) continue;
             if (!Boolean.TRUE.equals(route.getIsDefault())) continue;
             String routeType = route.getType() == null || route.getType().isBlank()
@@ -312,8 +498,8 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
             if (!routeType.equals(modelTypeMap.get(route.getModelName()))) continue;
             defaults.putIfAbsent(routeType, route.getModelName());
         }
-        for (String modelType : new java.util.LinkedHashSet<>(modelTypeMap.values())) {
-            String effective = readDefaultModelFromRedis(modelType);
+        for (String modelType : new LinkedHashSet<>(modelTypeMap.values())) {
+            String effective = catalogCache.readDefault(modelType);
             if (effective != null && modelType.equals(modelTypeMap.get(effective))) {
                 defaults.put(modelType, effective);
             }
@@ -321,15 +507,6 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         return defaults;
     }
 
-    private String readDefaultModelFromRedis(String type) {
-        return catalogCache.readDefault(type);
-    }
-
-    /**
-     * 按 model_name 组装 params 对象（能力枚举 + 默认值）：
-     * text：defaults{temperature,max_tokens,top_p}；image：n{min,max,default} + sizes/sizeDefault + qualities/qualityDefault + styles/styleDefault
-     * video：durations(Integer[])/durationDefault + resolutions/resolutionDefault + aspectRatios/aspectRatioDefault
-     */
     private Map<String, Object> buildParams(ModelParams mp) {
         if (mp == null) return null;
         Map<String, Object> params = new LinkedHashMap<>();
@@ -369,7 +546,6 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         putInt(params, "maxAudioSizeMB", mp.getMaxAudioSizeMb());
         putInt(params, "maxRequestBodyMB", mp.getMaxRequestBodyMb());
         putInt(params, "maxPromptChars", mp.getMaxPromptChars());
-        // Ollama 兼容渠道扩展参数（思考/等级/num_ctx 等），解析失败忽略，不阻塞 /v1/models
         if (mp.getOllamaParams() != null && !mp.getOllamaParams().isBlank()) {
             try {
                 JsonNode o = objectMapper.readTree(mp.getOllamaParams());
@@ -378,8 +554,6 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
                 log.warn("解析 ollama_params 失败，忽略: model={}, error={}", mp.getModelName(), e.getMessage());
             }
         }
-
-        // self-describing spec：把 params_schema 解析后作为 spec 附到 params（供前端/Agent 通用渲染）
         String ps = mp.getParamsSchema();
         if (ps != null && !ps.isBlank()) {
             JsonNode specNode = ModelParamsSpecNormalizer.spec(ps);
@@ -393,7 +567,7 @@ public class GatewayRoutingServiceImpl implements GatewayRoutingService {
         List<String> list = Arrays.stream(csv.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
+                .toList();
         if (!list.isEmpty()) params.put(key, list);
     }
 

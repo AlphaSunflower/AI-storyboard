@@ -68,4 +68,16 @@ describe('CanvasContextMenu pane actions', () => {
     expect(Array.from(group.querySelectorAll('.group-item')).map((item) => item.textContent))
       .toEqual(['文字', '图片', '视频']);
   });
+
+  it('offers grouping for a multi-node selection', () => {
+    const onCreateGroup = vi.fn();
+    renderPaneMenu({
+      target: { type: 'selection' as const, count: 2, clientX: 10, clientY: 10, flowPosition: { x: 0, y: 0 } },
+      onCreateGroup,
+    });
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /创建分组/ }));
+
+    expect(onCreateGroup).toHaveBeenCalledTimes(1);
+  });
 });

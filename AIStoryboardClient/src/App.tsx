@@ -9,6 +9,7 @@ import { StoryboardLibraryPage } from './pages/StoryboardLibraryPage';
 import NotFoundBrickBreaker from './components/ui/8bit/blocks/not-found-brick-breaker';
 import { LibraryWorkspacePage } from './pages/LibraryWorkspacePage';
 import { LibraryTaskQueue } from './components/library/LibraryTaskQueue';
+import { SendQueueRunner } from './components/agent/SendQueueRunner';
 import { ToastHost } from './components/common/ToastHost';
 
 function App() {
@@ -26,6 +27,7 @@ function App() {
         <Route path="/editor" element={<EditorPage />} />
         <Route path="*" element={<NotFoundBrickBreaker className="min-h-svh" href="/chat" />} />
       </Routes>
+      <SendQueueRunner />
       <LibraryTaskQueue />
       <ToastHost />
     </>

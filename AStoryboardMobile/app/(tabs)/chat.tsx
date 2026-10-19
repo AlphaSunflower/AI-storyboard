@@ -116,13 +116,13 @@ export default function ChatTab() {
           ListEmptyComponent={
             !currentProject ? (
               <View style={s.empty}>
-                <Text style={s.emptyIcon}>☾</Text>
+                <Image source={require('../../assets/moon-mark.png')} style={s.emptyIcon} resizeMode="contain" />
                 <Text style={s.emptyText}>请先选择项目</Text>
                 <Text style={s.emptyHint}>点击左上角菜单选择或创建项目</Text>
               </View>
             ) : (
               <View style={s.empty}>
-                <Text style={s.emptyIcon}>☾</Text>
+                <Image source={require('../../assets/moon-mark.png')} style={s.emptyIcon} resizeMode="contain" />
                 <Text style={s.emptyText}>开始和 Moon 智能体对话</Text>
                 <Text style={s.emptyHint}>输入你的创作需求，Moon 会帮你生成分镜、图片或视频</Text>
               </View>
@@ -467,8 +467,8 @@ const s = StyleSheet.create({
     paddingTop: 120,
   },
   emptyIcon: {
-    fontSize: 48,
-    color: tokens.colors.primary,
+    width: 64,
+    height: 64,
     marginBottom: 16,
   },
   emptyText: {

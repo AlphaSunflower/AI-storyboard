@@ -14,9 +14,12 @@ import com.llmgateway.mapper.CallLogMapper;
 import com.llmgateway.mapper.ChannelMapper;
 import com.llmgateway.mapper.ModelRouteMapper;
 import com.llmgateway.service.CallLogService;
-import com.llmgateway.service.KeyService;
+import com.llmgateway.service.ChannelKeyService;
 import com.llmgateway.service.ModelParamsService;
 import com.llmgateway.service.ModelParamsSpecNormalizer;
+import com.llmgateway.service.ParamOverrideSupport;
+import com.llmgateway.service.RouteResolver;
+import com.llmgateway.service.SpecRequestMapping;
 import com.llmgateway.service.VideoGatewayService;
 import com.llmgateway.service.VideoResult;
 import com.llmgateway.vendor.video.dto.VendorCreateInput;
@@ -54,12 +57,13 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
 
     private final ModelRouteMapper routeMapper;
     private final ChannelMapper channelMapper;
-    private final KeyService keyService;
     private final CallLogService callLogService;
     private final CallLogMapper callLogMapper;
     private final ModelParamsService modelParamsService;
     private final GatewayConfig config;
     private final VideoVendorRegistry registry;
+    private final RouteResolver routeResolver;
+    private final ChannelKeyService channelKeyService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** HttpClient 懒加载（connectTimeout 依赖 config，构造期不构建） */
@@ -81,67 +85,114 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
         return c;
     }
 
-    /** 按 model 取第一个 enabled 渠道（视频模型：MiniMax-H3→minimax 渠道；veo-*→laozhang 渠道） */
-    private Channel resolveChannel(String model) {
-        List<ModelRoute> routes = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
-                .eq(ModelRoute::getModelName, model));
-        if (routes == null || routes.isEmpty()) throw new BusinessException(40401, "no route for model: " + model);
-        return routes.stream()
-                .map(r -> channelMapper.selectById(r.getChannelId()))
-                .filter(c -> c != null && Boolean.TRUE.equals(c.getEnabled()))
-                .sorted(Comparator.comparingInt(c -> c.getPriority() == null ? 0 : c.getPriority()))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(50301, "no available channel for model: " + model));
+    @Override
+    public VideoResult create(String requestBody) {
+        return create(requestBody, null);
+    }
+
+    /** 强制渠道：管理后台测试单条路由时使用，停用渠道也允许（测试目的就是验证该行配置）。 */
+    private Channel resolveForcedChannel(String channelId) {
+        Channel channel = channelMapper.selectById(channelId);
+        if (channel == null) throw new BusinessException(40401, "渠道不存在: " + channelId);
+        return channel;
     }
 
     /**
      * 创建视频任务。OpenAI 风格统一请求体 → 按 model 反查渠道 → 经适配器构建/发送/解析。
      * 响应为带 vendor 的归一契约 {vendor, taskId, status, ...}（数据不挤成一坨，厂商可识别）。
+     *
+     * @param forcedChannelId 非空时只使用该渠道（管理后台单条路由测试；停用渠道也允许测）
      */
     @Override
-    public VideoResult create(String requestBody) {
+    public VideoResult create(String requestBody, String forcedChannelId) {
         long start = System.currentTimeMillis();
         try {
             JsonNode body = objectMapper.readTree(requestBody);
             String model = body.path("model").asText("");
             if (model.isBlank()) throw new BusinessException(40001, "model 不能为空");
-            Channel channel = resolveChannel(model);
-            String apiKey = keyService.decrypt(channel.getApiKey());
-            VideoVendorAdapter adapter = registry.resolve(channel.getType());
-            VendorCreateInput in = toCreateInput(body);
 
-            // 泛型重试循环：重试次数 / 可重试判定 / 退避均来自适配器（该协议自身策略）
-            HttpResponse<String> resp = null;
-            for (int attempt = 1; attempt <= adapter.maxCreateAttempts(); attempt++) {
-                HttpRequest req = adapter.buildCreateRequest(in, channel, apiKey, in.referenceImages());
-                resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
-                if (!adapter.isRetryableCreate(resp.statusCode(), resp.body())
-                        || attempt == adapter.maxCreateAttempts()) {
-                    break;
+            List<RouteResolver.RouteCandidate> candidates = createCandidates(model, forcedChannelId);
+            if (candidates.isEmpty()) {
+                throw new BusinessException(50301, "no available channel for model: " + model);
+            }
+
+            int attemptNo = 0;
+            String lastError = null;
+            for (RouteResolver.RouteCandidate candidate : candidates) {
+                Channel channel = candidate.channel();
+                ModelParams params = modelParamsService.getByModelNameAndType(model, candidate.type());
+                String mapped = SpecRequestMapping.applyValuesOnly(requestBody,
+                        params == null ? null : params.getParamsSchema());
+                String forwarded = ParamOverrideSupport.apply(
+                        mapped, candidate.route().getParamOverrides(), candidate.upstreamModel(), false);
+                JsonNode candidateBody = objectMapper.readTree(forwarded);
+                ChannelKeyService.KeySelection key = channelKeyService.select(channel);
+                VideoVendorAdapter adapter = registry.resolve(channel.getType());
+                VendorCreateInput in = toCreateInput(candidateBody);
+
+                // 泛型重试循环：重试次数 / 可重试判定 / 退避均来自适配器（该协议自身策略）
+                HttpResponse<String> resp = null;
+                for (int attempt = 1; attempt <= adapter.maxCreateAttempts(); attempt++) {
+                    attemptNo++;
+                    HttpRequest req = adapter.buildCreateRequest(in, channel, key.plainKey(), in.referenceImages());
+                    resp = httpClient().send(req, HttpResponse.BodyHandlers.ofString());
+                    if (!adapter.isRetryableCreate(resp.statusCode(), resp.body())
+                            || attempt == adapter.maxCreateAttempts()) {
+                        break;
+                    }
+                    log.warn("视频创建返回 {}（可重试），第 {}/{} 次重试, body={}",
+                            resp.statusCode(), attempt, adapter.maxCreateAttempts(),
+                            resp.body().length() > 150 ? resp.body().substring(0, 150) : resp.body());
+                    Thread.sleep(adapter.createBackoffMs(attempt));
                 }
-                log.warn("视频创建返回 {}（可重试），第 {}/{} 次重试, body={}",
-                        resp.statusCode(), attempt, adapter.maxCreateAttempts(),
-                        resp.body().length() > 150 ? resp.body().substring(0, 150) : resp.body());
-                Thread.sleep(adapter.createBackoffMs(attempt));
-            }
 
-            int status = resp.statusCode();
-            String bodyStr = resp.body();
-            if (status == 200) {
-                VideoVendorResult result = adapter.parseCreate(bodyStr);
-                callLogService.log(model, channel.getId(), "created",
-                        System.currentTimeMillis() - start, null, null, result.taskId());
-                return new VideoResult(200, toJson(result));
+                int status = resp.statusCode();
+                String bodyStr = resp.body();
+                if (status == 200) {
+                    VideoVendorResult result = adapter.parseCreate(bodyStr);
+                    callLogService.log(model, channel.getId(), "created",
+                            System.currentTimeMillis() - start, null, null, result.taskId(), null,
+                            candidate.upstreamModel(), attemptNo, null, null);
+                    channelKeyService.markSuccess(key.keyId());
+                    return new VideoResult(200, toJson(result));
+                }
+                lastError = bodyStr.length() > 300 ? bodyStr.substring(0, 300) : bodyStr;
+                callLogService.log(model, channel.getId(), "error",
+                        System.currentTimeMillis() - start, lastError, null, null, null,
+                        candidate.upstreamModel(), attemptNo, null, null);
+                if (status == 429 || status == 401 || status == 403 || status >= 500) {
+                    channelKeyService.markFailure(key.keyId(), status);
+                }
+                // 业务 4xx（非 429）直接透传；429/5xx 尝试下一个渠道
+                if (status != 429 && status < 500) {
+                    return new VideoResult(status, bodyStr);
+                }
             }
-            String error = bodyStr.length() > 300 ? bodyStr.substring(0, 300) : bodyStr;
-            callLogService.log(model, channel.getId(), "error",
-                    System.currentTimeMillis() - start, error, null, null);
-            return new VideoResult(status, bodyStr);
+            throw new BusinessException(50301, "all channels failed for model: " + model
+                    + (lastError == null ? "" : " (" + lastError + ")"));
         } catch (BusinessException be) {
             throw be;
         } catch (Exception e) {
             throw new BusinessException(50001, e.getMessage() == null ? "internal error" : e.getMessage());
         }
+    }
+
+    /** 正常路径按权重选路；测试路径锁定单条渠道，但保留该路由的上游模型/参数覆盖。 */
+    private List<RouteResolver.RouteCandidate> createCandidates(String model, String forcedChannelId) {
+        if (forcedChannelId == null || forcedChannelId.isBlank()) {
+            return routeResolver.resolve(model, null);
+        }
+        Channel channel = resolveForcedChannel(forcedChannelId);
+        ModelRoute route = routeMapper.selectList(new LambdaQueryWrapper<ModelRoute>()
+                        .eq(ModelRoute::getModelName, model)
+                        .eq(ModelRoute::getChannelId, forcedChannelId))
+                .stream().findFirst().orElseGet(() -> {
+                    ModelRoute fallback = new ModelRoute();
+                    fallback.setModelName(model);
+                    fallback.setChannelId(forcedChannelId);
+                    return fallback;
+                });
+        return List.of(new RouteResolver.RouteCandidate(route, channel, 1, 0, 0));
     }
 
     /**
@@ -178,7 +229,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
 
     /** 单渠道轮询：命中 200 返回归一结果，否则返回 null（该渠道无此任务） */
     private VideoResult pollChannel(Channel channel, String taskId, long start) throws Exception {
-        String apiKey = keyService.decrypt(channel.getApiKey());
+        String apiKey = channelKeyService.select(channel).plainKey();
         String url;
         if ("minimax".equals(channel.getType())) {
             url = stripTrailingSlash(channel.getBaseUrl()) + "/v2/query/video_generation/" + taskId;
@@ -294,7 +345,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
 
     /** 尝试在指定渠道上取消任务；上游不支持（buildCancelRequest 返回 null）时返回 null 交给调用方继续。 */
     private VideoResult cancelChannel(Channel channel, String taskId, long start) throws Exception {
-        String apiKey = keyService.decrypt(channel.getApiKey());
+        String apiKey = channelKeyService.select(channel).plainKey();
         VideoVendorAdapter adapter = registry.resolve(channel.getType());
         HttpRequest req = adapter.buildCancelRequest(taskId, channel, apiKey);
         if (req == null) {
@@ -374,7 +425,7 @@ public class VideoGatewayServiceImpl implements VideoGatewayService {
     /** 单渠道下载：命中 200 返回流式响应，否则返回 null（该渠道无此内容） */
     private org.springframework.http.ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody>
             downloadChannel(Channel channel, String taskId) throws Exception {
-        String apiKey = keyService.decrypt(channel.getApiKey());
+        String apiKey = channelKeyService.select(channel).plainKey();
         if ("minimax".equals(channel.getType())) {
             CallLog latest = callLogMapper.selectOne(new LambdaQueryWrapper<CallLog>()
                     .eq(CallLog::getChannelId, channel.getId())

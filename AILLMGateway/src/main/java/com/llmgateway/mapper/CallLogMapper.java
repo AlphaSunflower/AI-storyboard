@@ -32,6 +32,48 @@ public interface CallLogMapper extends BaseMapper<CallLog> {
             + "FROM call_log WHERE created_at >= now() - interval '6 days' GROUP BY 1 ORDER BY 1")
     List<Map<String, Object>> trend7d();
 
+    /** 每个渠道最近一条失败原因（管理端「最近错误」列） */
+    @Select("SELECT DISTINCT ON (channel_id) channel_id, error FROM call_log "
+            + "WHERE status = 'error' AND channel_id IS NOT NULL "
+            + "ORDER BY channel_id, created_at DESC")
+    List<Map<String, Object>> latestChannelErrors();
+
+    /** 近 7 天渠道健康度：调用量/成功/失败/平均延迟/p95/token */
+    @Select("SELECT channel_id, COUNT(*) AS calls, "
+            + "COUNT(*) FILTER (WHERE status = 'success') AS success_cnt, "
+            + "COUNT(*) FILTER (WHERE status = 'error') AS error_cnt, "
+            + "COALESCE(AVG(duration_ms), 0) AS avg_ms, "
+            + "COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0) AS p95_ms, "
+            + "COALESCE(SUM(total_tokens), 0) AS tokens "
+            + "FROM call_log WHERE created_at >= now() - interval '7 days' AND channel_id IS NOT NULL "
+            + "GROUP BY channel_id ORDER BY calls DESC")
+    List<Map<String, Object>> channelStats7d();
+
+    /** 近 7 天模型健康度：调用量/成功/失败/平均延迟/p95/token */
+    @Select("SELECT model, COUNT(*) AS calls, "
+            + "COUNT(*) FILTER (WHERE status = 'success') AS success_cnt, "
+            + "COUNT(*) FILTER (WHERE status = 'error') AS error_cnt, "
+            + "COALESCE(AVG(duration_ms), 0) AS avg_ms, "
+            + "COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0) AS p95_ms, "
+            + "COALESCE(SUM(total_tokens), 0) AS tokens "
+            + "FROM call_log WHERE created_at >= now() - interval '7 days' AND model IS NOT NULL AND model <> '' "
+            + "GROUP BY model ORDER BY calls DESC LIMIT 30")
+    List<Map<String, Object>> modelStats7d();
+
+    /** 今日 token 汇总 */
+    @Select("SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, "
+            + "COALESCE(SUM(completion_tokens), 0) AS completion_tokens, "
+            + "COALESCE(SUM(total_tokens), 0) AS tokens "
+            + "FROM call_log WHERE created_at >= date_trunc('day', now())")
+    Map<String, Object> tokenStatsToday();
+
+    /** 近 7 天 token 汇总 */
+    @Select("SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, "
+            + "COALESCE(SUM(completion_tokens), 0) AS completion_tokens, "
+            + "COALESCE(SUM(total_tokens), 0) AS tokens "
+            + "FROM call_log WHERE created_at >= now() - interval '7 days'")
+    Map<String, Object> tokenStats7d();
+
     /**
      * 冷热归档：把 call_log 中早于保留期的行原子迁移到 call_log_archive（单条 CTE：先 DELETE RETURNING 再 INSERT）。
      * 分批只搬 {@code batchSize} 行，避免大事务锁表；返回值 = 实际迁移行数（0 = 无可搬）。

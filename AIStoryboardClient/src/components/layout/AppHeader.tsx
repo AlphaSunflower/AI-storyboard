@@ -1,18 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { notify } from '../../stores/toastStore';
-import { Save, Pencil, Trash2, ChevronDown } from 'lucide-react';
+import { ChevronDown, MessageSquare, Pencil, Save, Trash2 } from 'lucide-react';
 import { ProjectDropdown } from './ProjectDropdown';
 import { ContextMenu } from '../common/ContextMenu';
+import MoonLogo from '../agent/MoonLogo';
 import StaggeredMenu from '../StaggeredMenu';
 
-const headerHeight = 64;
-
 // ── component ────────────────────────────────────────────────────────
-// 设计回归（2026-08-22）：去除标题栏装饰性特效（WarpText/SpecularButton/StaggeredMenu），
-// 回归 tokens.css 设计系统——canvas 画布底色、hairline 控件、inline SVG 图标、静态品牌字。
+// 编辑器顶栏：品牌 + 保存 / 居中的项目切换 / 智能体入口 + 菜单。
+// 设计语言与 /chat 对齐：暖色 canvas、hairline 分隔、8px 控件圆角。
 
 export function AppHeader() {
   const navigate = useNavigate();
@@ -67,153 +66,106 @@ export function AppHeader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject, updateProject]);
 
-  // ── helpers ──────────────────────────────────────────────────────
-
   const currentName = currentProject?.name || '选择项目';
-
-  // ── render ───────────────────────────────────────────────────────
+  const isDraft = currentProject?.status === 'draft';
 
   return (
     <>
-      <div
-        style={{
-          height: headerHeight,
-          minHeight: headerHeight,
-          display: 'grid',
-          gridTemplateColumns: '1fr auto 1fr',
-          alignItems: 'center',
-          padding: '0 var(--space-md)',
-          borderBottom: '1px solid var(--color-hairline)',
-          background: 'var(--color-canvas)',
-          zIndex: 10,
-        }}
-      >
-        {/* Left: 品牌字 + 保存 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-start' }}>
-          <span
-            style={{
-              fontSize: 19,
-              fontWeight: 650,
-              letterSpacing: '-0.4px',
-              color: 'var(--color-ink)',
-              whiteSpace: 'nowrap',
-              paddingRight: 4,
-            }}
+      <header className="app-header">
+        {/* Left: 品牌 + 保存 */}
+        <div className="app-header__left">
+          <button
+            type="button"
+            className="app-brand"
+            onClick={() => navigate('/chat')}
+            aria-label="返回 Moon 智能体"
           >
-            AIGC <span style={{ color: 'var(--color-primary)' }}>分镜系统</span>
-          </span>
+            <span className="app-brand__mark"><MoonLogo variant="mark" size={17} tone="brand" /></span>
+            <span className="app-brand__text">AIGC 分镜</span>
+          </button>
 
-          {/* Save button */}
           {currentProject && (
-            <button
-              onClick={handleSave}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '4px 10px',
-                fontSize: 12,
-                background: 'transparent',
-                border: '1px solid var(--color-primary)',
-                color: 'var(--color-primary)',
-                borderRadius: 'var(--rounded-sm)',
-                cursor: 'pointer',
-              }}
-            >
-              <Save size={12} strokeWidth={1.8} />
-              保存
+            <button type="button" className="btn btn--ghost btn--sm app-header__save" onClick={handleSave} aria-label="保存项目">
+              <Save size={14} strokeWidth={1.9} />
+              <span className="app-header__save-label">保存</span>
             </button>
           )}
-
         </div>
 
-        {/* Center: 项目选择（居中且大） */}
-        <div style={{ justifySelf: 'center' }}>
-          <div style={{ position: 'relative' }}>
-            <ContextMenu
-              items={[
-                {
-                  label: '重命名',
-                  icon: <Pencil size={13} strokeWidth={1.8} />,
-                  onClick: () => {
-                    if (currentProject) {
-                      setRenameProjectName(currentProject.name);
-                      setRenameProjectOpen(true);
-                    }
-                  },
+        {/* Center: 项目选择 */}
+        <div className="app-header__center">
+          <ContextMenu
+            items={[
+              {
+                label: '重命名',
+                icon: <Pencil size={13} strokeWidth={1.8} />,
+                onClick: () => {
+                  if (currentProject) {
+                    setRenameProjectName(currentProject.name);
+                    setRenameProjectOpen(true);
+                  }
                 },
-                {
-                  label: '删除项目',
-                  icon: <Trash2 size={13} strokeWidth={1.8} />,
-                  danger: true,
-                  disabled: !currentProject,
-                  onClick: () => { void removeCurrentProject(); },
-                },
-              ]}
+              },
+              {
+                label: '删除项目',
+                icon: <Trash2 size={13} strokeWidth={1.8} />,
+                danger: true,
+                disabled: !currentProject,
+                onClick: () => { void removeCurrentProject(); },
+              },
+            ]}
+          >
+            <button
+              type="button"
+              className="project-switch"
+              onClick={() => setDropdownOpen(!dropdownOpen)}
+              onMouseDown={(e) => e.stopPropagation()}
+              aria-label="切换项目"
+              aria-expanded={dropdownOpen}
             >
-              <button
-                onClick={() => setDropdownOpen(!dropdownOpen)}
-                onMouseDown={(e) => e.stopPropagation()}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '0 16px',
-                  height: 42,
-                  border: '1px solid var(--color-hairline)',
-                  borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-canvas)',
-                  fontSize: 15,
-                  fontWeight: 600,
-                  color: 'var(--color-ink)',
-                  cursor: 'pointer',
-                  minWidth: 240,
-                  transition: 'border-color 0.15s, background 0.15s, box-shadow 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.boxShadow = '0 2px 10px rgba(204,120,92,0.12)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-hairline)'; e.currentTarget.style.boxShadow = 'none'; }}
-              >
-                <span style={{ flex: 1, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentName}
-                </span>
-                <ChevronDown size={14} strokeWidth={2} color="var(--color-muted)" />
-              </button>
-            </ContextMenu>
-            <ProjectDropdown open={dropdownOpen} onClose={() => setDropdownOpen(false)} />
-          </div>
+              <span className="project-switch__name">{currentName}</span>
+              {isDraft && <span className="project-switch__status">草稿</span>}
+              <ChevronDown size={14} strokeWidth={2} color="var(--color-muted)" />
+            </button>
+          </ContextMenu>
+          <ProjectDropdown open={dropdownOpen} onClose={() => setDropdownOpen(false)} />
         </div>
 
-        {/* Right: 资产库 + 菜单 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+        {/* Right: 智能体入口 + ReactBits 菜单 */}
+        <div className="app-header__right">
+          <button type="button" className="btn btn--soft btn--sm" onClick={() => navigate('/chat')}>
+            <MessageSquare size={14} strokeWidth={1.9} />
+            Moon 智能体
+          </button>
+
           <StaggeredMenu
             position="right"
             menuButtonColor="#141413"
             openMenuButtonColor="#141413"
-            accentColor="#cc785c"
-            colors={['#cc785c', '#efe9de', '#faf9f5']}
+            accentColor="var(--color-primary)"
+            colors={['var(--color-primary)', 'var(--color-surface-card)', 'var(--color-canvas)']}
             displayItemNumbering={false}
             displaySocials={false}
             items={[
               { label: 'Moon Chat', ariaLabel: 'Moon Chat', onClick: () => navigate('/chat') },
               { label: '运行观测', ariaLabel: '运行观测', onClick: () => navigate('/observability') },
+              { label: '项目库', ariaLabel: '项目库', onClick: () => navigate('/library') },
               { label: '使用文档', ariaLabel: '使用文档', onClick: () => navigate('/docs') },
               { label: '个人信息', ariaLabel: '个人信息', onClick: () => navigate('/account') },
               { label: '退出登录', ariaLabel: '退出登录', onClick: logout, color: 'var(--color-error)' },
             ]}
           />
         </div>
-      </div>
+      </header>
 
       {/* ── 项目重命名弹窗 ─────────────────────────────────────────── */}
       {renameProjectOpen && currentProject && (
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setRenameProjectOpen(false)}
-        >
-          <div style={{ background: 'white', borderRadius: 12, padding: 24, minWidth: 300 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>重命名项目</h3>
+        <div className="modal-overlay" onClick={() => setRenameProjectOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="重命名项目">
+            <h3 className="modal-card__title">重命名项目</h3>
             <input
               autoFocus
+              className="field-input"
               value={renameProjectName}
               onChange={(e) => setRenameProjectName(e.target.value)}
               onKeyDown={(e) => {
@@ -221,26 +173,17 @@ export function AppHeader() {
                   void submitProjectRename();
                 }
               }}
-              style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--color-hairline)', borderRadius: 8, fontSize: 14, outline: 'none' }}
               placeholder="输入项目名称"
             />
-            <div style={{ marginTop: 16, textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setRenameProjectOpen(false)} style={{ padding: '6px 16px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', fontSize: 13 }}>
+            <div className="modal-card__actions">
+              <button type="button" className="btn btn--ghost btn--md" onClick={() => setRenameProjectOpen(false)}>
                 取消
               </button>
               <button
+                type="button"
+                className="btn btn--primary btn--md"
                 disabled={!renameProjectName.trim()}
                 onClick={() => { void submitProjectRename(); }}
-                style={{
-                  padding: '6px 16px',
-                  border: 'none',
-                  borderRadius: 8,
-                  background: 'var(--color-primary)',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  opacity: renameProjectName.trim() ? 1 : 0.5,
-                }}
               >
                 确定
               </button>

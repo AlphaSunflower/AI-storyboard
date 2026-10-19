@@ -4,6 +4,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 import { useNavigate } from 'react-router-dom';
 import SpecularButton from '../components/SpecularButton';
+import MoonLogo from '../components/agent/MoonLogo';
 import TextType from '../components/TextType';
 import CardSwap, { Card } from '../components/CardSwap';
 import Carousel from '../components/Carousel';
@@ -14,7 +15,7 @@ import Magnet from '../components/Magnet';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../components/ui/accordion';
 import {
   AlertTriangle, Archive, Bot, Brain, Camera, Clock, Film, Folder, Handshake, Hash,
-  Image as ImageIcon, MessageSquare, Minimize2, Moon, Music, Package, Palette, Paperclip, Pencil, PenLine,
+  Image as ImageIcon, MessageSquare, Minimize2, Music, Package, Palette, Paperclip, Pencil, PenLine,
   Loader, Puzzle, RotateCcw, Ruler, Save, Sparkles, Store, Trash2, User, Video, Zap,
 } from 'lucide-react';
 import '../styles/docs.css';
@@ -670,7 +671,7 @@ function DemoMoonScenes() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12, color: 'var(--color-body)' }}>
       {/* 抽屉顶部 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 6, borderBottom: '1px solid var(--color-hairline)' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体协作</span></span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><MoonLogo variant="mark" size={13} tone="brand" /> 多智能体协作</span></span>
         <span style={{ fontSize: 10, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Folder size={12} strokeWidth={1.8} /> 产出素材</span></span>
       </div>
 
@@ -1638,7 +1639,7 @@ export function DocsPage() {
                 生成结果在右下角「生成中心」统一查看、预览和删除。
               </div>
             </div>
-            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体协作 · 对话示意（试试确认 / 再改 / 发送）</span>>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><MoonLogo variant="mark" size={13} tone="light" /> 多智能体协作 · 对话示意（试试确认 / 再改 / 发送）</span>>
               <DemoMoonChat />
             </MockWindow>
           </div>
@@ -1686,9 +1687,9 @@ export function DocsPage() {
                 </div>
               ))}
             </div>
-            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体 · 协作会话</span> light>
+            <MockWindow title=<span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><MoonLogo variant="mark" size={13} tone="brand" /> 多智能体 · 协作会话</span> light>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Moon size={12} strokeWidth={1.8} /> 多智能体协作</span></div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-ink)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><MoonLogo variant="mark" size={13} tone="brand" /> 多智能体协作</span></div>
                 <div style={{ padding: '6px', border: '1px dashed var(--color-hairline)', borderRadius: 6, fontSize: 11, color: 'var(--color-primary)', textAlign: 'center' }}>+ 新建对话</div>
                 <div style={{ fontSize: 10, color: 'var(--color-muted)' }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Archive size={12} strokeWidth={1.8} /> 已归档</span></div>
                 <div style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--color-surface-card)', fontSize: 11, color: 'var(--color-ink)', display: 'flex', justifyContent: 'space-between' }}>

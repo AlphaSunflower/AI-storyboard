@@ -14,6 +14,31 @@ export const MENTION_LIMITS = {
   conversation: 3,
 } as const;
 
+/** 左侧会话列表拖进输入框时携带的 MIME；JSON 内容见 {@link ConversationDragPayload}。 */
+export const CONVERSATION_DRAG_MIME = 'application/x-moon-conversation';
+
+export interface ConversationDragPayload {
+  id: string;
+  title: string;
+  messageCount?: number;
+  summaryStatus?: 'ready' | 'generating' | 'stale' | 'unavailable';
+}
+
+export function parseConversationDragPayload(raw: string): ConversationDragPayload | null {
+  try {
+    const value = JSON.parse(raw) as Partial<ConversationDragPayload>;
+    if (!value || typeof value.id !== 'string' || !value.id) return null;
+    return {
+      id: value.id,
+      title: typeof value.title === 'string' ? value.title : '',
+      messageCount: typeof value.messageCount === 'number' ? value.messageCount : undefined,
+      summaryStatus: value.summaryStatus,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface MentionQuery {
   /** `@` 在正文里的下标 */
   start: number;
