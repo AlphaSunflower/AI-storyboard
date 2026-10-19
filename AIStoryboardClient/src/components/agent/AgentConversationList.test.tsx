@@ -68,6 +68,18 @@ describe('AgentConversationList generation markers', () => {
     );
     expect(setData).toHaveBeenCalledWith('text/plain', '@对话《对话二》');
   });
+
+  it('非当前会话在悬浮时显示底色，移出后恢复', () => {
+    render(<AgentConversationList />);
+    const item = screen.getByText('对话二').closest('.conversation-item') as HTMLElement;
+    expect(item.style.background).toBe('transparent');
+
+    fireEvent.mouseEnter(item);
+    expect(item.style.background).toBe('var(--color-surface-subtle)');
+
+    fireEvent.mouseLeave(item);
+    expect(item.style.background).toBe('transparent');
+  });
 });
 
 describe('AgentConversationList 操作通知', () => {
