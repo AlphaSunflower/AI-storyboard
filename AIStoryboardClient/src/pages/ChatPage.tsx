@@ -1606,10 +1606,10 @@ export function ChatPage() {
                   style={{
                     padding: '8px 16px', borderRadius: 20, border: `1px solid ${DS.border}`,
                     background: 'white', fontSize: 13, color: DS.textSecondary, cursor: 'pointer',
-                    transition: 'border-color 0.15s, color 0.15s',
+                    transition: 'border-color 0.15s, color 0.15s, background-color 0.15s',
                   }}
-                  onMouseEnter={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.brand; el.style.color = DS.brand; }}
-                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.border; el.style.color = DS.textSecondary; }}
+                  onMouseEnter={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.brand; el.style.color = DS.brand; el.style.background = 'var(--color-primary-tint)'; }}
+                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.border; el.style.color = DS.textSecondary; el.style.background = 'white'; }}
                 >{t}</button>
               ))}
             </div>

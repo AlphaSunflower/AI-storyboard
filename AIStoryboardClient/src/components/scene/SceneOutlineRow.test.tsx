@@ -93,7 +93,7 @@ describe('SceneOutlineRow', () => {
     );
 
     expect(document.querySelector('img')?.getAttribute('src')).toBe('/api/files/images/a.png');
-    expect(screen.getByLabelText('图片状态').getAttribute('title')).toContain('completed');
+    expect(screen.getByLabelText('图片状态').getAttribute('title')).toContain('已生成');
   });
 
   it('marks a shot as stale when its media predates the latest draft edit', () => {

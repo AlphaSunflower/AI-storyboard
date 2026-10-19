@@ -6794,6 +6794,11 @@ html[data-view-motion='back'] .view-shell { transform-origin: 50% 100%; }
   color: var(--acid);
 }
 
+.project-home__header button:not(:disabled):hover,
+.project-home__tabs button:hover {
+  background: rgba(244, 244, 245, 0.08);
+}
+
 /* 开合位移挂在内层内容上而不是面板本身：面板在手机端是 inset:0，位移会让文档多出横向滚动 */
 .side-is-closed .chat-body { translate: 14px 0; }
 .chat-view[data-active='false'] { opacity: 0; translate: 0 6px; pointer-events: none; visibility: hidden; }
