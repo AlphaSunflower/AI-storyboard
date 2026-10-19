@@ -87,6 +87,7 @@
 }
 
 .btn--outline:hover:not(:disabled) {
+  background: var(--color-surface-subtle);
   border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-hairline));
   color: var(--color-ink);
 }
@@ -627,6 +628,7 @@
 }
 
 .segmented__btn:hover {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
   color: var(--color-ink);
 }
 

@@ -283,8 +283,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                     if (onSelectOverride) { onSelectOverride(c.id); return; }
                     selectConversation(c.id);
                   }}
-                  onMouseEnter={(e) => { setHoverId(c.id); if (c.id !== activeConversationId && !isSelected) e.currentTarget.style.background = 'var(--color-surface-subtle)'; }}
-                  onMouseLeave={(e) => { setHoverId(null); e.currentTarget.style.background = c.id === activeConversationId ? DS.hover : isSelected ? 'color-mix(in srgb, var(--color-primary) 7%, transparent)' : 'transparent'; }}
+                  onMouseEnter={() => setHoverId(c.id)}
+                  onMouseLeave={() => setHoverId(null)}
                   style={{
                     margin: '1px 8px',
                     padding: '9px 10px',
@@ -293,7 +293,13 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
-                    background: c.id === activeConversationId ? DS.hover : isSelected ? 'color-mix(in srgb, var(--color-primary) 7%, transparent)' : 'transparent',
+                    background: c.id === activeConversationId
+                      ? (hoverId === c.id ? 'color-mix(in srgb, var(--color-primary) 14%, transparent)' : DS.hover)
+                      : isSelected
+                        ? 'color-mix(in srgb, var(--color-primary) 9%, transparent)'
+                        : hoverId === c.id
+                          ? 'var(--color-surface-subtle)'
+                          : 'transparent',
                     opacity: 1,
                   }}
                 >
