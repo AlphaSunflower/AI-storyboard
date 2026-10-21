@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react';
 import type { CSSProperties, ReactNode, MouseEventHandler } from 'react';
-import { Renderer, Program, Mesh, Triangle, Color } from 'ogl';
+import { Renderer, Program, Mesh, Triangle } from 'ogl';
 import './SpecularButton.css';
 
 type ButtonSize = 'sm' | 'md' | 'lg';
@@ -107,6 +107,39 @@ void main() {
 }
 `;
 
+type RGB = [number, number, number];
+
+/**
+ * 解析 CSS 颜色字符串为 0..1 的 RGB。
+ *
+ * 只处理规整格式（hex / rgb() / rgba() / color(srgb ...)）；`var(--token)`、
+ * `color-mix()` 这类需要浏览器计算的写法交给 {@link resolveColor} 用探针元素解析。
+ * 绝不在每帧调用：ogl 的 `Color#set` 遇到不认识的写法会 `console.warn`
+ * （“Color format not recognised”），而它原来正跑在 requestAnimationFrame 里，
+ * 于是每秒刷出上百条 warning，把 devtools 和页面一起拖死。
+ */
+function parseStaticColor(value: string): RGB | null {
+  const v = value.trim();
+  if (v.startsWith('#')) {
+    const hex = v.slice(1);
+    if (!/^([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(hex)) return null;
+    const full = hex.length <= 4 ? hex.split('').map((c) => c + c).join('') : hex;
+    return [
+      parseInt(full.slice(0, 2), 16) / 255,
+      parseInt(full.slice(2, 4), 16) / 255,
+      parseInt(full.slice(4, 6), 16) / 255,
+    ];
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(v);
+  if (rgb) return [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255];
+  const srgb = /^color\(\s*srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i.exec(v);
+  if (srgb) return [Number(srgb[1]), Number(srgb[2]), Number(srgb[3])];
+  return null;
+}
+
+/** 探针哨兵色：赋了非法颜色时浏览器会保留上一个值，用它区分“解析成功”与“解析失败”。 */
+const SENTINEL = 'rgb(1, 2, 3)';
+
 const SpecularButton = ({
   children = 'Get Started',
   size = 'lg',
@@ -155,6 +188,30 @@ const SpecularButton = ({
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
+    // 颜色探针：挂在按钮内部（而不是 body），这样 var(--sb-*) 等局部变量也能解析。
+    const probe = document.createElement('span');
+    probe.setAttribute('aria-hidden', 'true');
+    probe.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;';
+    fx.appendChild(probe);
+
+    // 颜色只按“字符串变化”解析一次：每帧解析是原来的主要开销与 warning 来源。
+    const colorCache = new Map<string, RGB>();
+    const resolveColor = (value: string): RGB => {
+      const key = value ?? '';
+      const cached = colorCache.get(key);
+      if (cached) return cached;
+      let out = parseStaticColor(key);
+      if (!out) {
+        probe.style.color = SENTINEL;
+        probe.style.color = key;
+        const computed = window.getComputedStyle(probe).color;
+        out = computed && computed !== SENTINEL ? parseStaticColor(computed) : null;
+      }
+      const resolved = out ?? [0, 0, 0];
+      colorCache.set(key, resolved);
+      return resolved;
+    };
+
     const geometry = new Triangle(gl);
     if (geometry.attributes.uv) delete geometry.attributes.uv;
 
@@ -181,11 +238,15 @@ const SpecularButton = ({
     const mesh = new Mesh(gl, { geometry, program });
     fx.appendChild(gl.canvas);
 
+    // 位置缓存：pointermove 里读 getBoundingClientRect 会强制同步布局，
+    // 多实例叠加时每一次鼠标移动都是成倍的 reflow。改成事件只记坐标、
+    // 每帧最多校准一次矩形（resize / scroll 时标脏）。
+    let rect = btn.getBoundingClientRect();
+    let rectDirty = false;
     const sizeRef = { w: 1, h: 1 };
     const resize = () => {
-      // Fractional size + explicit center keep the SDF pinned to the exact
-      // CSS border, instead of drifting up to a pixel from offsetWidth rounding.
-      const rect = btn.getBoundingClientRect();
+      rect = btn.getBoundingClientRect();
+      rectDirty = false;
       const w = rect.width;
       const h = rect.height;
       sizeRef.w = w;
@@ -200,42 +261,71 @@ const SpecularButton = ({
 
     // Light angle steers toward the pointer (anywhere on the page) and falls
     // back to a slow sweep when the pointer hasn't moved yet.
+    let pointer: { x: number; y: number } | null = null;
     let pointerAngle: number | null = null;
     let proximityT = 0;
     const onPointerMove = (e: PointerEvent) => {
-      const rect = btn.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dx = Math.max(rect.left - e.clientX, 0, e.clientX - rect.right);
-      const dy = Math.max(rect.top - e.clientY, 0, e.clientY - rect.bottom);
-      const dist = Math.hypot(dx, dy);
-      // Over the button itself the light settles on the diagonal (framing the
-      // corners) and gently sways with the cursor position within the button.
-      if (dist === 0) {
-        const nx = (e.clientX - cx) / (rect.width / 2);
-        const ny = (cy - e.clientY) / (rect.height / 2);
-        pointerAngle = Math.atan2(2 / rect.height, -2 / rect.width) + nx * 0.3 + ny * 0.15;
-      } else {
-        pointerAngle = Math.atan2(cy - e.clientY, e.clientX - cx);
-      }
-      const t = Math.max(0, 1 - dist / Math.max(propsRef.current.proximity, 1));
-      proximityT = t * t * (3 - 2 * t);
+      pointer = { x: e.clientX, y: e.clientY };
     };
-    window.addEventListener('pointermove', onPointerMove);
+    const onScroll = () => { rectDirty = true; };
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+
+    // 不可见（滚出视口 / 切到后台标签页）时不做任何 GL 工作：
+    // 编辑器与文档页会同时挂几个实例，原来的无限渲染是这类页面的常见卡顿源。
+    let inView = true;
+    const io = typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver((entries) => {
+        const last = entries[entries.length - 1];
+        if (last) inView = last.isIntersecting;
+      });
+    io?.observe(btn);
 
     let angle = 2.4;
     let idleAngle = 2.4;
     let bright = 0;
     let last = performance.now();
     let raf = 0;
+    let lastLineColor = '';
+    let lastBaseColor = '';
 
-    const lineC = new Color();
-    const baseC = new Color();
+    const lineRGB: RGB = [1, 1, 1];
+    const baseRGB: RGB = [0.32, 0.32, 0.32];
 
     const update = (now: number) => {
       raf = requestAnimationFrame(update);
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
+      if (document.hidden || !inView) return;
+
+      if (rectDirty) {
+        rect = btn.getBoundingClientRect();
+        rectDirty = false;
+      }
+
+      if (pointer) {
+        const e = pointer;
+        const dx = Math.max(rect.left - e.x, 0, e.x - rect.right);
+        const dy = Math.max(rect.top - e.y, 0, e.y - rect.bottom);
+        const dist = Math.hypot(dx, dy);
+        // Over the button itself the light settles on the diagonal (framing the
+        // corners) and gently sways with the cursor position within the button.
+        if (dist === 0) {
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const nx = (e.x - cx) / (rect.width / 2);
+          const ny = (cy - e.y) / (rect.height / 2);
+          pointerAngle = Math.atan2(2 / rect.height, -2 / rect.width) + nx * 0.3 + ny * 0.15;
+        } else {
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          pointerAngle = Math.atan2(cy - e.y, e.x - cx);
+        }
+        const t = Math.max(0, 1 - dist / Math.max(propsRef.current.proximity, 1));
+        proximityT = t * t * (3 - 2 * t);
+      }
+
       const p = propsRef.current;
 
       idleAngle += p.speed * dt;
@@ -248,12 +338,21 @@ const SpecularButton = ({
       const brightTarget = p.autoAnimate ? 1 : proximityT;
       bright += (brightTarget - bright) * (1 - Math.exp(-dt * 8));
 
-      lineC.set(p.lineColor);
-      baseC.set(p.baseColor);
+      if (p.lineColor !== lastLineColor) {
+        const rgb = resolveColor(p.lineColor);
+        lineRGB[0] = rgb[0]; lineRGB[1] = rgb[1]; lineRGB[2] = rgb[2];
+        lastLineColor = p.lineColor;
+      }
+      if (p.baseColor !== lastBaseColor) {
+        const rgb = resolveColor(p.baseColor);
+        baseRGB[0] = rgb[0]; baseRGB[1] = rgb[1]; baseRGB[2] = rgb[2];
+        lastBaseColor = p.baseColor;
+      }
+
       program.uniforms.uAngle.value = angle;
       program.uniforms.uRadius.value = Math.min(p.radius, Math.min(sizeRef.w, sizeRef.h) / 2) * dpr;
-      program.uniforms.uLineColor.value = [lineC.r, lineC.g, lineC.b];
-      program.uniforms.uBaseColor.value = [baseC.r, baseC.g, baseC.b];
+      program.uniforms.uLineColor.value = lineRGB;
+      program.uniforms.uBaseColor.value = baseRGB;
       program.uniforms.uIntensity.value = p.intensity * bright;
       program.uniforms.uShineSize.value = (p.shineSize * Math.PI) / 180;
       program.uniforms.uShineFade.value = (p.shineFade * Math.PI) / 180;
@@ -265,8 +364,11 @@ const SpecularButton = ({
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      io?.disconnect();
       window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions);
       if (gl.canvas.parentNode === fx) fx.removeChild(gl.canvas);
+      if (probe.parentNode === fx) fx.removeChild(probe);
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
   }, []);

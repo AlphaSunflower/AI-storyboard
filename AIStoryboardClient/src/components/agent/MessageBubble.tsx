@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import gsap from 'gsap';
-import { useGSAP } from '@gsap/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Download, FileAudio, FileText, FileVideo,
   Check, ImagePlus, Images, Library, MessageSquarePlus, PanelRightOpen, Pencil, Play, Trash2,
 } from 'lucide-react';
-import { assetUrl } from '../../config';
+import { assetUrl, imageThumbnailUrl } from '../../config';
 import type { AgentAttachment, AgentMessageMetadata } from '../../api/agent';
+import { agentApi } from '../../api/agent';
 import { hitlFromMetadata, useAgentStore } from '../../stores/agentStore';
 import { openAssetDetail } from '../../stores/assetDetailStore';
 import { useDocumentPreviewStore } from '../../stores/documentPreviewStore';
@@ -355,6 +354,57 @@ function stripTaskMediaMarkdown(content: string): string {
 }
 
 /**
+ * 重内容延迟挂载：首帧只画正文，思考过程 / 工具调用 / 画布卡片等主线程空闲后再补。
+ *
+ * <p>切会话时一次性铺开几十条消息，每条都带推理面板 + 工具卡片 + 轨迹，实测能把主线程
+ * 占住 7 秒（页面看起来"一直加载"）。正文才是用户第一时间要看的，所以这些块先渲染成
+ * 一行「加载中」占位，等浏览器空闲（`requestIdleCallback`，300ms 兜底）再挂上来。
+ *
+ * <p>直播中的消息（`streaming`）不延迟：那是用户正在盯着看的内容。
+ */
+function useDeferredHeavyContent(enabled: boolean, timeoutMs = 300): boolean {
+  const [ready, setReady] = useState(!enabled);
+  useEffect(() => {
+    if (!enabled) {
+      setReady(true);
+      return undefined;
+    }
+    setReady(false);
+    let cancelled = false;
+    const idle = window as Window & {
+      requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof idle.requestIdleCallback === 'function') {
+      const handle = idle.requestIdleCallback(() => {
+        if (!cancelled) setReady(true);
+      }, { timeout: timeoutMs });
+      return () => {
+        cancelled = true;
+        idle.cancelIdleCallback?.(handle);
+      };
+    }
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setReady(true);
+    }, 80);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [enabled, timeoutMs]);
+  return ready;
+}
+
+/** 重内容的占位：一行灰字 + 呼吸点，避免"什么都没画"的空窗感。 */
+function HeavyContentPlaceholder({ label }: { label: string }) {
+  return (
+    <span className="chat-heavy-placeholder" role="status" aria-live="polite">
+      {label}
+    </span>
+  );
+}
+
+/**
  * 图片加载失败时降级为"（图片已过期）"占位文本：
  * 防御历史消息里残留的带签名 URL（/files/tools/ 带 timestamp+sign，过期后 403）
  * 渲染成裂图 + alt 文件名的难看效果。
@@ -369,10 +419,27 @@ function ImgWithFallback({
   deferExternalLoad?: boolean; actions?: React.ReactNode;
 }) {
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [loadRequested, setLoadRequested] = useState(() => !deferExternalLoad || !isExternalImageSource(source));
   useEffect(() => {
     setLoadRequested(!deferExternalLoad || !isExternalImageSource(source));
   }, [deferExternalLoad, source]);
+  // src 变化（切会话 / 换消息）要重新走一遍占位与失败态
+  useEffect(() => {
+    setLoaded(false);
+    setFailed(false);
+  }, [src]);
+  /**
+   * 显示用缩略图：原图 ~1 MB，气泡里只有 220px 高。
+   * 正文先渲染，图片由浏览器按 `loading=lazy` 自己进来；这里只负责"没加载完先占位"，
+   * 绝不让图片解码/下载挡住文字出现。
+   */
+  const displaySrc = imageThumbnailUrl(src, 480);
+  /**
+   * 图片排第二优先：正文先出，等主线程空闲再把 src 挂上去（不挂 src 就不会发请求）。
+   * 这样切会话时是「文字 → 图片 → 思考/工具/token」的顺序，而不是一起抢首帧。
+   */
+  const mediaReady = useDeferredHeavyContent(true, 500);
   if (failed) {
     return (
       <span style={{ color: 'var(--color-muted-soft)', fontSize: 12, fontStyle: 'italic', margin: '4px 0' }}>
@@ -429,15 +496,23 @@ function ImgWithFallback({
         },
       ]}
     >
-      <span className="chat-media-frame">
+      <span
+        className="chat-media-frame"
+        style={loaded ? undefined : { minWidth: 160, minHeight: 120 }}
+      >
+        {/* 占位骨架：图片没到之前先撑住版面，文字不用等图 */}
+        {!loaded && <span className="chat-media-skeleton" aria-hidden="true" />}
         <img
-          src={src}
+          src={mediaReady ? displaySrc : undefined}
           alt={alt ?? ''}
-          style={{ ...style, cursor: onClick ? 'zoom-in' : undefined }}
+          style={{ ...style, cursor: onClick ? 'zoom-in' : undefined, opacity: loaded ? 1 : 0, transition: 'opacity 160ms ease' }}
           onClick={onClick}
+          onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
           referrerPolicy="no-referrer"
           loading="lazy"
+          // 图片解码放到合成线程：切会话时一次挂上多张生成图，同步解码会卡住首帧
+          decoding="async"
           draggable={Boolean(dragPayload)}
           onDragStart={(event) => {
             if (!dragPayload) return;
@@ -659,8 +734,15 @@ export function splitMentionParts(
 /**
  * Markdown 渲染（Moon 助手消息）：保留 `[链接](url)`、视频裸 URL、图片 markdown / 裸图片 URL 的原有处理。
  * 表格与代码块额外挂悬浮的复制 / 下载操作条（streaming 期间不渲染，避免打断逐字呈现）。
+ *
+ * <p>**必须是 memo**：这条链路里每个字都贵——`ChatPage` 订阅了 `messages`，
+ * 流式期间每来一个 `TEXT_BLOCK_DELTA` 都会让整页重渲染一次，而消息列表是逐条渲染的。
+ * 没有 memo 时，**每一条历史消息**都会跟着重新跑一遍 react-markdown 解析，
+ * 长对话下这份开销随消息数线性增长、再乘以 delta 频率，页面就会「越聊越卡」。
+ * 加了 memo 之后，只有真正变了的那一条（正在流式输出的气泡）会重新解析，
+ * 其余气泡直接命中缓存跳过。前提是下面传入的回调必须是稳定引用。
  */
-function MarkdownContent({
+const MarkdownContent = memo(function MarkdownContent({
   content,
   onImgClick,
   onImportMedia,
@@ -809,7 +891,7 @@ function MarkdownContent({
   });
   flush(lines.length);
   return <>{nodes}</>;
-}
+});
 
 /** 消息时间格式化：今天 → HH:MM；跨天 → MM-DD HH:MM */
 function formatTime(iso?: string): string {
@@ -939,7 +1021,7 @@ function SelectionActionToolbar({
       style={{
         position: 'fixed', ...popoverPosition(anchor, 250), zIndex: 2200,
         display: 'inline-flex', alignItems: 'center', padding: 4,
-        background: 'white', borderRadius: 12,
+        background: 'var(--color-panel)', borderRadius: 12,
         border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 8px 24px rgba(15,17,21,0.16)',
       }}
     >
@@ -1034,7 +1116,7 @@ function AnnotationEditor({
       aria-label={mode === 'create' ? '添加注释' : '编辑注释'}
       style={{
         position: 'fixed', ...popoverPosition(anchor), width: ANNOTATION_POPOVER_WIDTH, zIndex: 2300,
-        background: 'white', borderRadius: 16, padding: 10,
+        background: 'var(--color-panel)', borderRadius: 16, padding: 10,
         border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 12px 32px rgba(15,17,21,0.16)',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}
@@ -1067,7 +1149,7 @@ function AnnotationEditor({
             onClick={() => onSave(value)}
             style={{
               width: 36, height: 36, flexShrink: 0, borderRadius: 12, border: 'none',
-              background: 'var(--color-ink)', color: 'white', cursor: 'pointer',
+              background: 'var(--color-ink)', color: 'var(--color-canvas)', cursor: 'pointer',
               display: 'grid', placeItems: 'center',
             }}
           >
@@ -1093,7 +1175,7 @@ function AnnotationEditor({
               type="button"
               onClick={onCancel}
               style={{
-                borderRadius: 10, border: '1px solid rgba(0,0,0,0.10)', background: 'white',
+                borderRadius: 10, border: '1px solid rgba(0,0,0,0.10)', background: 'var(--color-panel)',
                 color: 'rgb(60,64,72)', fontSize: 13, padding: '7px 14px', cursor: 'pointer',
               }}
             >取消</button>
@@ -1102,7 +1184,7 @@ function AnnotationEditor({
               onClick={() => onSave(value)}
               style={{
                 borderRadius: 10, border: 'none', background: 'var(--color-ink)',
-                color: 'white', fontSize: 13, padding: '7px 14px', cursor: 'pointer',
+                color: 'var(--color-canvas)', fontSize: 13, padding: '7px 14px', cursor: 'pointer',
               }}
             >保存</button>
           </div>
@@ -1146,7 +1228,7 @@ function QuotedAnnotationList({ items }: { items: AnnotationQuote[] }) {
   );
 }
 
-export function MessageBubble({ messageId, conversationId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
+export const MessageBubble = memo(function MessageBubble({ messageId, conversationId, role, content, streaming, variant = 'default', createdAt, metadata, editable, onEdit, onEditMessage, onOpenGenerationCenter }: {
   messageId?: string;
   conversationId?: string;
   role: 'user' | 'assistant'; content: string; streaming?: boolean;
@@ -1157,6 +1239,42 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
 }) {
   const isUser = role === 'user';
   const ds = variant === 'deepseek';
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  /**
+   * 重内容（推理面板 / 工具调用 / 画布卡片）只在**这条消息滚进视口**、且主线程空闲时才挂。
+   *
+   * <p>只靠 requestIdleCallback 不够：12 条消息的空闲回调会在同一个空闲段里排队跑完，
+   * 又攒成一个 2 秒级长任务。加上视口判断后，首屏只挂看得见的那 2~3 条，其余保持"只有正文"，
+   * 滚到哪条才补哪条。
+   */
+  const [bubbleInView, setBubbleInView] = useState(false);
+  useEffect(() => {
+    const node = bubbleRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setBubbleInView(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setBubbleInView(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '320px 0px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  // 重内容延到空闲 + 进入视口再挂：首帧只出正文
+  const heavyReady = useDeferredHeavyContent(!streaming) && bubbleInView;
+  /**
+   * 思考全文 / 执行轨迹在列表接口里被瘦身掉了（只留 detailsAvailable / traceAvailable），
+   * 用户展开面板时再按需拉一次；没有标记（老服务端）时返回 undefined，行为不变。
+   */
+  const loadReasoningDetails = useCallback(async () => {
+    if (!conversationId || !messageId) return {};
+    const response = await agentApi.getMessageDetails(conversationId, messageId);
+    return response.data.data ?? {};
+  }, [conversationId, messageId]);
+  const needsReasoningDetails = !!(metadata?.reasoning?.detailsAvailable || metadata?.traceAvailable);
   const canvasRunMeta = metadata?.kind === 'canvas-run' ? metadata : null;
   const currentProject = useProjectStore((state) => state.currentProject);
   const archivedConversation = useAgentStore((state) =>
@@ -1168,10 +1286,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     return conversation?.status === 'archived' || conversation?.orchestrationMode === 'LEGACY';
   });
   // 点会话里的图片/视频 → 打开和生成中心同一个素材详情弹窗（提示词、参数、改图入口都在那儿）。
-  const openMediaDetail = (url: string, kind?: 'image' | 'video') => {
+  const openMediaDetail = useCallback((url: string, kind?: 'image' | 'video') => {
     if (!url) return;
     openAssetDetail({ url, kind });
-  };
+  }, []);
+
+  /** MarkdownContent 是 memo 组件：回调引用不稳定的话 memo 会整个失效，所以在这里固定下来。 */
+  const handleMarkdownImgClick = useCallback((url: string) => openMediaDetail(url), [openMediaDetail]);
   const openAttachmentPreview = (attachment: AgentAttachment) => {
     if (attachment.kind === 'image' || attachment.kind === 'video') {
       openMediaDetail(attachment.url, attachment.kind === 'video' ? 'video' : 'image');
@@ -1185,6 +1306,23 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   const [editSaving, setEditSaving] = useState(false);
   const [editFocused, setEditFocused] = useState(false);
   const [projectImportState, setProjectImportState] = useState<'idle' | 'importing' | 'done' | 'error'>('idle');
+  /** 导入项目库。声明提前 + useCallback：memo 的 MarkdownContent 依赖它的稳定引用。 */
+  const handleImportMedia = useCallback(async (media: MessageMedia[]) => {
+    if (!currentProject?.id || media.length === 0) return;
+    setProjectImportState('importing');
+    const results = await Promise.allSettled(media.map((item) => importMediaToProjectLibrary({
+      projectId: currentProject.id,
+      producer: 'moon-chat',
+      url: item.url,
+      mediaType: item.type,
+      conversationId,
+      label: item.type === 'VIDEO' ? 'Moon 生成视频' : 'Moon 生成图片',
+    })));
+    setProjectImportState(results.every((result) => result.status === 'fulfilled') ? 'done' : 'error');
+  }, [conversationId, currentProject?.id]);
+  const handleMarkdownImport = useCallback((media: MessageMedia) => {
+    void handleImportMedia([media]);
+  }, [handleImportMedia]);
   const storyboardResultReady = useAgentStore((state) => {
     if (metadata?.storyboardReview?.stage === 'COMPLETED') return true;
     return Boolean(metadata?.taskCards?.some((card) => {
@@ -1194,7 +1332,6 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         && task.stage === 'completed';
     }));
   });
-  const bubbleRef = useRef<HTMLDivElement>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const rawDisplayContent = useStreamingReveal(content, role === 'assistant' && !!streaming);
@@ -1538,8 +1675,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         <div style={{ width: '100%', maxWidth: '100%', marginBottom: 8 }}>
           <MarkdownContent
             content={renderedContent}
-            onImgClick={(url) => openMediaDetail(url)}
-            onImportMedia={(media) => void handleImportMedia([media])}
+            onImgClick={handleMarkdownImgClick}
+            onImportMedia={handleMarkdownImport}
             importDisabled={importDisabled}
             streaming={streaming}
           />
@@ -1617,35 +1754,13 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     setProjectImportState('idle');
   }, [content]);
 
-  const handleImportMedia = async (media: MessageMedia[]) => {
-    if (!currentProject?.id || media.length === 0) return;
-    setProjectImportState('importing');
-    const results = await Promise.allSettled(media.map((item) => importMediaToProjectLibrary({
-      projectId: currentProject.id,
-      producer: 'moon-chat',
-      url: item.url,
-      mediaType: item.type,
-      conversationId,
-      label: item.type === 'VIDEO' ? 'Moon 生成视频' : 'Moon 生成图片',
-    })));
-    setProjectImportState(results.every((result) => result.status === 'fulfilled') ? 'done' : 'error');
-  };
-
-  // 新消息入场：从下往上轻微浮入（仅挂载时播放一次）
-  useGSAP(() => {
-    if (!bubbleRef.current) return;
-    gsap.fromTo(
-      bubbleRef.current,
-      { y: 12, opacity: 0, scale: 0.98 },
-      {
-        y: 0, opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out',
-        onComplete: () => {
-          // 清除残留 transform：气泡作为 containing block 会让内部 fixed 浮层（工具提示、注释面板）错位
-          gsap.set(bubbleRef.current, { clearProps: 'transform' });
-        },
-      }
-    );
-  }, { scope: bubbleRef });
+  /**
+   * 入场动画交给列表层（只有最新一条加 `chat-msg-in`）。
+   *
+   * <p>原来这里每条消息挂载都用 GSAP 浮入：往上翻历史时一次挂二十条，
+   * 二十个 GSAP 时间线同时跑，视觉上就是"整页重新加载"。动画留在最新一条上就够，
+   * 历史消息直接静态出现（它们本来就该是"翻出来"而不是"弹出来"）。
+   */
 
   /**
    * 助手消息的「产物层」：生成结果预置位条 + 沙箱产物文件卡 + 结果确认动作。
@@ -1666,7 +1781,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
         onPreview={openAttachmentPreview}
         {...attachmentStripProps}
       />
-      {metadata?.confirmResult && (
+      {/* HITL 卡片没有「生成结果」可完善；即使旧数据/回放里误挂了 confirmResult 也不渲染。 */}
+      {metadata?.confirmResult && metadata?.kind !== 'hitl' && !metadata?.hitl && (
         <ConfirmResultActions info={metadata.confirmResult} messageId={messageId} />
       )}
     </>
@@ -1682,7 +1798,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     return (
       <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: ds ? 16 : 18 }}>
         {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
-          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
+          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} loadDetails={needsReasoningDetails ? loadReasoningDetails : undefined} />
         ) : null}
         {hitlPlanContent}
         <ToolResultBlocks metadata={metadata} messageId={messageId} />
@@ -1703,7 +1819,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     return (
       <div ref={bubbleRef} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: ds ? 16 : 18 }}>
         {metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) ? (
-          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} />
+          <ReasoningPanel reasoning={metadata.reasoning} agentTrace={metadata.agentTrace} streaming={false} loadDetails={needsReasoningDetails ? loadReasoningDetails : undefined} />
         ) : null}
         {hitlPlanContent}
         <ToolResultBlocks metadata={metadata} messageId={messageId} />
@@ -1725,15 +1841,21 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
   return (
     <>
     {!isUser && canvasRunMeta && (
-      <CanvasRunCard metadata={canvasRunMeta} conversationId={conversationId} />
+      heavyReady
+        ? <CanvasRunCard metadata={canvasRunMeta} conversationId={conversationId} />
+        : <div className="msg-row"><HeavyContentPlaceholder label="画布编排加载中…" /></div>
     )}
     <div ref={bubbleRef} data-turn-id={metadata?.turnId || undefined} className="msg-row" style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', marginBottom: ds ? 16 : 18 }}>
       {/* 助手消息：正文上方渲染推理面板（实时/已思考） */}
-      {!isUser && (metadata?.reasoning || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
-        <ReasoningPanel reasoning={metadata?.reasoning} agentTrace={metadata?.agentTrace} streaming={streaming} />
+      {!isUser && (metadata?.reasoning || metadata?.traceAvailable || (metadata?.agentTrace && metadata.agentTrace.length > 0) || (streaming && !content)) && (
+        heavyReady
+          ? <ReasoningPanel reasoning={metadata?.reasoning} agentTrace={metadata?.agentTrace} streaming={streaming} loadDetails={needsReasoningDetails ? loadReasoningDetails : undefined} />
+          : <HeavyContentPlaceholder label="思考过程加载中…" />
       )}
       {/* 工具输出（直播 generating.toolDrafts / 重放 metadata.toolDrafts + render 块） */}
-      {!isUser && <ToolResultBlocks metadata={metadata} messageId={messageId} />}
+      {!isUser && (heavyReady
+        ? <ToolResultBlocks metadata={metadata} messageId={messageId} />
+        : <HeavyContentPlaceholder label="工具调用加载中…" />)}
       <div
         ref={contentRef}
         onMouseUp={handleAnnotationSelection}
@@ -1760,7 +1882,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               padding: '12px 18px',
               borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
               background: isUser ? 'var(--color-primary)' : 'var(--color-surface-card)',
-              color: isUser ? 'white' : 'var(--color-body)',
+              color: isUser ? 'var(--color-on-primary)' : 'var(--color-body)',
               // 抽屉空间有限,正文 15px(全局 16px 偏大)
               fontSize: 15,
               lineHeight: 1.7,
@@ -1831,8 +1953,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
                   {renderedContent && (
                     <MarkdownContent
                       content={renderedContent}
-                      onImgClick={(url) => openMediaDetail(url)}
-                      onImportMedia={(media) => void handleImportMedia([media])}
+                      onImgClick={handleMarkdownImgClick}
+                      onImportMedia={handleMarkdownImport}
                       importDisabled={importDisabled}
                       importing={projectImportState === 'importing'}
                       dragProjectId={currentProject?.id}
@@ -1884,7 +2006,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
               width: 2, height: 16,
               marginLeft: 2,
               verticalAlign: 'text-bottom',
-              background: isUser ? (ds ? 'var(--color-primary)' : 'white') : (ds ? 'var(--color-primary)' : 'var(--color-primary)'),
+              background: isUser ? (ds ? 'var(--color-primary)' : 'var(--color-panel)') : (ds ? 'var(--color-primary)' : 'var(--color-primary)'),
               animation: 'typeCursor 1s steps(1) infinite',
             }}
           />
@@ -1956,7 +2078,8 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
             </button>
             </Tooltip>
           )}
-          {metrics && (
+          {/* 用量/耗时属于「审计」信息：正文和图片先出，这里等空闲再补 */}
+          {metrics && heavyReady && (
             <span
               title={metricsTitle}
               style={{
@@ -1986,7 +2109,7 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
           top: Math.max(8, badgeAnchor.top - 10),
           left: badgeAnchor.right - 8,
           minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999,
-          border: '2px solid white', background: 'var(--color-primary)', color: 'white',
+          border: '2px solid white', background: 'var(--color-primary)', color: 'var(--color-on-primary)',
           fontSize: 11, fontWeight: 700, lineHeight: 1, cursor: 'pointer',
           boxShadow: '0 2px 8px color-mix(in srgb, var(--color-primary) 45%, transparent)', zIndex: 2100,
         }}
@@ -2040,4 +2163,4 @@ export function MessageBubble({ messageId, conversationId, role, content, stream
     )}
     </>
   );
-}
+});

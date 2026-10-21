@@ -97,6 +97,9 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  // 显式登录/清理视为新的会话边界：清掉刷新失败的冷却，避免拦掉正常的首次刷新
+  refreshFailedAt = 0;
+  redirectingToLogin = false;
   localStorage.removeItem('accessToken');
   if (token) {
     broadcastToken(token);
@@ -128,9 +131,39 @@ export function persistUser(user: { userId: string; displayName: string }): void
 
 export function clearAuthSession(): void {
   accessToken = null;
+  refreshFailedAt = 0;
   localStorage.removeItem('user');
   localStorage.removeItem('accessToken');
 }
+
+let redirectingToLogin = false;
+
+/**
+ * 401 且刷新失败时的唯一出口：清掉本地会话并强制回登录页。
+ *
+ * <p>axios 链路一直有这道兜底，但 `authorizedFetch`（SSE、上传、轮询等）此前只把 401
+ * 原样返回，调用方各自弹「未授权」，页面停在一个再也发不出请求的会话里。
+ * 这里做集中处理：并发 401 只跳一次，已经在 /login 时不再重复跳。
+ */
+export function redirectToLogin(): void {
+  clearAuthSession();
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname.startsWith('/login')) return;
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
+  window.location.assign('/login');
+}
+
+/**
+ * 刷新失败后的冷却期。
+ *
+ * <p>没有这个冷却期时，每个并发/轮询请求发现 401 都会各自触发一次刷新；
+ * 刷新本身也 401（token 过期、Cookie 丢了）时，页面就会以每次请求一个的节奏
+ * 持续打 `/api/auth/refresh`（实测 55 秒 20 次），白白烧网络与主线程。
+ * 失败后 10 秒内直接返回 null，让调用方走自己的兜底/跳登录。
+ */
+const REFRESH_FAILURE_COOLDOWN_MS = 10_000;
+let refreshFailedAt = 0;
 
 /**
  * 刷新 Access Token。
@@ -140,10 +173,14 @@ export function clearAuthSession(): void {
 export async function refreshAccessToken(force = false): Promise<string | null> {
   if (!force && accessToken) return accessToken;
   if (refreshPromise) return refreshPromise;
+  if (!force && refreshFailedAt > 0 && Date.now() - refreshFailedAt < REFRESH_FAILURE_COOLDOWN_MS) {
+    return null;
+  }
   refreshPromise = (async () => {
     const peerToken = await requestTokenFromPeer();
     if (peerToken) {
       accessToken = peerToken;
+      refreshFailedAt = 0;
       return peerToken;
     }
     try {
@@ -155,18 +192,26 @@ export async function refreshAccessToken(force = false): Promise<string | null> 
       });
       if (!response.ok) {
         clearAuthSession();
+        // 顺序很重要：clearAuthSession 会重置冷却，失败时间戳必须写在它之后
+        refreshFailedAt = Date.now();
         return null;
       }
       const body = await response.json() as { data?: AuthPayload };
       const token = body.data?.accessToken ?? null;
       accessToken = token;
-      if (token) broadcastToken(token);
+      if (token) {
+        refreshFailedAt = 0;
+        broadcastToken(token);
+      } else {
+        refreshFailedAt = Date.now();
+      }
       if (body.data?.userId && body.data.displayName) {
         persistUser({ userId: body.data.userId, displayName: body.data.displayName });
       }
       return token;
     } catch {
       clearAuthSession();
+      refreshFailedAt = Date.now();
       return null;
     } finally {
       refreshPromise = null;
@@ -182,9 +227,17 @@ export async function authorizedFetch(input: RequestInfo | URL, init: RequestIni
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
   let response = await fetch(input, { ...init, headers });
-  if (response.status === 401 && await refreshAccessToken(true)) {
-    headers.set('Authorization', `Bearer ${getAccessToken()}`);
-    response = await fetch(input, { ...init, headers });
+  if (response.status === 401) {
+    // 先尝试刷新；刷新失败或重试后仍然 401，就强制回登录页，不能把 401 丢给调用方
+    // 各自弹错（否则 SSE/上传/轮询会停在一个永远未授权的页面上）。
+    const refreshed = await refreshAccessToken(true);
+    if (refreshed) {
+      headers.set('Authorization', `Bearer ${getAccessToken()}`);
+      response = await fetch(input, { ...init, headers });
+    }
+    if (response.status === 401) {
+      redirectToLogin();
+    }
   }
   return response;
 }

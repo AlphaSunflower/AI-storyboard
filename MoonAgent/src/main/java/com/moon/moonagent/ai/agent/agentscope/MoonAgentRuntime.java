@@ -187,6 +187,10 @@ public class MoonAgentRuntime implements AgentRecoverySource {
     @Autowired(required = false)
     private ToolCallContentMiddleware toolCallContentMiddleware;
 
+    /** ppt-master 按需启用：只有本轮引用 PPT 时才加入技能白名单并物化到会话沙箱。 */
+    @Autowired(required = false)
+    private PptMasterSkillSupport pptMasterSkillSupport;
+
     @Autowired(required = false)
     private FrameworkToolAuditMiddleware frameworkToolAuditMiddleware;
 
@@ -768,7 +772,12 @@ public class MoonAgentRuntime implements AgentRecoverySource {
         turnState.setReferenceInputMode(classifyReferenceInput(request, hasBoundAssetGroups));
         boolean canvasEdit = isCanvasEditTurn(request);
         // 每会话组合：技能白名单 + 工具组白名单都由会话/模式推导，不看套餐或用户等级。
-        ToolCatalog.Profile toolProfile = ToolCatalog.profileFor(canvasEdit);
+        // ppt-master 是可选技能：只有本轮引用（/ppt、ppt-master、PPT/幻灯片等）或该会话
+        // 此前引用过时才加入白名单；其余回合模型完全看不到它。
+        java.util.Set<String> referencedSkills = canvasEdit || pptMasterSkillSupport == null
+                ? java.util.Set.of()
+                : pptMasterSkillSupport.skillsForTurn(conversation.getId(), request.getContent());
+        ToolCatalog.Profile toolProfile = ToolCatalog.profileFor(canvasEdit, referencedSkills);
         RuntimeContext.Builder runtimeBuilder = RuntimeContext.builder()
                 .userId(conversation.getUserId())
                 .sessionId(conversation.getId())
@@ -1265,6 +1274,13 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 "canvas_image_crop",
                 "canvas_image_split",
                 "canvas_image_adjust",
+                // 分组只是组织动作（不生成、不花钱），放行；执行确认仍由分组上的按钮承担。
+                "canvas_group_nodes",
+                // 执行类工具已被服务端强制成预览（CanvasBrowserMailbox 的 FORCED_DRY_RUN_METHODS）：
+                // 它们不会真正开跑，只返回 status=preview + groupId。真正花钱的执行由用户在画布分组上
+                // 点「执行」触发，所以这里不再叠加一道 HITL 确认（那道确认点了也没用）。
+                "canvas_execute_node",
+                "canvas_execute_graph",
                 // canvas_execute_node / canvas_execute_graph 不在这里：画布执行会真的花钱、花时间
                 // （每张图 30–60s、每段视频 2–5min），必须先经用户确认——见下面的 ASK 清单。
                 // canvas_cancel_execution 仍直接放行：用户随时要能停。
@@ -1301,11 +1317,8 @@ public class MoonAgentRuntime implements AgentRecoverySource {
                 // 认为智能体有删除能力，也不要把它们当成可用工具名写进技能或提示词。
                 "canvas_delete_nodes",
                 "canvas_delete_edges",
-                // 画布执行 = 真实花费与长等待（图 30–60s / 视频 2–5min），必须让用户先确认；
-                // 与 canvas-run 技能声明的「确认执行」以及本文件顶部「Canvas 执行进入 ASK/HITL」
-                // 保持一致。放进 ALLOW 会让智能体在同一轮把整轮生成跑掉，用户没有插话机会。
-                "canvas_execute_node",
-                "canvas_execute_graph",
+                // 画布执行工具不在这里：它们被 CanvasBrowserMailbox 强制成预览，
+                // 不会真正开跑；真正的执行（真实花费与长等待）由用户在画布分组上点「执行」触发。
                 "merge_storyboard_videos",
                 "write_file",
                 "run_python_script",

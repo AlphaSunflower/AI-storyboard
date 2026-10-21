@@ -20,3 +20,7 @@ moon:
     max-timeout-seconds: ${MOON_SANDBOX_MAX_TIMEOUT_SECONDS:600}
     max-concurrent-executions: ${MOON_SANDBOX_MAX_CONCURRENT_EXECUTIONS:4}
     idle-expiry: ${MOON_SANDBOX_IDLE_EXPIRY:24h}
+    transient-ttl: ${MOON_SANDBOX_TRANSIENT_TTL:1h}
+    # 只读技能包根目录：镜像里预置 <root>/<skill>/SKILL.md，按引用物化到会话工作区。
+    skill-bundle-root: ${MOON_SANDBOX_SKILL_BUNDLE_ROOT:/opt/moon-skills}
+    skill-bundle-version: ${MOON_SANDBOX_SKILL_BUNDLE_VERSION:1}

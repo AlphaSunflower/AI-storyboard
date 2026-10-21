@@ -189,6 +189,13 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
     @Autowired(required = false)
     private transient SandboxSessionRegistry sandboxSessionRegistry;
 
+    /**
+     * 站内通知（可选依赖）：任务进入终态时写一条通知，供手机端角标与通知中心展示。
+     * 用字段注入保持既有 9 参构造器与单测不变；未装配时静默跳过。
+     */
+    @Autowired(required = false)
+    private transient com.moon.moonagent.service.notification.NotificationService notificationService;
+
     @Override
     public String name() {
         return "agent-async";
@@ -2466,6 +2473,44 @@ public class AgentScopeAsyncTaskService implements AgentRecoverySource {
             // 因此这里显式降级为告警，绝不向上传播。
             log.warn("Task snapshot push failed: taskId={}, error={}",
                     taskId, pushFailure.getMessage());
+        }
+        notifyTerminalTask(task);
+    }
+
+    /**
+     * 任务进入终态时写一条站内通知（完成 / 部分完成 / 失败）。
+     *
+     * <p>用户主动取消不通知：那通常是他刚点过按钮，再弹一条只是噪音。
+     * {@code dedupeKey} 由 taskId + status 组成，同一终态被多次 publish 也只落一条。
+     */
+    private void notifyTerminalTask(AgentAsyncTask task) {
+        if (notificationService == null || task == null || !isTerminal(task.getStatus())) return;
+        if ("cancelled".equals(task.getStatus())) return;
+        try {
+            String label = switch (task.getStatus()) {
+                case "completed" -> "生成任务完成";
+                case "partial" -> "生成任务部分完成";
+                default -> "生成任务失败";
+            };
+            String suffix = task.getTitle() == null || task.getTitle().isBlank()
+                    ? "" : " · " + task.getTitle();
+            boolean succeeded = "completed".equals(task.getStatus()) || "partial".equals(task.getStatus());
+            String body = succeeded
+                    ? (task.getResultSummary() == null || task.getResultSummary().isBlank()
+                        ? "任务已结束，点开查看结果。" : task.getResultSummary())
+                    : (task.getError() == null || task.getError().isBlank()
+                        ? "任务未完成，点开查看详情。" : task.getError());
+            notificationService.create(
+                    task.getUserId(),
+                    "TASK_COMPLETED",
+                    label + suffix,
+                    body,
+                    "conversation",
+                    task.getConversationId(),
+                    "task:" + task.getId() + ":" + task.getStatus());
+        } catch (RuntimeException notificationFailure) {
+            log.warn("Task notification failed: taskId={}, error={}",
+                    task.getId(), notificationFailure.getMessage());
         }
     }
 

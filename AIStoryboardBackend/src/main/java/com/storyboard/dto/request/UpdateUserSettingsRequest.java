@@ -6,5 +6,6 @@ package com.storyboard.dto.request;
 public record UpdateUserSettingsRequest(
     String defaultApprovalMode,
     String busySendBehavior,
-    String workStepDisplay
+    String workStepDisplay,
+    String themePreference
 ) {}

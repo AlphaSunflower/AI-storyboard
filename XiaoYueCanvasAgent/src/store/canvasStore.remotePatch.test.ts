@@ -145,6 +145,26 @@ describe('canvasStore.applyRemotePatch', () => {
     expect(state.selectedNodeId).toBe('n1');
   });
 
+  it('正在拖动的节点不会被远端补丁挪位置（松手前不能被"弹回原位"）', () => {
+    const dragged = { ...node('n1'), position: { x: 120, y: 80 }, dragging: true };
+    const idle = node('n2', {}, 400);
+    reset([dragged as CanvasNode, idle]);
+
+    // 远端补丁里是服务端保存的旧位置
+    useCanvasStore.getState().applyRemotePatch({
+      nodes: [
+        { ...node('n1'), position: { x: 0, y: 0 } },
+        { ...node('n2'), position: { x: 640, y: 0 } },
+      ],
+    });
+
+    const state = useCanvasStore.getState();
+    // 拖动中的节点保持本地位置，其它节点照常跟随远端
+    expect(state.nodes.find((item) => item.id === 'n1')?.position).toEqual({ x: 120, y: 80 });
+    expect(state.nodes.find((item) => item.id === 'n1')?.dragging).toBe(true);
+    expect(state.nodes.find((item) => item.id === 'n2')?.position).toEqual({ x: 640, y: 0 });
+  });
+
   it('结构不合法时抛错且不改动本地图（调用方据此退回全量重载）', () => {
     reset([node('n1')]);
     const before = JSON.stringify(useCanvasStore.getState().nodes);

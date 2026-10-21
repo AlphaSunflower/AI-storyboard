@@ -53,7 +53,7 @@ const selectStyle: React.CSSProperties = {
   borderRadius: 6,
   border: '1px solid var(--color-hairline)',
   fontSize: 12,
-  background: 'white',
+  background: 'var(--color-panel)',
   color: 'var(--color-ink)',
   outline: 'none',
   cursor: 'pointer',
@@ -102,7 +102,7 @@ const sceneTextareaStyle: React.CSSProperties = {
 
 /** 透明主色描边按钮的悬停态：填充主色 */
 const ghostHover = {
-  onMouseEnter: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--color-primary)'; el.style.color = 'white'; el.style.borderColor = 'var(--color-primary)'; },
+  onMouseEnter: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = 'var(--color-primary)'; el.style.color = 'var(--color-on-primary)'; el.style.borderColor = 'var(--color-primary)'; },
   onMouseLeave: (e: React.MouseEvent) => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.color = 'var(--color-primary)'; el.style.borderColor = 'var(--color-primary)'; },
 };
 
@@ -836,7 +836,7 @@ export function PreviewPanel() {
                   style={{
                     padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none',
                     background: Object.keys(imageDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
-                    color: Object.keys(imageDraft).length === 0 ? 'var(--color-muted)' : 'white',
+                    color: Object.keys(imageDraft).length === 0 ? 'var(--color-muted)' : 'var(--color-on-primary)',
                     cursor: Object.keys(imageDraft).length === 0 ? 'not-allowed' : 'pointer',
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                   }}
@@ -1056,7 +1056,7 @@ export function PreviewPanel() {
                   style={{
                     padding: '4px 14px', fontSize: 12, borderRadius: 'var(--rounded-sm)', border: 'none',
                     background: Object.keys(videoDraft).length === 0 ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
-                    color: Object.keys(videoDraft).length === 0 ? 'var(--color-muted)' : 'white',
+                    color: Object.keys(videoDraft).length === 0 ? 'var(--color-muted)' : 'var(--color-on-primary)',
                     cursor: Object.keys(videoDraft).length === 0 ? 'not-allowed' : 'pointer',
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                   }}
@@ -1226,7 +1226,7 @@ export function PreviewPanel() {
             ) : (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                 {sceneImageGroups.map((binding) => (
-                  <span key={`${binding.groupId}-${binding.snapshotId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 8px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                  <span key={`${binding.groupId}-${binding.snapshotId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 8px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'var(--color-panel)', fontSize: 12, color: 'var(--color-ink)' }}>
                     资产组 · {binding.media.length} 项
                     {binding.stale && (
                       <button
@@ -1256,7 +1256,7 @@ export function PreviewPanel() {
             ) : (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                 {sceneVideoGroups.map((binding) => (
-                  <span key={`${binding.groupId}-${binding.snapshotId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 8px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'white', fontSize: 12, color: 'var(--color-ink)' }}>
+                  <span key={`${binding.groupId}-${binding.snapshotId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 8px', borderRadius: 999, border: '1px solid var(--color-hairline)', background: 'var(--color-panel)', fontSize: 12, color: 'var(--color-ink)' }}>
                     资产组 · {binding.media.length} 项
                     {binding.stale && (
                       <button

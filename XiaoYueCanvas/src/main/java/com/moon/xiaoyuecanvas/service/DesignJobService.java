@@ -37,6 +37,7 @@ import com.storyboard.common.generation.GenerationRecordTypes;
 import com.storyboard.common.generation.GenerationRecordUpdate;
 import com.storyboard.common.generation.GenerationRecordWriter;
 import com.storyboard.common.generation.GenerationReference;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
@@ -76,6 +80,8 @@ public class DesignJobService {
     private static final Duration LEASE_DURATION = Duration.ofHours(2);
     private static final long HEARTBEAT_INTERVAL_MS = 30_000L;
     private static final long VIDEO_POLL_TIMEOUT_MS = 60 * 60 * 1000L;
+    /** 终态帧发出后多久再关闭 SSE：留出 flush 时间，避免最后一帧被截断。 */
+    private static final long TERMINAL_FLUSH_DELAY_MS = 200L;
 
     private final CanvasJobMapper canvasJobMapper;
     private final CanvasJobRepository canvasJobRepository;
@@ -98,6 +104,12 @@ public class DesignJobService {
     private final Map<String, SseEmitter> emitters = new ConcurrentHashMap<>();
     /** jobId -> 事件追加/重放锁，保证 snapshot 与实时事件之间没有游标缺口。 */
     private final Map<String, ReentrantLock> jobLocks = new ConcurrentHashMap<>();
+    /** 单线程足够：只用来做「终态帧延迟关闭」，不承担业务，也不做心跳。 */
+    private final ScheduledExecutorService sseScheduler = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "canvas-sse-close");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Autowired
     public DesignJobService(CanvasJobMapper canvasJobMapper,
@@ -255,7 +267,7 @@ public class DesignJobService {
             CanvasJob claimed = claim.job() != null ? claim.job() : snapshotJob;
             Thread.startVirtualThread(() -> runJob(claimed, owner));
         } else if (CanvasJobStateMachine.isFinalWithoutResume(snapshotJob, OffsetDateTime.now())) {
-            completeEmitter(emitter);
+            completeEmitter(jobId, emitter);
         }
         return emitter;
     }
@@ -304,6 +316,64 @@ public class DesignJobService {
         result.put("assets", assets);
         if (job.getError() != null) result.put("error", job.getError());
         return result;
+    }
+
+    /** 服务端批次执行用的终态快照。 */
+    public record ExecutionOutcome(String jobId, String status, List<String> assetIds, String error) {
+    }
+
+    /**
+     * 提交作业并等它走到终态（服务端串行批次用）。
+     *
+     * <p>不依赖 SSE：批次执行器自己轮询 DB 里的作业状态，所以浏览器关掉也不影响执行。
+     */
+    public ExecutionOutcome submitAndWait(String userId, JobRequest request, Duration timeout) {
+        String jobId = submit(userId, request).jobId();
+        startDetached(jobId);
+        long deadline = System.currentTimeMillis() + Math.max(1_000L, timeout.toMillis());
+        while (System.currentTimeMillis() < deadline) {
+            CanvasJob job = canvasJobMapper.selectById(jobId);
+            if (job == null) return new ExecutionOutcome(jobId, "failed", List.of(), "作业不存在");
+            if (isTerminal(job.getStatus())) {
+                return new ExecutionOutcome(jobId, job.getStatus(),
+                        JsonUtil.parseList(job.getResultAssetIds()), job.getError());
+            }
+            try {
+                Thread.sleep(400L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return new ExecutionOutcome(jobId, "interrupted", List.of(), "执行被中断");
+            }
+        }
+        return new ExecutionOutcome(jobId, "failed", List.of(), "执行超时");
+    }
+
+    /**
+     * 不挂 SSE 直接开跑（服务端批次用）：认领 lease 后在虚拟线程里跑，事件照常落库，
+     * 之后任何 SSE 订阅者都能用 Last-Event-ID 重放。
+     */
+    public void startDetached(String jobId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        String owner = UUID.randomUUID().toString();
+        CanvasJobRepository.Claim claim = canvasJobRepository.claim(jobId, owner, now, now.plus(LEASE_DURATION));
+        if (claim == null || claim.job() == null) return;
+        CanvasJob claimed = claim.job();
+        Thread.startVirtualThread(() -> runJob(claimed, owner));
+    }
+
+    /** 内部取消：调用方已经校验过批次归属，这里不再按 userId 过滤。 */
+    public void cancelDetached(String jobId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        CanvasJobEvent event = canvasJobRepository.cancel(jobId, now);
+        if (event == null) return;
+        ReentrantLock lock = lockFor(jobId);
+        lock.lock();
+        try {
+            publishEvent(jobId, event);
+            completeCurrent(jobId);
+        } finally {
+            lock.unlock();
+        }
     }
 
     /** 按项目列全部会话（画布侧边栏对话列表）。 */
@@ -879,7 +949,7 @@ public class DesignJobService {
                     || "job.failed".equals(event.getType())
                     || "job.cancelled".equals(event.getType())) {
                 SseEmitter current = emitters.get(jobId);
-                if (current != null) completeEmitter(current);
+                if (current != null) completeEmitter(jobId, current);
             }
         } finally {
             lock.unlock();
@@ -1013,15 +1083,30 @@ public class DesignJobService {
 
     private void completeCurrent(String jobId) {
         SseEmitter current = emitters.get(jobId);
-        if (current != null) completeEmitter(current);
+        if (current != null) completeEmitter(jobId, current);
     }
 
-    private void completeEmitter(SseEmitter emitter) {
-        try {
-            emitter.complete();
-        } catch (Exception e) {
-            log.warn("SSE 完成失败: {}", e.getMessage());
-        }
+    /**
+     * 收尾 SSE：先让终态帧 flush 出去，再关闭连接。
+     *
+     * <p>`send()` 只是把事件交给容器写缓冲，紧接着 `complete()` 结束异步请求时，最后这一帧
+     * （恰好就是 `job.completed`）可能被截断——前端会永远收不到终态，表现为「图出来了、
+     * 节点还停在生成中」「分组执行卡在第一个节点」。这里延迟一小段时间再 complete，
+     * 只做收尾，不发心跳（心跳会不断产生无关帧，干扰前端的事件驱动与轮询）。
+     */
+    private void completeEmitter(String jobId, SseEmitter emitter) {
+        sseScheduler.schedule(() -> {
+            try {
+                emitter.complete();
+            } catch (Exception e) {
+                log.warn("SSE 完成失败: {}", e.getMessage());
+            }
+        }, TERMINAL_FLUSH_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
+    @PreDestroy
+    void shutdownSseScheduler() {
+        sseScheduler.shutdownNow();
     }
 
     private boolean isTerminal(String status) {

@@ -35,6 +35,7 @@ import { importCanvasLibraryAsset, importCanvasLibraryGroup } from '../services/
 import { canvasCommandService } from '../canvas/canvasCommandService';
 import { startGraphExecution } from '../canvas/graphExecutionService';
 import { collapsedGroupNodeIds, collectCanvasGroups, groupMemberNodes } from '../canvas/groups';
+import { usePendingGroupRunStore } from '../canvas/pendingGroupRun';
 import { usePresence } from '../hooks/usePresence';
 
 const COMPACT_NODE_WIDTH = 156;
@@ -405,6 +406,7 @@ function CanvasInner(props: CanvasWorkspaceProps) {
     }
     try {
       startGraphExecution(projectId, memberIds, {}, 1);
+      usePendingGroupRunStore.getState().clear(groupId);
       notify(`已按节点顺序开始执行「${title}」（${memberIds.length} 个节点）`);
     } catch (error) {
       notify(error instanceof Error ? error.message : '执行分组失败');

@@ -31,7 +31,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { bootstrapJobAuth, clearToken, getJobToken, setJobToken, tokenExpired } from './services/jobAuth';
 import { recoverGenerationJobs } from './canvas/generationRuntime';
 import { decideLiveRefresh } from './canvas/liveRefresh';
-import { recoverGraphExecutions } from './canvas/graphExecutionService';
+import { recoverGraphExecutions, syncServerExecutions } from './canvas/graphExecutionService';
 import { usePresence } from './hooks/usePresence';
 import { hydrateReferencedCanvasAssets } from './services/canvasMedia';
 
@@ -287,6 +287,8 @@ export default function App() {
         })
         .catch(() => undefined);
       recoverGraphExecutions();
+      // 服务端执行的批次：刷新/重开后把还在跑的那一批接回来（轮询 + 结果落地）。
+      void syncServerExecutions(canvas.id).catch(() => undefined);
     };
     reconcile();
     const timer = window.setInterval(reconcile, 15_000);
@@ -384,8 +386,20 @@ export default function App() {
         }
         await saveInFlight.current;
       } while (pendingSave.current);
-      // 落库成功（含 40901 重试后的成功）→ 本地与服务端对齐，轮询恢复工作。
+      // 落库成功（含 40901 冲突合并后的成功）→ 本地与服务端对齐，轮询恢复工作。
       setHasLocalChanges(false);
+      // 冲突合并可能把智能体刚在服务端建的节点带回来了：立刻采用，不用等下一次轮询或刷新。
+      const latest = canvasRef.current;
+      if (latest?.id === next.id) {
+        const known = new Set(useCanvasStore.getState().nodes.map((node) => node.id));
+        const incoming = (latest.nodes ?? []).filter((node) => !known.has(node.id));
+        if (incoming.length) {
+          const assets = await getAssetMetadatas(projectAssetIds(latest.nodes));
+          hydrateMetadata(assets);
+          loadProjectGraph(latest);
+          console.info(`[canvas] 已同步服务端新增的 ${incoming.length} 个节点（保存冲突合并）`);
+        }
+      }
       void refreshProjects();
       return canvasRef.current?.id === next.id ? canvasRef.current : next;
     } catch (error) {
@@ -395,7 +409,7 @@ export default function App() {
       console.warn('[canvas] 画布保存失败，本地改动已保留', error);
       throw error;
     }
-  }, [refreshProjects]);
+  }, [refreshProjects, getAssetMetadatas, projectAssetIds, hydrateMetadata, loadProjectGraph]);
 
   const openProjectHome = useCallback(async (projectId: string) => {
     const nextProject = await loadProject(projectId);
@@ -550,6 +564,10 @@ export default function App() {
         hasPendingDebounce: saveTimer.current !== null,
         hasLocalChanges,
         saveRetryCount: saveRetryCount.current,
+        // 拖动中/批次执行中都不能整图重载：前者会把节点位置打回服务端旧值（松手瞬间"弹回原位"），
+        // 后者会把本地 executions 换成服务端旧快照，正在跑的批次直接消失。
+        dragging: useCanvasStore.getState().dragStartSnapshot !== null,
+        executing: useCanvasStore.getState().executions.some((execution) => execution.status === 'running'),
       });
       if (decision.action === 'skip') {
         // 只在原因变化时打一行，避免每 4s 刷屏
@@ -586,6 +604,11 @@ export default function App() {
           if (stopped) return;
           const local = canvasRef.current?.revision ?? 0;
           if (revision <= local) return;
+          if (decision.action === 'check' && decision.deferReload) {
+            // 本地还有保存在飞/防抖：这一轮只感知，不重载；下一次 tick（4s 后）再落地。
+            console.info(`[canvas-live] 服务端有更新 server=${revision} local=${local}，等本地保存落地后再整图重载`);
+            return;
+          }
           console.info(`[canvas-live] 服务端有更新 server=${revision} local=${local} → 整图重载`);
           return openCanvas(projectId, canvasId);
         })
@@ -602,6 +625,38 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [view, project, canvas, hasLocalChanges, openCanvas, persistCurrentCanvas, notifySaveFailure, notify]);
+
+  /**
+   * 画布信箱里的写命令跑在浏览器里，用的是本地这份图。
+   *
+   * <p>智能体刚在服务端建的节点，本地还没拉下来时，命令会报 `NODE_NOT_FOUND` /
+   * `CANVAS_REVISION_CONFLICT`（2026-10-19 实测：apply_plan 建完 10 个节点后立刻
+   * `canvas_group_nodes`，前端报「节点不存在：…」）。这里接一个「先对齐服务端再重试」的握手：
+   * 命令层派发 `morrow:canvas-resync`，我们整图重载后回 `morrow:canvas-resynced`，
+   * 命令层收到后重试一次，用户就不会再看到那次假报错。
+   */
+  useEffect(() => {
+    const onResync = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; canvasId?: string; reason?: string }>).detail ?? {};
+      const targetProject = detail.projectId ?? project?.id;
+      const targetCanvas = detail.canvasId ?? canvasRef.current?.id;
+      const done = () => window.dispatchEvent(new CustomEvent('morrow:canvas-resynced', {
+        detail: { canvasId: targetCanvas ?? '' },
+      }));
+      if (!targetProject || !targetCanvas) {
+        done();
+        return;
+      }
+      console.info(`[canvas-live] 画布命令需要最新图（${detail.reason ?? 'resync'}）→ 整图重载后重试`);
+      void openCanvas(targetProject, targetCanvas)
+        .catch((error) => {
+          console.warn('[canvas-live] 对齐服务端画布失败', error);
+        })
+        .finally(done);
+    };
+    window.addEventListener('morrow:canvas-resync', onResync);
+    return () => window.removeEventListener('morrow:canvas-resync', onResync);
+  }, [openCanvas, project?.id]);
 
   const newProject = useCallback(async () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);

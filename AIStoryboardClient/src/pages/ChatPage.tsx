@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Profiler, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AgentConversationList } from '../components/agent/AgentConversationList';
 import { LiveOrb } from '../components/ui/live-orb';
@@ -21,6 +21,7 @@ import { useChatApps } from '../components/agent/apps/useChatApps';
 import { GenerationRecordsModal } from '../components/agent/GenerationRecordsModal';
 import { AssetDetailHost } from '../components/agent/AssetDetailHost';
 import { ChatComposer, DS } from '../components/agent/ChatComposer';
+import { ChatEntryCards } from '../components/agent/ChatEntryCards';
 import { ChatDockShell, type ChatDockPresentation } from '../components/agent/ChatDockShell';
 import {
   resolveChatDockMode,
@@ -50,8 +51,11 @@ import { matchMoonShortcut, MOON_PAGE_SHORTCUT_IDS } from '../lib/moonShortcuts'
 import { notify } from '../stores/toastStore';
 import { shouldShowFirstRunHero } from '../components/agent/sideChatFrame';
 import { agentApi } from '../api/agent';
-import { X, FolderKanban, PanelLeftClose, ChevronDown, ChevronsDown, Info, User, LogOut, Library, Search, Keyboard } from 'lucide-react';
+import { X, FolderKanban, PanelLeftClose, ChevronDown, ChevronsDown, Info, User, LogOut, Library, Search, Keyboard, Bell } from 'lucide-react';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
+import { NotificationCenter } from '../components/layout/NotificationCenter';
+import { useNotificationPolling } from '../hooks/useNotificationPolling';
+import { useNotificationStore } from '../stores/notificationStore';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePresence } from '../hooks/usePresence';
 import {
@@ -62,6 +66,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useAccountSettingsStore } from '../stores/accountSettingsStore';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
 import { useAgentStore } from '../stores/agentStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useDocumentPreviewStore } from '../stores/documentPreviewStore';
 import { useSideChatSelectionStore } from '../stores/sideChatSelectionStore';
 import {
@@ -85,6 +90,7 @@ import { canvasIdFromUrl, openChatAppEntry, type ChatAppKey } from '../component
 import { requestSideChatSelectionContext } from '../lib/sideChatSelectionSync';
 import { shouldHidePendingCardMessage } from '../lib/pendingCardMessage';
 import MoonLogo from '../components/agent/MoonLogo';
+import { logProfilerRender } from '../lib/devLongTaskLogger';
 import { Frame } from 'lucide-react';
 import '../styles/chat-theme.css';
 import '../styles/chat-interactions.css';
@@ -119,6 +125,26 @@ function AgentStreamErrorNotice({ message }: { message: string }) {
   );
 }
 
+/** 消息列表窗口渲染：首屏条数 / 每次「显示更早」的步长（见 ChatPage 注释）。 */
+const CHAT_RENDER_INITIAL = 8;
+const CHAT_RENDER_STEP = 20;
+
+/**
+ * 消息区骨架屏：切会话时 `messages` 会被清空、首屏数据还在路上，
+ * 这段空窗期用几条灰条顶住，比"白屏一下再整屏刷出来"稳得多。
+ */
+function ChatThreadSkeleton() {
+  return (
+    <div className="chat-thread-skeleton" aria-busy="true" aria-label="正在加载会话">
+      <p className="chat-thread-skeleton__hint">正在翻聊天记录，顺便抖抖灰…</p>
+      <div className="chat-thread-skeleton__row chat-thread-skeleton__row--user" />
+      <div className="chat-thread-skeleton__row chat-thread-skeleton__row--assistant" />
+      <div className="chat-thread-skeleton__row chat-thread-skeleton__row--assistant chat-thread-skeleton__row--short" />
+      <div className="chat-thread-skeleton__row chat-thread-skeleton__row--user chat-thread-skeleton__row--narrow" />
+    </div>
+  );
+}
+
 /**
  * 独立 AI 对话页（/chat）——仿 DeepSeek 桌面端：
  * 最左图标导航（项目/AI资产库/左下角设置）｜会话列表（可拖宽）｜主区：
@@ -126,6 +152,9 @@ function AgentStreamErrorNotice({ message }: { message: string }) {
  */
 export function ChatPage() {
   const isMobile = useIsMobile();
+  useNotificationPolling();
+  const notificationUnread = useNotificationStore((s) => s.unread);
+  const openNotifications = useNotificationStore((s) => s.openDrawer);
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useAuthStore((s) => s.logout);
@@ -143,16 +172,42 @@ export function ChatPage() {
   const leaveCanvasEditMode = useAgentStore((s) => s.leaveCanvasEditMode);
   const setCanvasBindingStatus = useAgentStore((s) => s.setCanvasBindingStatus);
   const newConversation = useAgentStore((s) => s.newConversation);
+  /**
+   * 只订阅页面真正读的字段（useShallow）。
+   *
+   * <p>原来是 `useAgentStore()` 全量订阅：store 里任何一次 set 都会重渲染整个 ChatPage——
+   * 包括任务流的轮询 tick、视频进度、画布绑定、工具草稿等与本页无关的状态；
+   * 而 ChatPage 会遍历渲染整条消息列表（react-markdown 逐条解析），
+   * 于是"消息列表越大越卡"。收窄到 12 个字段后，无关状态变化不再触发整页重渲染。
+   */
   const {
     messages, messageHasMore, loadOlderMessages, streaming, waitingHumanInput, waitingVideoPlan, streamError, workflowHint,
+    messagesLoadedConversationId,
     conversations, activeConversationId,
     renameConversation, editAndResend,
-  } = useAgentStore();
+  } = useAgentStore(useShallow((state) => ({
+    messages: state.messages,
+    messagesLoadedConversationId: state.messagesLoadedConversationId,
+    messageHasMore: state.messageHasMore,
+    loadOlderMessages: state.loadOlderMessages,
+    streaming: state.streaming,
+    waitingHumanInput: state.waitingHumanInput,
+    waitingVideoPlan: state.waitingVideoPlan,
+    streamError: state.streamError,
+    workflowHint: state.workflowHint,
+    conversations: state.conversations,
+    activeConversationId: state.activeConversationId,
+    renameConversation: state.renameConversation,
+    editAndResend: state.editAndResend,
+  })));
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
   useEffect(() => {
     const state = location.state as { conversationId?: string; turnId?: string } | null;
     if (state?.conversationId) {
       pendingTurnJumpRef.current = state.turnId || null;
+      // 记住这条深链目标：紧随其后的项目重置会把 activeConversationId 清空，
+      // 不留住它就会被 loadConversations 的「自动选中最近会话」顶成最新一条。
+      deepLinkConversationRef.current = state.conversationId;
       void useAgentStore.getState().selectConversation(state.conversationId);
       navigate('/chat', { replace: true, state: null });
     }
@@ -191,6 +246,8 @@ export function ChatPage() {
   const [composerCollapsed, setComposerCollapsed] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const pendingTurnJumpRef = useRef<string | null>(null);
+  /** 按会话 ID 深链进来的目标（项目库/通知/观测页）；项目重置时必须保住它 */
+  const deepLinkConversationRef = useRef<string | null>(null);
   const openedCanvasSessionRef = useRef<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
   const titleSavingRef = useRef(false);
@@ -320,6 +377,11 @@ export function ChatPage() {
   }, [cancelCanvasBinding, releaseCanvasMode]);
   // 顶栏「画布」直接打开画布网站，编辑器/项目库仍是内嵌小窗
   const handleChatAppOpen = useCallback((key: ChatAppKey) => {
+    // 编辑器必须带项目：静默 no-op 会让空态的入口看起来坏了，这里和快捷键保持同一条提示。
+    if (key === 'editor' && !currentProject?.id) {
+      notify({ title: '请先选择项目', description: '编辑器需要项目上下文', variant: 'info' });
+      return;
+    }
     openChatAppEntry(openChatApp, key, currentProject);
   }, [currentProject, openChatApp]);
 
@@ -509,7 +571,11 @@ export function ChatPage() {
   const projectId = currentProject?.id;
   useEffect(() => {
     if (!projectId) return;
-    useAgentStore.setState({ activeConversationId: null, messages: [], generating: {}, replyUnread: {}, streaming: false, workflowHint: '' });
+    // 深链（项目库「使用位置 · 对话」/ 产出对话 / 通知 / 观测页）按 ID 指定的会话必须保留：
+    // 这里若一并清空，下面的 loadConversations 会「自动选中最近会话」，落到最新一条而不是目标。
+    const deepLinkConversationId = deepLinkConversationRef.current;
+    deepLinkConversationRef.current = null;
+    useAgentStore.getState().resetConversationForProject(deepLinkConversationId);
     if (sideChatMode && sideChatId) {
       void agentApi.getConversation(sideChatId)
         .then((response) => {
@@ -637,6 +703,88 @@ export function ChatPage() {
     !!waitingHumanInput,
     !!waitingVideoPlan,
   );
+  /**
+   * 空态 hero 延迟显示（350ms）。
+   *
+   * <p>切会话时 store 会先 `set({messages: []})` 再等接口回消息，于是 `isEmpty` 在这段
+   * 时间里为 true —— hero 会整棵挂上来（`LiveOrb variant="webgl"` 要新建 WebGL 上下文、
+   * 编译 fbm shader，外加一个完整的输入卡），消息到达后又把这棵树整体卸载换成消息列表。
+   * 每次切换都做两轮「大组件挂载 + WebGL 初始化 + 卸载」，切换那一瞬的卡顿就来自这里，
+   * 与消息多少无关。延迟 350ms 后：真正的新会话仍然显示 hero，切换途中的瞬时空态不再闪。
+   */
+  const [heroReady, setHeroReady] = useState(false);
+  useEffect(() => {
+    if (!isEmpty) {
+      setHeroReady(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setHeroReady(true), 350);
+    return () => window.clearTimeout(timer);
+  }, [isEmpty]);
+  /**
+   * 加载中绝不切到空态 hero。
+   *
+   * <p>hero 分支自带一个独立的输入框；如果加载超过 350ms 就切过去，正在打字的那个输入框
+   * 会被整棵换掉——文字和焦点一起丢，用户感觉就是"输入框断了一下"。
+   * 有会话在加载时留在消息分支（骨架 + 同一个输入框），hero 只给真正空的会话。
+   */
+  /** 首屏骨架屏：有会话、但消息还没落到 store（切会话的空窗期）；出错时不再转圈 */
+  const threadLoading = !!activeConversationId
+    && messagesLoadedConversationId !== activeConversationId
+    && messages.length === 0
+    && !streamError;
+  const showHero = isEmpty && heroReady && !threadLoading;
+  /**
+   * 消息列表按窗口渲染：首屏只铺最近 12 条，其余点「显示更早的 N 条」再往上铺。
+   *
+   * <p>实测：接口 200ms 就把 50 条消息拿回来了，但**一次性渲染** 50 条在 dev 模式要
+   * 7.7 秒主线程长任务（≈150ms/条：markdown 解析 + 代码高亮 + GSAP 入场 + 布局），
+   * 页面看起来就是"加载半天"。窗口渲染把这个成本从「历史长度」上解耦：
+   * 首屏 12 条 ≈ 2 秒以内，越往上翻才付越多的钱。
+   *
+   * <p>注意只影响"渲染多少条"：`messages` 仍是全量，`isEmpty` / 行边栏 / 编辑最后一条
+   * / 自动滚底都用全量数据，语义不变。
+   */
+  /**
+   * 渲染窗口按会话分别记。
+   *
+   * <p>原来是 `useState` + `useEffect` 在切会话后重置——但 effect 在**首次渲染之后**才跑，
+   * 于是"上个会话翻到 48 条 → 切到新会话"的第一帧会直接铺 48 条，再回落到 8 条：
+   * 一次切换干了两次大渲染，输入框要等它跑完才有反应。现在按会话取窗口，
+   * 新会话天然从 8 开始，没有重置窗口期。
+   */
+  const [windowByConversation, setWindowByConversation] = useState<Record<string, number>>({});
+  const conversationKey = activeConversationId ?? '';
+  const renderWindow = windowByConversation[conversationKey] ?? CHAT_RENDER_INITIAL;
+  const setRenderWindow = useCallback((updater: number | ((count: number) => number)) => {
+    setWindowByConversation((current) => {
+      const key = conversationKey;
+      const previous = current[key] ?? CHAT_RENDER_INITIAL;
+      const next = typeof updater === 'function' ? updater(previous) : updater;
+      return next === previous ? current : { ...current, [key]: next };
+    });
+  }, [conversationKey]);
+  const windowedMessages = useMemo(
+    () => (renderWindow >= messages.length ? messages : messages.slice(-renderWindow)),
+    [messages, renderWindow],
+  );
+  /**
+   * 列表用过渡渲染（React 并发特性）：切会话时消息列表的渲染会被切成 5ms 的小片，
+   * 中间让出主线程，输入框/滚动始终能响应；旧内容先留着，新内容就绪再整体替换。
+   * 这是 ChatGPT/Claude 那类长列表的通行做法——不是把渲染做快，而是让它可被打断。
+   */
+  const deferredMessages = useDeferredValue(windowedMessages);
+  /** 只有最新一条做入场动画：往上翻历史时二十条一起淡入，看起来像整页重新加载 */
+  const newestMessageId = messages[messages.length - 1]?.id;
+  const hiddenMessageCount = Math.max(0, messages.length - windowedMessages.length);
+  /** 还有未渲染的历史就先本地铺开；全铺完了才去打服务端下一页。 */
+  const revealOlderMessages = useCallback(() => {
+    if (hiddenMessageCount > 0) {
+      setRenderWindow((count) => count + CHAT_RENDER_STEP);
+      return;
+    }
+    void loadOlderMessages();
+  }, [hiddenMessageCount, loadOlderMessages]);
   const scrollDownPresence = usePresence(showScrollDown && !isEmpty, 180);
 
   useEffect(() => {
@@ -728,17 +876,52 @@ export function ChatPage() {
     railSyncFrameRef.current = null;
   }, []);
 
-  /** 点刻度：该条用户消息滚到消息区顶部，留 16px 边距 */
-  const handleRailSelect = useCallback((item: ChatRailItem) => {
+  /** 点刻度：该条用户消息滚到消息区顶部，留 16px 边距。 */
+  const scrollToMessage = useCallback((messageId: string): boolean => {
     const scrollEl = activeScrollEl();
-    const anchor = railAnchorRefs.current.get(item.anchorId);
-    if (!scrollEl || !anchor) return;
+    const anchor = railAnchorRefs.current.get(messageId);
+    if (!scrollEl || !anchor) return false;
     const offset = anchor.getBoundingClientRect().top
       - scrollEl.getBoundingClientRect().top
       + scrollEl.scrollTop
       - 16;
     scrollEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+    return true;
   }, []);
+
+  /**
+   * 索引点击可能指向**还没渲染**的历史：
+   * 窗口外的先把渲染窗口撑到包含它，尚未加载的再拉一页，等消息挂上后由下面的 effect 完成滚动。
+   */
+  const pendingRailScrollRef = useRef<string | null>(null);
+  const handleRailSelect = useCallback((item: ChatRailItem) => {
+    if (scrollToMessage(item.anchorId)) return;
+    const index = messages.findIndex((message) => message.id === item.anchorId);
+    if (index < 0) {
+      pendingRailScrollRef.current = item.anchorId;
+      void loadOlderMessages();
+      return;
+    }
+    const distanceFromEnd = messages.length - index;
+    setRenderWindow((count) => Math.max(count, distanceFromEnd + CHAT_RENDER_STEP));
+    pendingRailScrollRef.current = item.anchorId;
+  }, [loadOlderMessages, messages, scrollToMessage]);
+
+  // 目标消息挂上 DOM 之后再滚：窗口刚撑开的那一帧 ref 还没写入
+  useEffect(() => {
+    const target = pendingRailScrollRef.current;
+    if (!target) return;
+    if (scrollToMessage(target)) {
+      pendingRailScrollRef.current = null;
+      return;
+    }
+    const index = messages.findIndex((message) => message.id === target);
+    if (index < 0) return; // 还没加载到那一页：等 loadOlderMessages 回来再试
+    const distanceFromEnd = messages.length - index;
+    if (distanceFromEnd > windowedMessages.length) {
+      setRenderWindow((count) => Math.max(count, distanceFromEnd + CHAT_RENDER_STEP));
+    }
+  }, [messages, scrollToMessage, windowedMessages]);
 
   const referenceSidebarWidth = collapsed ? 48 : convWidth;
   const nextDockMode = resolveChatDockMode({
@@ -788,6 +971,20 @@ export function ChatPage() {
     setGenerationCenterTab(tab);
     setGenerationCenterOpen(true);
   }, []);
+
+  /**
+   * 传给 MessageBubble 的回调必须是稳定引用：MessageBubble 是 memo 的，
+   * 每次渲染新建箭头函数会让整条消息列表在任意无关状态变化（任务轮询、素材加载）时全部重渲染——
+   * 实测一次全列表重渲染就是 6 秒级长任务。
+   */
+  const handleEditMessage = useCallback(
+    (messageId: string, nextContent: string) => editAndResend(nextContent, messageId),
+    [editAndResend],
+  );
+  const handleOpenImageCenter = useCallback(
+    () => openGenerationCenter('image'),
+    [openGenerationCenter],
+  );
 
   /**
    * 页面级快捷键：搜索 / 生成中心 / 编辑器 / 画布 / 项目库 / 帮助。
@@ -999,6 +1196,7 @@ export function ChatPage() {
   return (
     <ChatAppsProvider open={chatApps.open}>
     <>
+    <NotificationCenter />
     {/* 页面氛围光晕（fixed 覆盖手机/桌面两分支，pointer-events none） */}
     
     {/* ═══════════════ 手机端布局（CSS 隐藏/显示，避免 hooks 协调错误）═══════════════ */}
@@ -1013,6 +1211,8 @@ export function ChatPage() {
           title={activeConversation ? currentTitle : 'Moon 智能体'}
           onMenuClick={() => setMobileSidebarOpen(true)}
           onNewConversation={handleMobileNewConversation}
+          onOpenNotifications={() => void openNotifications()}
+          notificationCount={notificationUnread}
         />
 
         {/* 会话列表 overlay 抽屉 */}
@@ -1050,7 +1250,7 @@ export function ChatPage() {
         )}
 
         {/* 主对话区 */}
-        {isEmpty ? (
+        {showHero ? (
           <div style={{
             flex: 1, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 20, padding: '0 16px',
@@ -1060,6 +1260,12 @@ export function ChatPage() {
               <div style={{ marginBottom: 6 }}><MoonLogo size={28} showText textColor={DS.ink} animated /></div>
               <div style={{ fontSize: 13, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
             </div>
+            <ChatEntryCards
+              variant="compact"
+              hasProject={Boolean(currentProject?.id)}
+              canvasPhase={canvasPhase}
+              onOpen={handleChatAppOpen}
+            />
             <div style={{ width: '100%', maxWidth: 480 }}>
               <ChatComposer enableSideChat={false} canvasModeCommand={canvasModeCommand} shortcutsEnabled={showMobile && !shortcutHelpOpen} />
             </div>
@@ -1074,7 +1280,7 @@ export function ChatPage() {
                   }}
                   style={{
                     padding: '6px 14px', borderRadius: 16, border: `1px solid ${DS.border}`,
-                    background: 'white', fontSize: 12, color: DS.textSecondary, cursor: 'pointer',
+                    background: 'var(--color-panel)', fontSize: 12, color: DS.textSecondary, cursor: 'pointer',
                   }}
                 >{t}</button>
               ))}
@@ -1106,21 +1312,22 @@ export function ChatPage() {
                   flexDirection: 'column',
                 }}
               >
-                {messageHasMore && (
+                {threadLoading && <ChatThreadSkeleton />}
+                {(messageHasMore || hiddenMessageCount > 0) && (
                   <button
                     type="button"
-                    onClick={() => void loadOlderMessages()}
+                    onClick={revealOlderMessages}
                     style={{
                       alignSelf: 'center', marginBottom: 12, padding: '6px 14px',
                       border: '1px solid var(--color-hairline)', borderRadius: 8,
-                      background: 'white', color: DS.textSecondary, cursor: 'pointer',
+                      background: 'var(--color-panel)', color: DS.textSecondary, cursor: 'pointer',
                     }}
                   >
-                    加载更早消息
+                    {hiddenMessageCount > 0 ? `显示更早的 ${Math.min(hiddenMessageCount, CHAT_RENDER_STEP)} 条` : '加载更早消息'}
                   </button>
                 )}
-                {messages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
-                  <div key={m.id} style={{ animation: 'chat-msg-in 0.35s ease-out' }}>
+                {deferredMessages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
+                  <div key={m.id} style={m.id === newestMessageId ? { animation: 'chat-msg-in 0.35s ease-out' } : undefined}>
                     <MessageBubble
                       messageId={m.id}
                       conversationId={m.conversationId}
@@ -1130,9 +1337,9 @@ export function ChatPage() {
                       variant="deepseek"
                       createdAt={m.createdAt}
                       editable={canEditLastTurn && m.id === lastUserMessageId}
-                      onEditMessage={(messageId, nextContent) => editAndResend(nextContent, messageId)}
+                      onEditMessage={handleEditMessage}
                       streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
-                      onOpenGenerationCenter={() => openGenerationCenter('image')}
+                      onOpenGenerationCenter={handleOpenImageCenter}
                     />
                   </div>
                 ))}
@@ -1212,7 +1419,7 @@ export function ChatPage() {
                     padding: '0 12px',
                     borderRadius: 999,
                     border: '1px solid var(--color-hairline)',
-                    background: 'white',
+                    background: 'var(--color-panel)',
                     color: 'var(--color-muted)',
                     cursor: 'pointer',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
@@ -1248,7 +1455,7 @@ export function ChatPage() {
           </>
         )}
 
-        <MobileBottomNav onOpenAssets={() => navigate('/library')} />
+        <MobileBottomNav fixed={false} badges={{ chat: notificationUnread }} />
       </div>
     {/* ═══════════════ 桌面端布局（CSS 隐藏/显示）═══════════════ */}
     <div
@@ -1301,6 +1508,23 @@ export function ChatPage() {
                       className="chat-icon-button"
                       {...railHover}
                     ><Library size={18} strokeWidth={1.8} /></button>
+                  </Tooltip>
+                  <Tooltip side="right" label="通知">
+                    <button
+                      onClick={() => void openNotifications()}
+                      aria-label="通知"
+                      style={{ ...railIconBtn, position: 'relative' }}
+                      className="chat-icon-button"
+                      {...railHover}
+                    >
+                      <Bell size={18} strokeWidth={1.8} />
+                      {notificationUnread > 0 && (
+                        <span style={{
+                          position: 'absolute', top: 7, right: 7, width: 7, height: 7,
+                          borderRadius: '50%', background: 'var(--color-primary)',
+                        }} />
+                      )}
+                    </button>
                   </Tooltip>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
@@ -1394,20 +1618,21 @@ export function ChatPage() {
                           aria-label={canvasPhase === 'natural' ? '切换项目' : '请先离开画布编辑模式'}
                           style={{
                             width: '100%', display: 'flex', alignItems: 'center', gap: 7,
-                            border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white',
+                            border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)',
                             padding: '0 10px', height: 36, fontSize: 13, fontWeight: 500,
                             color: DS.ink, cursor: canvasPhase === 'natural' ? 'pointer' : 'not-allowed',
                             opacity: canvasPhase === 'natural' ? 1 : 0.5,
                             boxShadow: 'var(--shadow-xs)',
+                            transition: 'background-color 0.15s, border-color 0.15s, color 0.15s',
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-subtle)'; e.currentTarget.style.border = '1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-hairline))'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; e.currentTarget.style.border = '1px solid var(--color-hairline)'; }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-subtle)'; e.currentTarget.style.border = '1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-hairline))'; e.currentTarget.style.color = DS.brand; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-panel)'; e.currentTarget.style.border = '1px solid var(--color-hairline)'; e.currentTarget.style.color = DS.ink; }}
                         >
-                          <span style={{ color: 'var(--color-muted)' }}><FolderKanban size={14} strokeWidth={1.8} /></span>
+                          <span style={{ color: 'currentColor', opacity: 0.72 }}><FolderKanban size={14} strokeWidth={1.8} /></span>
                           <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {currentProject?.name ?? '选择项目'}
                           </span>
-                          <span style={{ fontSize: 10, color: DS.textCaption }}><ChevronDown size={10} strokeWidth={2.5} /></span>
+                          <span style={{ fontSize: 10, color: 'currentColor', opacity: 0.6 }}><ChevronDown size={10} strokeWidth={2.5} /></span>
                         </button>
                         </Tooltip>
                       </div>
@@ -1433,6 +1658,30 @@ export function ChatPage() {
                   >
                     <User size={18} strokeWidth={1.8} />
                     <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</span>
+                  </button>
+                  </Tooltip>
+                  <Tooltip label="通知">
+                  <button
+                    onClick={() => void openNotifications()}
+                    aria-label="通知"
+                    style={{
+                      position: 'relative',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 34, height: 34, border: 'none', background: 'transparent', borderRadius: 8, cursor: 'pointer', color: 'var(--color-muted)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.ink; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-muted)'; }}
+                  >
+                    <Bell size={18} strokeWidth={1.8} />
+                    {notificationUnread > 0 && (
+                      <span style={{
+                        position: 'absolute', top: 5, right: 4,
+                        minWidth: 14, height: 14, padding: '0 3px',
+                        borderRadius: 999, background: 'var(--color-primary)',
+                        color: 'var(--color-on-primary)', fontSize: 9, fontWeight: 700,
+                        lineHeight: '14px', textAlign: 'center', boxSizing: 'border-box',
+                      }}>{notificationUnread > 99 ? '99+' : notificationUnread}</span>
+                    )}
                   </button>
                   </Tooltip>
                   <Tooltip label="退出登录">
@@ -1551,11 +1800,11 @@ export function ChatPage() {
           onShowHistory={() => setDockPresentation('history')}
           onCollapseHistory={() => setDockPresentation('open')}
         >
-        {isEmpty ? (
+        {showHero ? (
           /* 首次对话 hero：名称居中 + 输入卡居中（DeepSeek harness 空态） */
           <div style={{
             flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: dockMode === 'docked' ? 'flex-end' : 'center', gap: 28,
+            alignItems: 'center', justifyContent: dockMode === 'docked' ? 'flex-end' : 'center', gap: 24,
             paddingLeft: 16,
             paddingRight: !embed ? desktopRightReserve + 16 : 16,
             transition: 'padding-right 420ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -1574,6 +1823,7 @@ export function ChatPage() {
             {dockMode !== 'docked' && (
               <>
                 <LiveOrb
+                  className="chat-hero-orb"
                   variant="webgl"
                   colors={["#4D6BFE", "#7C93FF", "#DDE4FF"]}
                   size={112}
@@ -1583,6 +1833,13 @@ export function ChatPage() {
                   <div style={{ fontSize: 14, color: DS.textCaption }}>设计分镜、图片与视频方案</div>
                 </div>
               </>
+            )}
+            {!embed && dockMode !== 'docked' && (
+              <ChatEntryCards
+                hasProject={Boolean(currentProject?.id)}
+                canvasPhase={canvasPhase}
+                onOpen={handleChatAppOpen}
+              />
             )}
             <ChatComposer
               enableSideChat={sideChatCommandEnabled}
@@ -1605,11 +1862,11 @@ export function ChatPage() {
                   }}
                   style={{
                     padding: '8px 16px', borderRadius: 20, border: `1px solid ${DS.border}`,
-                    background: 'white', fontSize: 13, color: DS.textSecondary, cursor: 'pointer',
+                    background: 'var(--color-panel)', fontSize: 13, color: DS.textSecondary, cursor: 'pointer',
                     transition: 'border-color 0.15s, color 0.15s, background-color 0.15s',
                   }}
                   onMouseEnter={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.brand; el.style.color = DS.brand; el.style.background = 'var(--color-primary-tint)'; }}
-                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.border; el.style.color = DS.textSecondary; el.style.background = 'white'; }}
+                  onMouseLeave={(e) => { const el = e.currentTarget; el.style.border = '1px solid ' + DS.border; el.style.color = DS.textSecondary; el.style.background = 'var(--color-panel)'; }}
                 >{t}</button>
               ))}
             </div>
@@ -1647,7 +1904,7 @@ export function ChatPage() {
                     style={{
                       fontSize: embed ? 13 : 16, fontWeight: 600, color: DS.ink, minWidth: 0,
                       border: `1px solid ${DS.brand}`, borderRadius: 8, padding: '2px 8px',
-                      outline: 'none', background: 'white', boxSizing: 'border-box', fontFamily: 'inherit',
+                      outline: 'none', background: 'var(--color-panel)', boxSizing: 'border-box', fontFamily: 'inherit',
                     }}
                   />
                 ) : (
@@ -1717,20 +1974,21 @@ export function ChatPage() {
                   flexDirection: 'column',
                 }}
               >
-                {messageHasMore && (
+                {threadLoading && <ChatThreadSkeleton />}
+                {(messageHasMore || hiddenMessageCount > 0) && (
                   <button
                     type="button"
-                    onClick={() => void loadOlderMessages()}
+                    onClick={revealOlderMessages}
                     style={{
                       alignSelf: 'center', marginBottom: 16, padding: '6px 14px',
                       border: '1px solid var(--color-hairline)', borderRadius: 8,
-                      background: 'white', color: DS.textSecondary, cursor: 'pointer',
+                      background: 'var(--color-panel)', color: DS.textSecondary, cursor: 'pointer',
                     }}
                   >
-                    加载更早消息
+                    {hiddenMessageCount > 0 ? `显示更早的 ${Math.min(hiddenMessageCount, CHAT_RENDER_STEP)} 条` : '加载更早消息'}
                   </button>
                 )}
-                {messages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
+                {deferredMessages.filter((m) => !shouldHidePendingCardMessage(m)).map((m) => (
                   <div
                     key={m.id}
                     data-message-id={m.id}
@@ -1738,21 +1996,24 @@ export function ChatPage() {
                       if (node) railAnchorRefs.current.set(m.id, node);
                       else railAnchorRefs.current.delete(m.id);
                     }}
-                    style={{ animation: 'chat-msg-in 0.35s ease-out' }}
+                    style={m.id === newestMessageId ? { animation: 'chat-msg-in 0.35s ease-out' } : undefined}
                   >
-                    <MessageBubble
-                      messageId={m.id}
-                      conversationId={m.conversationId}
-                      role={m.role}
-                      content={m.content}
-                      metadata={m.metadata}
-                      variant="deepseek"
-                      createdAt={m.createdAt}
-                      editable={canEditLastTurn && m.id === lastUserMessageId}
-                      onEditMessage={(messageId, nextContent) => editAndResend(nextContent, messageId)}
-                      streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
-                      onOpenGenerationCenter={() => openGenerationCenter('image')}
-                    />
+                    {/* 开发期定位"卡在某条消息"：慢渲染会打出 [perf] render msg:... */}
+                    <Profiler id={`msg:${m.role}:${m.id.slice(0, 6)}`} onRender={logProfilerRender}>
+                      <MessageBubble
+                        messageId={m.id}
+                        conversationId={m.conversationId}
+                        role={m.role}
+                        content={m.content}
+                        metadata={m.metadata}
+                        variant="deepseek"
+                        createdAt={m.createdAt}
+                        editable={canEditLastTurn && m.id === lastUserMessageId}
+                        onEditMessage={handleEditMessage}
+                        streaming={streaming && m.role === 'assistant' && m.id === messages[messages.length - 1]?.id}
+                        onOpenGenerationCenter={handleOpenImageCenter}
+                      />
+                    </Profiler>
                   </div>
                 ))}
                 {sideChatMode && messages.length === 0 && !streaming && (
@@ -1837,7 +2098,7 @@ export function ChatPage() {
                     padding: '0 14px',
                     borderRadius: 999,
                     border: '1px solid var(--color-hairline)',
-                    background: 'white',
+                    background: 'var(--color-panel)',
                     color: 'var(--color-muted)',
                     cursor: 'pointer',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.12)',

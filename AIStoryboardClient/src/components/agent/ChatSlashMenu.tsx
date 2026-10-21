@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { Fragment, useEffect, useMemo, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { agentChatTokens as T } from './agentChatTokens';
 import { useAbovePopoverPlacement } from './abovePopover';
@@ -12,6 +12,11 @@ export interface SlashCommandItem {
   aliases?: string[];
   /** 移动端或内嵌侧边聊天中可隐藏整项。 */
   visible?: boolean;
+  /**
+   * 菜单分组：技能（引用后才会挂载）与工具（面板自身动作）。
+   * 组内第一项前渲染分组标题；不填 = 不分组。
+   */
+  group?: 'skill' | 'tool';
   /** 不可用项：仍展示（可发现），但不可执行并显示 disabledHint */
   disabled?: boolean;
   disabledHint?: string;
@@ -62,22 +67,27 @@ export function ChatSlashMenu({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return; }
       if (visible.length === 0) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        e.stopPropagation();
         setActive((i) => (i + 1) % visible.length);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
+        e.stopPropagation();
         setActive((i) => (i - 1 + visible.length) % visible.length);
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         const item = visible[active];
         if (!item || item.disabled) return;
+        // 菜单打开时由菜单独占该按键：否则同一个 Enter 会继续冒泡到输入框的
+        // onKeyDown，把刚插入的技能提示词当正文直接发送（没会话时还会触发建会话失败）。
         e.preventDefault();
+        e.stopPropagation();
         item.run();
       }
     };
@@ -91,64 +101,83 @@ export function ChatSlashMenu({
     <div className="chat-slash-menu" role="listbox" aria-label="命令" style={{
       position: 'fixed', bottom: placement.bottom, left: placement.left,
       width: placement.width, maxHeight: placement.maxHeight, overflowY: 'auto',
-      background: 'white', border: `1px solid ${T.border}`,
+      background: 'var(--color-panel)', border: `1px solid ${T.border}`,
       borderRadius: 14, boxShadow: '0 8px 28px rgba(0,0,0,0.14)',
       padding: 6, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: 2,
     }}>
-      {visible.map((item, index) => (
-        <button
-          key={item.id}
-          type="button"
-          role="option"
-          aria-selected={index === active}
-          onMouseEnter={() => setActive(index)}
-          onClick={() => { if (!item.disabled) item.run(); }}
-          disabled={item.disabled}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-            padding: '9px 10px', border: 'none', borderRadius: 10, textAlign: 'left',
-            background: index === active && !item.disabled ? T.hover : 'transparent',
-            color: item.disabled ? T.textCaption : T.ink,
-            cursor: item.disabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          <span style={{ display: 'flex', flexShrink: 0, color: item.disabled ? T.textCaption : T.brand }}>
-            {item.icon}
-          </span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>
-              {item.title}
-              {(item.aliases ?? []).map((alias) => (
-                <span
-                  key={alias}
-                  style={{
-                    marginLeft: 6, fontSize: 12, fontWeight: 500, color: T.textCaption,
-                  }}
-                >
-                  /{alias}
+      {visible.map((item, index) => {
+        const previous = visible[index - 1];
+        const showGroup = !!item.group && item.group !== previous?.group;
+        return (
+          <Fragment key={item.id}>
+            {showGroup && (
+              <div
+                role="presentation"
+                style={{
+                  padding: '6px 10px 2px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: T.textCaption,
+                }}
+              >
+                {item.group === 'skill' ? '技能' : '工具'}
+              </div>
+            )}
+            <button
+              type="button"
+              role="option"
+              aria-selected={index === active}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => { if (!item.disabled) item.run(); }}
+              disabled={item.disabled}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                padding: '9px 10px', border: 'none', borderRadius: 10, textAlign: 'left',
+                background: index === active && !item.disabled ? T.hover : 'transparent',
+                color: item.disabled ? T.textCaption : T.ink,
+                cursor: item.disabled ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <span style={{ display: 'flex', flexShrink: 0, color: item.disabled ? T.textCaption : T.brand }}>
+                {item.icon}
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>
+                  {item.title}
+                  {(item.aliases ?? []).map((alias) => (
+                    <span
+                      key={alias}
+                      style={{
+                        marginLeft: 6, fontSize: 12, fontWeight: 500, color: T.textCaption,
+                      }}
+                    >
+                      /{alias}
+                    </span>
+                  ))}
                 </span>
-              ))}
-            </span>
-            <span style={{ display: 'block', fontSize: 12, color: T.textCaption, marginTop: 1 }}>
-              {item.disabled ? (item.disabledHint ?? item.description) : item.description}
-            </span>
-          </span>
-          {item.shortcut && (
-            <kbd style={{
-              flexShrink: 0,
-              padding: '2px 5px',
-              borderRadius: 5,
-              border: `1px solid ${T.border}`,
-              background: 'rgba(15,17,21,0.04)',
-              color: T.textCaption,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              fontSize: 10,
-              lineHeight: 1.4,
-              whiteSpace: 'nowrap',
-            }}>{item.shortcut}</kbd>
-          )}
-        </button>
-      ))}
+                <span style={{ display: 'block', fontSize: 12, color: T.textCaption, marginTop: 1 }}>
+                  {item.disabled ? (item.disabledHint ?? item.description) : item.description}
+                </span>
+              </span>
+              {item.shortcut && (
+                <kbd style={{
+                  flexShrink: 0,
+                  padding: '2px 5px',
+                  borderRadius: 5,
+                  border: `1px solid ${T.border}`,
+                  background: 'rgba(15,17,21,0.04)',
+                  color: T.textCaption,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontSize: 10,
+                  lineHeight: 1.4,
+                  whiteSpace: 'nowrap',
+                }}>{item.shortcut}</kbd>
+              )}
+            </button>
+          </Fragment>
+        );
+      })}
     </div>,
     document.body,
   );

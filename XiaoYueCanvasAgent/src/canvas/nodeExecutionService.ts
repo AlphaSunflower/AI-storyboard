@@ -7,6 +7,7 @@ import {
   type CanvasGraphV2,
 } from './graphContracts';
 import {
+  submitImageEdit,
   submitImageGeneration,
   submitImageRedraw,
   submitScriptDrafting,
@@ -178,7 +179,10 @@ export async function executeNodeAction(
     );
   } else if (action.capabilityId === 'image.generate' || action.capabilityId === 'image.redraw') {
     if (!input.prompt.trim()) throw new Error('生图需要提示词');
-    jobId = await submitImageGeneration(input.prompt, nodeId, () => undefined, {
+    // 图生图在没有区域掩码时走「整图编辑」，和节点上点生成完全同一条链路；
+    // 绝不能因为缺少掩码把节点直接判失败（分组执行会连带把下游全 block 掉）。
+    const submit = action.capabilityId === 'image.redraw' ? submitImageEdit : submitImageGeneration;
+    jobId = await submit(input.prompt, nodeId, () => undefined, {
       sourceAssetIds: input.sourceAssetIds,
       sourceNodeIds: input.sourceNodeIds,
       params: executionParams(node, action.id),
@@ -196,4 +200,24 @@ export async function executeNodeAction(
 
 export async function cancelNodeExecution(jobId: string) {
   await jobAdapter.cancel(jobId);
+}
+
+/**
+ * 把「这个节点这一步要提交什么」抽成纯数据，供服务端批次执行使用。
+ *
+ * <p>服务端不复制画布节点契约（端口 / 模式 / 结果槽规则都在前端），只负责按序可靠地把
+ * 这些 job 请求跑完；因此计划里必须带齐 capabilityId / params / 参考素材。
+ */
+export function describeNodeExecution(nodeId: string, actionId: string) {
+  const graph = graphOf();
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId) as CanvasNode | undefined;
+  const action = getNodeDefinition(node?.data.kind)?.actions.find((item) => item.id === actionId);
+  if (!node || !action) return undefined;
+  const input = executionInputs(nodeId, actionId);
+  return {
+    capabilityId: action.capabilityId,
+    params: { ...executionParams(node, actionId), prompt: input.prompt },
+    prompt: input.prompt,
+    sourceAssetIds: input.sourceAssetIds,
+  };
 }

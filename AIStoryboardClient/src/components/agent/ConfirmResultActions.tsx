@@ -39,7 +39,7 @@ export function ConfirmResultActions({ info, messageId }: {
         onClick={() => refineAsset(info, messageId)}
         style={{
           padding: '8px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-          background: 'var(--color-primary)', color: 'white', fontSize: 14,
+          background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 14,
           cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
         }}
       >
@@ -51,7 +51,7 @@ export function ConfirmResultActions({ info, messageId }: {
         onClick={() => void dismissConfirm(messageId)}
         style={{
           padding: '8px 16px', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
-          background: 'white', color: 'var(--color-muted)', fontSize: 14,
+          background: 'var(--color-panel)', color: 'var(--color-muted)', fontSize: 14,
           cursor: streaming ? 'not-allowed' : 'pointer', opacity: streaming ? 0.6 : 1,
         }}
       >

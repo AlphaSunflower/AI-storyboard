@@ -9,7 +9,7 @@ metadata:
 
 # AI-storyboard 部署交付速查
 
-一个 compose 项目拉起全栈（11 个容器）：Postgres / Redis / MinIO / MoonSandbox
+一个 compose 项目拉起全栈（12 个容器）：Postgres / Redis / MinIO / MoonSandbox
 + 6 个 Java 服务（api-gateway、backend、llm-gateway、moon-agent、asset-service、canvas）+ 前端入口。
 
 栈内**不含 Nacos**：服务发现默认关闭（`NACOS_DISCOVERY_ENABLED=false`），ApiGateway 按 `.env` 的
@@ -39,7 +39,7 @@ metadata:
 
 | 对象 | 账号 / 凭据 | 备注 |
 |---|---|---|
-| **主站（业务）** | `admin@qq.com` / `123456` | role=admin，持有全部 13 个项目 / 251 会话 / 83 分镜 |
+| **主站（业务）** | `admin@qq.com` / `123456` | role=admin，干净部署：无项目 / 会话 / 分镜 |
 | **模型网关管理后台** | `admin` / `admin-init-9d2d14c37360be40` | 另一可用账号 `e2eadmin` / `E2EAdmin123!` |
 | 网关 API Key（Agent/画布/资产） | `lg-df377c8084e645ffa34e0dfce1fb3e78` | `llm_gateway.gateway_api_key` 表内 |
 | 网关 API Key（主后端） | `lg-5f018f73b71c4bda8b9ebb97268d55a9` | 同上 |

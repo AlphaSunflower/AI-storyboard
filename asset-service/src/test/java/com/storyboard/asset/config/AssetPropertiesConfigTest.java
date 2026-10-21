@@ -32,7 +32,7 @@ class AssetPropertiesConfigTest {
     }
 
     @Test
-    void storageDefaultsToThreeDayTrashRetentionAndDisabledOrphanScan() throws Exception {
+    void storageDefaultsToOneDayTrashRetentionAndDisabledOrphanScan() throws Exception {
         StandardEnvironment environment = new StandardEnvironment();
         loadApplicationYaml(environment);
 
@@ -40,7 +40,7 @@ class AssetPropertiesConfigTest {
                 .bind("storyboard.storage", StorageProperties.class)
                 .orElseThrow(() -> new IllegalStateException("storage properties did not bind"));
 
-        assertThat(properties.trashRetentionDays()).isEqualTo(3);
+        assertThat(properties.trashRetentionDays()).isEqualTo(1);
         assertThat(properties.orphanScanEnabled()).isFalse();
         assertThat(properties.orphanScanIntervalHours()).isEqualTo(6);
         assertThat(properties.orphanScanGraceHours()).isEqualTo(24);

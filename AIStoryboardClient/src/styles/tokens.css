@@ -1,7 +1,7 @@
 :root {
-  /* ── Colors ─────────────────────────────────────────────────────────────
-     一处定义：warm editorial（cream / coral / ink）。
-     页面只能通过语义变量取色，不再新增裸 hex（画布子站除外，它有独立世界）。 */
+   /* ── Colors ─────────────────────────────────────────────────────────────
+      浅色语义变量（warm editorial：cream / coral / ink）；夜间覆盖见 theme.css。
+      页面只能通过语义变量取色，不再新增裸 hex（画布子站除外，它有独立世界）。 */
   --color-primary: #cc785c;
   --color-primary-active: #a9583e;
   --color-primary-soft: #f7e7e0;

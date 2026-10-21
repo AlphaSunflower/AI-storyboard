@@ -132,7 +132,7 @@ export function ReferenceUploader({
       {items.length > 0 && (
         <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
           {items.map((it) => (
-            <div key={it.id} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '3px 6px 3px 3px', background: 'white' }}>
+            <div key={it.id} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 4, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '3px 6px 3px 3px', background: 'var(--color-panel)' }}>
               {it.type === 'image' ? (
                 <img src={assetUrl(it.url)} alt="参考图" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }} />
               ) : (
@@ -146,7 +146,7 @@ export function ReferenceUploader({
                 onClick={() => !disabled && onDelete(it.id)}
                 title="删除"
                 style={{
-                  background: 'var(--color-error)', color: 'white', borderRadius: '50%',
+                  background: 'var(--color-error)', color: 'var(--color-on-danger)', borderRadius: '50%',
                   width: 15, height: 15, fontSize: 9, display: 'flex', alignItems: 'center',
                   justifyContent: 'center', cursor: disabled ? 'not-allowed' : 'pointer', flexShrink: 0,
                 }}

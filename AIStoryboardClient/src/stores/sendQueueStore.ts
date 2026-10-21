@@ -24,6 +24,8 @@ export interface QueuedSendItem {
   conversationId: string;
   content: string;
   createdAt: number;
+  /** 最近一次编辑时间；排队中改过正文时写入，用于面板提示。 */
+  editedAt?: number;
   opts?: QueuedSendOptions;
 }
 
@@ -87,17 +89,34 @@ function persist(queues: Record<string, QueuedSendItem[]>): void {
 
 interface SendQueueState {
   queues: Record<string, QueuedSendItem[]>;
+  /**
+   * 队列「暂缓发送」计数（不持久化）。
+   *
+   * <p>两处会用：① 排队消息「插队发送」要先打断当前回合，打断成功前不能让
+   * `SendQueueRunner` 抢先把队首发出去；② 队列内正在编辑某条消息时，不能让自动发送
+   * 把未保存的旧正文发走。计数归零才恢复自动出队。</p>
+   */
+  holds: Record<string, number>;
   enqueue: (input: EnqueueSendInput) => boolean;
   shift: (conversationId: string) => QueuedSendItem | undefined;
+  /** 按 id 取走一条（插队发送用），返回被移除的消息。 */
+  take: (conversationId: string, itemId: string) => QueuedSendItem | undefined;
+  /** 插队发送失败时把消息放回原位置，避免丢消息。 */
+  restore: (item: QueuedSendItem, index: number) => void;
+  /** 排队中重新编辑正文：保留附件/引用快照，只替换文字。 */
+  update: (conversationId: string, itemId: string, content: string) => boolean;
   remove: (conversationId: string, itemId: string) => void;
   clear: (conversationId: string) => void;
   clearAll: () => void;
   move: (conversationId: string, itemId: string, direction: -1 | 1) => void;
   promote: (conversationId: string, itemId: string) => void;
+  holdQueue: (conversationId: string) => void;
+  releaseQueue: (conversationId: string) => void;
 }
 
 export const useSendQueueStore = create<SendQueueState>((set, get) => ({
   queues: readQueues(),
+  holds: {},
 
   enqueue: (input) => {
     const conversationId = input.conversationId;
@@ -137,6 +156,47 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
     return first;
   },
 
+  take: (conversationId, itemId) => {
+    const current = get().queues[conversationId] ?? [];
+    const item = current.find((entry) => entry.id === itemId);
+    if (!item) return undefined;
+    const rest = current.filter((entry) => entry.id !== itemId);
+    const next = { ...get().queues };
+    if (rest.length > 0) next[conversationId] = rest;
+    else delete next[conversationId];
+    set({ queues: next });
+    persist(next);
+    return item;
+  },
+
+  restore: (item, index) => {
+    const conversationId = item.conversationId;
+    if (!conversationId) return;
+    const current = get().queues[conversationId] ?? [];
+    if (current.some((entry) => entry.id === item.id)) return;
+    if (current.length >= MAX_QUEUED_SENDS) return;
+    const at = Math.max(0, Math.min(index, current.length));
+    const nextItems = [...current.slice(0, at), item, ...current.slice(at)];
+    const next = { ...get().queues, [conversationId]: nextItems };
+    set({ queues: next });
+    persist(next);
+  },
+
+  update: (conversationId, itemId, content) => {
+    const trimmed = content.trim();
+    if (!trimmed) return false;
+    const current = get().queues[conversationId] ?? [];
+    const index = current.findIndex((item) => item.id === itemId);
+    if (index < 0) return false;
+    if (current[index].content === trimmed) return true;
+    const nextItems = [...current];
+    nextItems[index] = { ...current[index], content: trimmed, editedAt: Date.now() };
+    const next = { ...get().queues, [conversationId]: nextItems };
+    set({ queues: next });
+    persist(next);
+    return true;
+  },
+
   remove: (conversationId, itemId) => {
     const current = get().queues[conversationId] ?? [];
     const rest = current.filter((item) => item.id !== itemId);
@@ -156,7 +216,7 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
   },
 
   clearAll: () => {
-    set({ queues: {} });
+    set({ queues: {}, holds: {} });
     persist({});
   },
 
@@ -181,6 +241,26 @@ export const useSendQueueStore = create<SendQueueState>((set, get) => ({
     const next = { ...get().queues, [conversationId]: nextItems };
     set({ queues: next });
     persist(next);
+  },
+
+  holdQueue: (conversationId) => {
+    if (!conversationId) return;
+    set((state) => ({
+      holds: { ...state.holds, [conversationId]: (state.holds[conversationId] ?? 0) + 1 },
+    }));
+  },
+
+  releaseQueue: (conversationId) => {
+    if (!conversationId) return;
+    set((state) => {
+      const current = state.holds[conversationId] ?? 0;
+      if (current <= 1) {
+        const next = { ...state.holds };
+        delete next[conversationId];
+        return { holds: next };
+      }
+      return { holds: { ...state.holds, [conversationId]: current - 1 } };
+    });
   },
 }));
 

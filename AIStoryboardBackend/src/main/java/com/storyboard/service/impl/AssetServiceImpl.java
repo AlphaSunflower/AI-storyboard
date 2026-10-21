@@ -91,6 +91,26 @@ public class AssetServiceImpl implements AssetService {
     }
 
     @Override
+    public List<AssetVO> listAgentAssets(String userId, String projectId) {
+        // 不按单一 asset_type 过滤：旧资产迁移后可能落在 GROUP（ai_kind 仍保留）。
+        List<AssetSummary> merged = new ArrayList<>();
+        for (String type : List.of(AssetType.AI_ASSET.name(), AssetType.GROUP.name())) {
+            if (projectId != null && !projectId.isBlank()) {
+                merged.addAll(assetClient.listAssetsForUser(userId,
+                        AssetScope.PROJECT, projectId, null, null,
+                        type, 1, 100, UUID.randomUUID().toString()).records());
+            }
+            merged.addAll(assetClient.listAssetsForUser(userId,
+                    AssetScope.GLOBAL, null, null, null,
+                    type, 1, 100, UUID.randomUUID().toString()).records());
+        }
+        return merged.stream()
+                .filter(asset -> asset.aiKind() != null)
+                .map(asset -> toVO(asset, mediaToImages(assetClient.getAssetInternal(asset.id(), userId).media())))
+                .toList();
+    }
+
+    @Override
     public AssetVO update(String userId, String assetId, AssetUpdateRequest request) {
         AssetSummary current = assetClient.getAssetInternal(assetId, userId).asset();
         AssetSummary updated = assetClient.updateAsset(assetId, new UpdateAssetRequest(

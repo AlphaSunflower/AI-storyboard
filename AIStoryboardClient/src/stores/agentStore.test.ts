@@ -1763,11 +1763,20 @@ describe('agentStore detached async tasks', () => {
       expect(useAgentStore.getState().generating['conversation-1']?.turnId).toBe('turn-running');
     });
 
-    const delivered = await useAgentStore.getState().interruptAndSend('改成新的问题');
+    const delivered = await useAgentStore.getState().interruptAndSend(
+      '改成新的问题',
+      { picUrls: ['/api/files/a.png'] },
+    );
     await running;
 
     expect(delivered).toBe(true);
     expect(interruptTurn).toHaveBeenCalledWith('conversation-1', 'turn-running');
+    // 打断后新回合必须带上调用方给的上下文快照（排队消息插队发送依赖这一点）
+    await vi.waitFor(() => {
+      expect(JSON.parse(String(fetchMock.mock.calls
+        .filter(([url]) => String(url).includes('/conversations/conversation-1/turns/stream'))[1]?.[1]?.body)))
+        .toMatchObject({ content: '改成新的问题', picUrls: ['/api/files/a.png'] });
+    });
     // 打断后才把新消息作为下一轮发出去（而不是抢跑撞会话锁）：turns/stream 恰好两次
     const streamCalls = () => fetchMock.mock.calls
       .filter(([url]) => String(url).includes('/conversations/conversation-1/turns/stream'));
@@ -4038,6 +4047,100 @@ describe('agentStore @ 引用资料', () => {
     await useAgentStore.getState().editAndResend('还是只看 @分镜3', 'user-1');
 
     expect(requestBody(fetchMock).references).toEqual([{ ...sceneReference }]);
+  });
+});
+
+/**
+ * 项目库「使用位置 · 对话」等入口按会话 ID 深链回 /chat。
+ *
+ * 回归：项目切换重置曾把 activeConversationId 一并清空，随后 loadConversations
+ * 发现「没有活动会话」就自动选中最近一条；用户点的是 A 对话，落在同名的 B 对话上。
+ */
+describe('agentStore 深链会话不被「最近会话」顶掉', () => {
+  const conversation = (id: string, updatedAt: string): AgentConversation => ({
+    id,
+    userId: 'user-1',
+    projectId: 'project-1',
+    title: '新对话',
+    status: 'active',
+    createdAt: updatedAt,
+    updatedAt,
+  });
+
+  beforeEach(() => {
+    useProjectStore.setState({ currentProject: { id: 'project-1', name: 'Project' } as never });
+    vi.spyOn(agentApi, 'listConversations').mockResolvedValue({
+      data: {
+        data: [
+          conversation('newest-conversation', '2026-10-20T10:00:00Z'),
+          conversation('clicked-conversation', '2026-10-19T10:00:00Z'),
+        ],
+      },
+    } as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useAgentStore.setState({
+      activeConversationId: null,
+      conversations: [],
+      messages: [],
+      streaming: false,
+      generating: {},
+      selectConversation: useAgentStore.getInitialState().selectConversation,
+    });
+    useProjectStore.setState({ currentProject: null });
+  });
+
+  it('深链目标原样保留，不再自动选中最近一条', async () => {
+    const selectConversation = vi.fn().mockResolvedValue(undefined);
+    const message = {
+      id: 'message-1',
+      conversationId: 'clicked-conversation',
+      role: 'user' as const,
+      content: '继续',
+      createdAt: new Date().toISOString(),
+    };
+    useAgentStore.setState({
+      // 模拟跳转时 selectConversation 已经切到目标会话，且该会话正在生成
+      activeConversationId: 'clicked-conversation',
+      messages: [message],
+      streaming: true,
+      selectConversation,
+    });
+
+    useAgentStore.getState().resetConversationForProject('clicked-conversation');
+    await useAgentStore.getState().loadConversations();
+
+    expect(useAgentStore.getState().activeConversationId).toBe('clicked-conversation');
+    expect(useAgentStore.getState().streaming).toBe(true);
+    expect(useAgentStore.getState().messages).toEqual([message]);
+    expect(selectConversation).not.toHaveBeenCalled();
+  });
+
+  it('普通项目切换（没有深链目标）仍清空会话态并选中最近会话', async () => {
+    const selectConversation = vi.fn().mockResolvedValue(undefined);
+    useAgentStore.setState({
+      activeConversationId: 'previous-conversation',
+      messages: [{
+        id: 'message-old',
+        conversationId: 'previous-conversation',
+        role: 'user' as const,
+        content: '旧会话',
+        createdAt: new Date().toISOString(),
+      }],
+      streaming: true,
+      selectConversation,
+    });
+
+    useAgentStore.getState().resetConversationForProject();
+    expect(useAgentStore.getState().activeConversationId).toBeNull();
+    expect(useAgentStore.getState().streaming).toBe(false);
+    expect(useAgentStore.getState().messages).toEqual([]);
+
+    await useAgentStore.getState().loadConversations();
+
+    expect(selectConversation).toHaveBeenCalledWith('newest-conversation');
   });
 });
 

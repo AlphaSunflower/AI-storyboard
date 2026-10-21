@@ -150,10 +150,15 @@ cp .env.example .env
 
 ### 统一业务栈（deploy/stack/）
 
-`deploy/stack/` 用一个 compose 项目把基础设施与业务一起拉起（6 个 Java 服务 + 主前端/画布前端 + Postgres/Redis/MinIO/MoonSandbox，共 11 个容器；不含 Nacos 与画布 Bridge——服务发现默认关闭、网关直连，浏览器画布命令由 canvas 服务的信箱转发），
-入口 `http://localhost/`，默认账号 `admin@qq.com`。首启由 `db/` 下的 `docker-entrypoint-initdb.d` 脚本建库、还原
-`ai_storyboard` / `llm_gateway` 转储并把账号收敛为 `admin@qq.com`；MinIO 直接挂载 `deploy/docker/minio/data`。
-构建/启停/验收/离线打包脚本在 `deploy/stack/scripts/`，细节与排障要点见 `deploy/stack/README.md`。
+`deploy/stack/` 用一个 `docker-compose.yml` 把基础设施与业务一起拉起（6 个 Java 服务 + 主前端/画布前端 +
+Postgres/Redis/MinIO/MoonSandbox，共 12 个容器；不含 Nacos 与画布 Bridge——服务发现默认关闭、网关直连，
+浏览器画布命令由 canvas 服务的信箱转发）。容器名/网络名/卷名都带 `STACK_PREFIX` 前缀，去掉了固定 IP 与
+固定 subnet，同一台机器可并存多套。入口 `http://localhost/`，初始账号 `admin@qq.com` / `123456`。
+首启由 `db/` 下的 `docker-entrypoint-initdb.d` 脚本建库、还原 `ai_storyboard` / `llm_gateway` 转储，
+并把源账号 `771038325@qq.com` 改名为 `admin@qq.com`、清掉其它账号。数据随目录迁移：
+`data/minio`（对象）、`data/sandbox-workspaces`（沙箱工作区），不再依赖 `deploy/docker/minio/data`。
+构建/启停/验收/离线打包脚本在 `deploy/stack/scripts/`（`load-and-up.sh`、`verify.sh`、`save-images.ps1`、
+`export-usb.ps1`），细节与排障要点见 `deploy/stack/README.md`。
 
 ## Databases
 
@@ -432,14 +437,23 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
 
 ### 通用创作智能层
 
-- 项目记忆（2026-10-18 P0）：`agent_memories` 表按 `user_id + project_id` 隔离，只存显式写入的事实
-  （goal/style/constraint/decision/feedback），同用户同项目内容哈希去重，可过期。工具
-  `remember_memory` / `recall_memory`；`TurnContextMiddleware` 每轮召回 top 5 注入
-  `<project-memories>`。接口 `GET /api/agent/memories`（当前用户全部）、
-  `PUT /api/agent/memories/{memoryId}`（改 kind/content/confidence/expiresAt）、
-  `DELETE /api/agent/memories/{memoryId}`，以及项目级 `GET/DELETE /projects/{projectId}/memories`；
-  V42 migration 已在本地 `newworkflow` / `ai_storyboard` 执行，其他环境仍需手动执行。
-  个人信息从弹窗改为独立路由 `/account`，账号信息、密码和记忆管理（查看/编辑/删除）都在该页。
+- 记忆（2026-10-18 P0；2026-10-20 改为「项目记忆仅智能体写 + 一条全局记忆 + 总开关」）：
+  **项目记忆** `agent_memories` 按 `user_id + project_id` 隔离，智能体用 `remember_memory` /
+  `recall_memory` 读写，用户只能查看和删除（不提供手动新增/编辑入口）。全局提示词 §二.13 规定何时写
+  （跨会话有效的目标/风格/硬约束/已确认决策/成品反馈，一次性指令不写），`TurnContextMiddleware`
+  每轮召回 top 5 注入 `<project-memories>`。上限集中在 `AgentMemoryLimits`：**单项目 200 条、
+  单账号 500 条、单条 4000 字符**；过期行在写入前清理、不占容量；超限/关闭时智能体收到
+  `ok:false`（`MEMORY_UNAVAILABLE`）并须如实告知，不得声称已记住。
+  **全局记忆** `agent_global_memories` 每账号一条（`user_id` 主键），由用户维护、跨项目注入
+  `<global-memory>`，智能体只读、不会自行修改。
+  **总开关** `agent_memory_settings`（缺行视为启用）：关闭后智能体不能写/召回，用户不能修改全局记忆，
+  但删除既有记忆仍可用；开关与全局记忆都在 `/account` 记忆管理里。
+  接口：`GET /api/agent/memories`（项目记忆）、`GET/PUT /api/agent/memories/settings`（开关 + 全局记忆 +
+  上限）、`PUT/DELETE /api/agent/memories/global`、`DELETE /api/agent/memories/{memoryId}`、
+  `PUT /api/agent/memories/{memoryId}`（保留的兼容接口，UI 不再使用），
+  以及项目级 `GET/DELETE /projects/{projectId}/memories`。
+  V42 / V50 migration 已在本地 `newworkflow` / `ai_storyboard` 执行，其他环境仍需手动执行。
+  个人信息从弹窗改为独立路由 `/account`，账号信息、密码和记忆管理（开关/全局记忆/只读项目记忆）都在该页。
   2026-10-18 起 `/account` 为左侧菜单：个人信息（名称/邮箱/生成数据/余额占位/改密）、
   余额明细（摘要 + 空变动记录，当前无计费数据）、记忆管理、通用设置、帮助与反馈；
   管理员额外看到「反馈收件箱」。通用设置按账号持久化在
@@ -451,8 +465,12 @@ classpath 是同版本资产的离线回退。AgentSpec 和 AgentScope Service �
   `defaultApprovalMode`，禁止再写死 `DEFAULT_AGENT_APPROVAL_MODE`（否则设置完全访问后点「新对话」
   又回到方案批准）。设置同时缓存到 `localStorage` 并监听 `storage` 事件，多标签页即时同步。
   排队发送是前端会话级队列（`sendQueueStore` + sessionStorage）：
-  输入框上方 `SendQueuePanel` 支持置顶、上下移、删除、清空；当前回合终态后逐条取出作为普通 turn 发送，
-  不进入当前上下文，也不新增后端排队接口。帮助与反馈写 `public.user_feedback`（不收集联系方式），
+  输入框上方 `SendQueuePanel` 支持置顶、上下移、删除、清空，以及**插队发送**和**排队中重新编辑**；
+  当前回合终态后逐条取出作为普通 turn 发送，不进入当前上下文，也不新增后端排队接口。
+  插队发送在生成中会先弹确认、停止当前回合并等它走到终态（复用 `interruptAndSend`，随队列快照带上
+  附件/参考图/`@` 引用）；打断期间和队列编辑期间用 `sendQueueStore.holds` 暂缓 `SendQueueRunner`
+  自动出队，避免旧正文被抢先发出。等待 HITL/视频方案/画布绑定时只提示、不动队列。
+  帮助与反馈写 `public.user_feedback`（不收集联系方式），
   截图先走 `POST /api/files/upload`，提交接口 `POST /api/user/feedback`；管理员用
   `GET /api/user/feedback` 查看收件箱、`PATCH /api/user/feedback/{id}` 标记已处理（仅 `ROLE_ADMIN`）。
   均经 8080 → 8082，**不经过 8083 LLM 网关**（8083 只做模型协议转换）。
@@ -510,6 +528,19 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - `agent_messages/assets/checkpoints/tool_invocations`：产品数据。
 - 未迁移会话在首个 AgentScope turn 前从最近 20 条产品消息重建会话；已有运行时状态优先。
 - 旧 checkpoint 标记过期，活动旧计划标记取消；表和历史内容不删除。
+- **已归档会话定期清理**（2026-10-21）：`ArchivedConversationCleanupJob`（每天 03:40，
+  `ai.cleanup.archive.*`）清理归档超过 `grace-days`（默认 3 天）的会话，删除
+  `agent_turn_events`、`agent_checkpoints`、画布会话/运行/操作、`agent_document_index`、
+  终态 `agent_async_tasks`、工作流运行、AgentScope 运行时状态与沙箱工作区；
+  **消息、`agent_turns`、`agent_assets` 行、审计表与 MinIO 图片/文档对象一律保留**。
+  每个会话只清一次，台账表 `agent_archive_cleanups`（`V54__agent_archive_cleanups.sql`，需手动执行）；
+  缺表时任务只告警跳过，不影响其它链路。回收站保留期同日改为 1 天（`storyboard.storage.trash-retention-days`）。
+- **保留期清理**（2026-10-21）：`DataRetentionJob`（每天 04:20，`ai.cleanup.retention.*`，默认
+  `dry-run=true` 只统计）分批删 `agent_turn_events`（30 天）、`agent_subagent_runs`（90 天）、
+  `asset_outbox` 终态（7 天）、AgentScope 状态表的**孤儿行**（7 天，只删会话已不存在的槽位；
+  活跃/归档会话的状态由归档清理负责）。状态表按运行时口径解析：开 DistributedStore（默认）时是
+  `agentscope.agentscope_sessions`，关掉才用 `state-schema/state-table`。索引见
+  `V55__data_retention_indexes.sql`（需手动执行），开真删前把 `AI_RETENTION_DRY_RUN` 置 false。
 - runner 重启不丢 `sandbox-workspaces`；MoonAgent 重启后可重新扫描 `output/` 并按内容哈希幂等发布。
 
 ### 权限与资产
@@ -539,6 +570,27 @@ turn 归并文本、推理、工具、Subagent、Plan、HITL、Artifact、Usage 
 - 回归：`ToolCatalogTest`、`ToolCatalogPermissionTest`、`ToolCompositionMiddlewareTest`、`SkillToolCatalogConsistencyTest`；
   2026-10-17 真实联调（dev）覆盖 HITL resume steer → `STEER-OK`、canvas-edit turn steer → `CANVAS-STEER-OK`，
   `USER_MESSAGE` seq 连续。
+
+### 可选技能 ppt-master（按引用挂载，2026-10-19）
+
+- **不常驻**：`ppt-master` 只在 `ToolCatalog.OPTIONAL_SKILLS` 登记，**不在** `ALL_SKILLS` 里。
+  `profileFor(canvasEdit, referencedSkills)` 只在 `PptMasterSkillSupport.skillsForTurn(...)` 判定本轮引用时
+  才把它加进该轮技能白名单；未引用时模型 `<available_skills>` 里没有它，会话工作区也没有 `skills/` 目录。
+- **引用口径**（`PptMasterSkillSupport`）：正文出现 `ppt-master` / `[[skill:ppt-master]]`，或 `PPT`/`PPTX`/
+  `幻灯片`/`演示文稿`/`演示稿`/`课件`。前端聊天 `/` 菜单的「PPT 生成」（`/ppt`、`/pptx`、`/ppt-master`）会写入
+  「用 ppt-master 技能生成 PPT：」。一旦会话引用过，后续回合继续可用（HITL 续流/编辑重发不会丢技能）。
+- **按需物化**：22MB / 12k 文件的完整技能包常驻 sandbox 镜像 `/opt/moon-skills/ppt-master`（`deploy/skills/
+  ppt-master-skill-v6.7.2.zip` 在构建时解压，`.dockerignore` 必须放行该 zip）。引用时 MoonAgent 调
+  `POST /internal/sandbox/{conversationId}/skills/ppt-master/materialize`，`SandboxSkillService` 在会话锁内
+  把它复制到 `/workspaces/{conversationId}/skills/ppt-master`，用 `.moon-skill-version`（镜像版本 + SKILL.md
+  mtime/size）幂等；镜像重建后自动重拷。**不要**把它挂进所有工作区，也不要预展开到 classpath。
+- **classpath 只放包装**：`MoonAgent/src/main/resources/skills/ppt-master/SKILL.md` 是 Moon 适配层，
+  负责给出沙箱路径、`SKILL_DIR` 解析、attribution guard 与 `output/` 交付约定；上游原始 `SKILL.md`
+  在沙箱里，由模型 `read_file` 读取。**不要改上游 SKILL.md 的 frontmatter**——`attribution_guard.py`
+  会校验 copyright/license/official_repository/sponsors 与 gate 标记，改了就 fail-closed。
+- 沙箱依赖（python-pptx / PyYAML / XlsxWriter / skia-pathops / uharfbuzz 等）在 `deploy/docker/sandbox/
+  Dockerfile` 预装；PyMuPDF（AGPL）默认不装。回归：`SandboxSkillServiceTest`、`SandboxControllerTest`、
+  `PptMasterSkillSupportTest`、`ToolCatalogTest`、`SkillPackageTest`。
 
 ### 通用子智能体编排（2026-10-18）
 

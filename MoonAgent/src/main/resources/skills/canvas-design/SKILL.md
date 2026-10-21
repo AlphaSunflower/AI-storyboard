@@ -8,7 +8,7 @@ metadata:
     model_role: text
     version: "1.0"
     priority: 8
-allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph request_human_input update_creative_context
+allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph canvas_group_nodes request_human_input update_creative_context
  update_creative_context
 ---
 
@@ -58,4 +58,6 @@ allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node ca
 22. 只有未知但必要的创意决策才调用 request_human_input；已有画布由会话上下文直接接管，不要求用户选择旧画布。
 23. 最终回复只说明实际创建、更新、连接、重命名、模型调整或布局的内容；ID 仅用于工具参数，不展示给用户。
 24. canvas_graph_* 由服务端执行，不依赖浏览器 iframe。用户未打开画布时也必须完成节点、连线、素材导入和布局；最终回复说明画布已在后台创建或已在当前画布上完成。
-25. **本轮只搭结构，不代跑生成**：`canvas_execute_node` / `canvas_execute_graph` 属于 canvas-run，会真的花钱并长时间等待（每张图 30–60 秒、每段视频 2–5 分钟），且服务端已把它们设为**需要用户确认**。所以结构（节点 + 结果槽 + 连线 + 布局）完成后，**在本轮结尾主动问一句**：「结构已经搭好，下一步需要我把工作流里的图片（如果有）/ 视频（如果有）都生成出来吗？」——用户明确同意后再用 `canvas_execute_graph` 执行（届时会弹确认卡片，属预期行为）。**不要**在同一轮里未经询问就执行生成，也不要因为"顺手"把整轮生成跑掉。
+25. **本轮只搭结构 + 分组，不代跑生成**：执行入口只存在于画布分组上——未分组的节点没有任何执行按钮，而 `canvas_execute_node` / `canvas_execute_graph` 会被服务端强制成预览（只返回 `status: "preview"`，不会真的开跑，也不会返回 executionId）。所以结构（节点 + 结果槽 + 连线 + 布局）完成后：
+   - 用 `canvas_group_nodes` 把这条工作流里所有参与生成的节点（图片 + 视频，至少 2 个，例如 4 张开场图 + 1 个转场视频节点）分成**同一组**，带一个有意义的 `title`（例如「赛亚人转场」）。**不要**在同一轮里调用 `canvas_execute_*` 冒充执行。
+   - 然后如实告诉用户：「已把工作流分成「X」一组，点分组标题上的「执行」按钮即可按依赖顺序开跑」。确认与开跑由用户完成，不要声称已经生成。

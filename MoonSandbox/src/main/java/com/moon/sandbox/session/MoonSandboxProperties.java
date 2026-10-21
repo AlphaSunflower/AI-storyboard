@@ -23,7 +23,16 @@ public class MoonSandboxProperties {
     private int stderrLimitBytes = 2_097_152;
     private int maxConcurrentExecutions = 4;
     private Duration idleExpiry = Duration.ofHours(24);
+    /** 会话内临时文件（tmp/、work/.runner/）的保留时长；超过后由清理任务删除。 */
+    private Duration transientTtl = Duration.ofHours(1);
     private String internalSecret = "";
+    /**
+     * 只读技能包根目录。镜像里预置 {@code <root>/<skill>/SKILL.md}，
+     * 只有会话显式引用技能时才复制到 {@code /workspaces/{conversationId}/skills/<skill>}。
+     */
+    private Path skillBundleRoot = Path.of("/opt/moon-skills");
+    /** 技能包版本号；与包内 SKILL.md 的 mtime/size 一起构成物化缓存键。 */
+    private String skillBundleVersion = "1";
 
     public static MoonSandboxProperties defaults() {
         return new MoonSandboxProperties();
@@ -136,11 +145,38 @@ public class MoonSandboxProperties {
                 ? Duration.ofHours(24) : idleExpiry;
     }
 
+    public Duration getTransientTtl() {
+        return transientTtl;
+    }
+
+    public void setTransientTtl(Duration transientTtl) {
+        this.transientTtl = transientTtl == null || transientTtl.isNegative() || transientTtl.isZero()
+                ? Duration.ofHours(1) : transientTtl;
+    }
+
     public String getInternalSecret() {
         return internalSecret;
     }
 
     public void setInternalSecret(String internalSecret) {
         this.internalSecret = internalSecret == null ? "" : internalSecret;
+    }
+
+    public Path getSkillBundleRoot() {
+        return skillBundleRoot;
+    }
+
+    public void setSkillBundleRoot(Path skillBundleRoot) {
+        this.skillBundleRoot = skillBundleRoot == null
+                ? Path.of("/opt/moon-skills") : skillBundleRoot;
+    }
+
+    public String getSkillBundleVersion() {
+        return skillBundleVersion;
+    }
+
+    public void setSkillBundleVersion(String skillBundleVersion) {
+        this.skillBundleVersion = skillBundleVersion == null || skillBundleVersion.isBlank()
+                ? "1" : skillBundleVersion.trim();
     }
 }

@@ -107,7 +107,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
     <div
       ref={listRef}
       style={{
-        height: '100%', overflowY: 'auto', background: 'white',
+        height: '100%', overflowY: 'auto', background: 'var(--color-panel)',
         padding: '12px', display: 'flex', flexDirection: 'column',
       }}
     >
@@ -124,7 +124,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px',
                 border: '1px solid var(--color-hairline)', borderRadius: 8,
-                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
+                background: 'var(--color-panel)', color: DS.textSecondary, fontSize: 12, cursor: 'pointer',
               }}
             >
               <X size={13} strokeWidth={2} /> 取消
@@ -150,7 +150,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
               onClick={referenceSelected}
               style={{
                 flex: 1.5, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                border: 0, borderRadius: 9, background: DS.brand, color: 'white',
+                border: 0, borderRadius: 9, background: DS.brand, color: 'var(--color-on-primary)',
                 fontSize: 12, fontWeight: 600, cursor: selectedIds.length ? 'pointer' : 'not-allowed',
                 opacity: selectedIds.length ? 1 : 0.45,
               }}
@@ -176,7 +176,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
                   padding: '4px 11px', height: 28, fontSize: 12,
                   borderRadius: 'var(--rounded-md)',
                   border: '1px solid var(--color-hairline)',
-                  background: 'white', cursor: 'pointer', color: DS.ink, fontWeight: 500,
+                  background: 'var(--color-panel)', cursor: 'pointer', color: DS.ink, fontWeight: 500,
                 }}
               >多选</button>
             )}
@@ -187,7 +187,7 @@ export function MobileSceneList({ onSelectScene, embedded = false }: MobileScene
                   padding: '4px 14px', height: 28, fontSize: 12,
                   borderRadius: 'var(--rounded-md)',
                   border: '1px solid var(--color-hairline)',
-                  background: 'white', cursor: 'pointer', color: DS.ink, fontWeight: 500,
+                  background: 'var(--color-panel)', cursor: 'pointer', color: DS.ink, fontWeight: 500,
                 }}
               >+ 添加</button>
             )}

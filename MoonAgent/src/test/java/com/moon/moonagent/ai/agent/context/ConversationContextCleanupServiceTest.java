@@ -2,6 +2,7 @@ package com.moon.moonagent.ai.agent.context;
 
 import com.moon.moonagent.entity.AgentCanvasRunEntity;
 import com.moon.moonagent.entity.AgentTurnEntity;
+import com.moon.moonagent.entity.AgentWorkflowRun;
 import com.moon.moonagent.mapper.AgentAsyncTaskMapper;
 import com.moon.moonagent.mapper.AgentCanvasRunMapper;
 import com.moon.moonagent.mapper.AgentCanvasRunOperationMapper;
@@ -16,6 +17,8 @@ import com.moon.moonagent.mapper.AgentTimelineManifestMapper;
 import com.moon.moonagent.mapper.AgentTurnEventMapper;
 import com.moon.moonagent.mapper.AgentTurnMapper;
 import com.moon.moonagent.mapper.AgentWorkflowRunMapper;
+import com.moon.moonagent.mapper.AgentWorkflowStepMapper;
+import com.moon.moonagent.mapper.AgentConversationMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -52,7 +55,9 @@ class ConversationContextCleanupServiceTest {
     @Mock private AgentTimelineManifestMapper timelineManifestMapper;
     @Mock private AgentMediaCritiqueMapper mediaCritiqueMapper;
     @Mock private AgentWorkflowRunMapper workflowRunMapper;
+    @Mock private AgentWorkflowStepMapper workflowStepMapper;
     @Mock private AgentExternalActionMapper externalActionMapper;
+    @Mock private AgentConversationMapper conversationMapper;
 
     @InjectMocks
     private ConversationContextCleanupService service;
@@ -128,6 +133,43 @@ class ConversationContextCleanupServiceTest {
         ordered.verify(canvasRunOperationMapper).delete(any()); // 操作先于运行
         ordered.verify(canvasRunMapper).delete(any());
         ordered.verify(canvasSessionMapper).delete(any());   // 会话在运行之后
+    }
+
+    @Test
+    void archivedCleanupDeletesRuntimeTablesAndKeepsProductData() {
+        AgentTurnEntity turn = new AgentTurnEntity();
+        turn.setId("turn-1");
+        AgentCanvasRunEntity run = new AgentCanvasRunEntity();
+        run.setId("run-1");
+        AgentWorkflowRun workflowRun = new AgentWorkflowRun();
+        workflowRun.setId("workflow-1");
+        when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+        when(canvasRunMapper.selectList(any())).thenReturn(List.of(run));
+        when(workflowRunMapper.selectList(any())).thenReturn(List.of(workflowRun));
+
+        when(turnEventMapper.delete(any())).thenReturn(3);
+        when(checkpointMapper.delete(any())).thenReturn(3);
+        when(canvasRunOperationMapper.delete(any())).thenReturn(3);
+        when(canvasRunMapper.delete(any())).thenReturn(3);
+        when(canvasSessionMapper.delete(any())).thenReturn(3);
+        when(documentIndexMapper.delete(any())).thenReturn(3);
+        when(asyncTaskMapper.delete(any())).thenReturn(3);
+        when(workflowStepMapper.delete(any())).thenReturn(3);
+        when(workflowRunMapper.delete(any())).thenReturn(3);
+
+        var report = service.cleanupArchivedRuntime("conversation-1");
+
+        // 9 张运行时表 × 3 行
+        assertThat(report.total()).isEqualTo(27);
+        // 产品数据与 MinIO 归属行不在归档清理范围：消息、轮次行、资产组、时间线、评审、外部动作
+        verify(messageMapper, never()).delete(any());
+        verify(turnMapper, never()).delete(any());
+        verify(assetGroupMapper, never()).delete(any());
+        verify(timelineManifestMapper, never()).delete(any());
+        verify(mediaCritiqueMapper, never()).delete(any());
+        verify(externalActionMapper, never()).delete(any());
+        // 运行时状态已删，初始化标记与画布绑定必须置空（否则恢复归档后带着空上下文继续）
+        verify(conversationMapper).update(any(), any());
     }
 
     @Test

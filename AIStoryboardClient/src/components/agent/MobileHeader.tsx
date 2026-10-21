@@ -1,17 +1,23 @@
 import { DS } from './ChatComposer';
 import { Tooltip, TooltipGroup } from '../common/Tooltip';
+import { Bell } from 'lucide-react';
 
 interface MobileHeaderProps {
   title: string;
   onMenuClick: () => void;
   onNewConversation: () => void;
+  /** 打开站内通知抽屉；不传则不渲染铃铛（其余页面复用同一个顶栏时保持原样）。 */
+  onOpenNotifications?: () => void;
+  notificationCount?: number;
 }
 
 /**
  * 手机端顶部导航栏（仿 DeepSeek 移动端）：
  * 左侧 ☰ 汉堡菜单 | 中间会话标题 | 右侧 ＋ 新建对话
  */
-export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHeaderProps) {
+export function MobileHeader({
+  title, onMenuClick, onNewConversation, onOpenNotifications, notificationCount = 0,
+}: MobileHeaderProps) {
   return (
     <TooltipGroup>
     <div style={{
@@ -19,7 +25,7 @@ export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHe
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 12px',
       borderBottom: `1px solid ${DS.border}`,
-      background: 'white',
+      background: 'var(--color-panel)',
     }}>
       {/* 左：汉堡菜单 */}
       <Tooltip side="bottom" label="菜单">
@@ -48,8 +54,39 @@ export function MobileHeader({ title, onMenuClick, onNewConversation }: MobileHe
         {title}
       </span>
 
-      {/* 右：新建对话 */}
+      {/* 右：通知 + 新建对话 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {onOpenNotifications && (
+          <Tooltip side="bottom" label="通知">
+            <button
+              onClick={onOpenNotifications}
+              aria-label="通知"
+              style={{
+                position: 'relative',
+                width: 40, height: 40, border: 'none', background: 'transparent',
+                borderRadius: 10, cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', color: DS.ink,
+              }}
+            >
+              <Bell size={19} strokeWidth={1.8} />
+              {notificationCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute', top: 5, right: 4,
+                    minWidth: 15, height: 15, padding: '0 4px',
+                    borderRadius: 999, background: 'var(--color-primary)',
+                    color: 'var(--color-on-primary)',
+                    fontSize: 9.5, fontWeight: 700, lineHeight: '15px',
+                    textAlign: 'center', boxSizing: 'border-box',
+                  }}
+                >
+                  {notificationCount > 99 ? '99+' : notificationCount}
+                </span>
+              )}
+            </button>
+          </Tooltip>
+        )}
         <Tooltip side="bottom" label="新建对话">
         <button
           onClick={onNewConversation}

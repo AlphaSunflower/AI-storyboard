@@ -85,7 +85,7 @@
   right: 0;
   width: clamp(240px, 30vw, 360px);
   height: 100%;
-  background: white;
+  background: var(--color-panel);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   display: flex;

@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { ReasoningPanel } from './ReasoningPanel';
 
 const reasoning = {
@@ -52,5 +52,39 @@ describe('ReasoningPanel', () => {
     expect(container.querySelector('.reasoning-expand')).toBeNull();
     fireEvent.click(container.querySelector('button') as HTMLButtonElement);
     expect(container.querySelector('.reasoning-expand')).not.toBeNull();
+  });
+
+  it('loads slimmed reasoning details once and renders them', async () => {
+    const loadDetails = vi.fn().mockResolvedValue({ reasoningDetails: '按需补拉的推理全文' });
+    const { container } = render(
+      <ReasoningPanel reasoning={{ source: 'agentscope', detailsAvailable: true }} loadDetails={loadDetails} />,
+    );
+
+    fireEvent.click(container.querySelector('button') as HTMLButtonElement);
+
+    await waitFor(() => expect(container.textContent).toContain('按需补拉的推理全文'));
+    expect(loadDetails).toHaveBeenCalledTimes(1);
+    // 关键回归：请求结束后不能继续停在「加载中」，也不能反复重拉。
+    expect(container.textContent).not.toContain('思考内容加载中');
+    expect(container.textContent).not.toContain('思考详情加载失败');
+  });
+
+  it('shows one failure state instead of retrying forever, then retries on demand', async () => {
+    const loadDetails = vi.fn().mockRejectedValue(new Error('boom'));
+    const { container } = render(
+      <ReasoningPanel reasoning={{ source: 'agentscope', detailsAvailable: true }} loadDetails={loadDetails} />,
+    );
+
+    fireEvent.click(container.querySelector('button') as HTMLButtonElement);
+
+    await waitFor(() => expect(container.textContent).toContain('思考详情加载失败'));
+    expect(loadDetails).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain('思考内容加载中');
+
+    loadDetails.mockResolvedValueOnce({ reasoningDetails: '重试后的推理全文' });
+    fireEvent.click(screen.getByText('重试'));
+
+    await waitFor(() => expect(container.textContent).toContain('重试后的推理全文'));
+    expect(loadDetails).toHaveBeenCalledTimes(2);
   });
 });

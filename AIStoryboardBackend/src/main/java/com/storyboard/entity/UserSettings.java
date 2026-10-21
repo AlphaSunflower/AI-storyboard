@@ -17,6 +17,8 @@ public class UserSettings {
     private String defaultApprovalMode;
     private String busySendBehavior;
     private String workStepDisplay;
+    /** light / dark / system；缺省 light，保持历史用户仍是浅色。 */
+    private String themePreference;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

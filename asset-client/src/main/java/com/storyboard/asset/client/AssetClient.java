@@ -1,5 +1,6 @@
 package com.storyboard.asset.client;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -45,6 +46,25 @@ import static com.storyboard.asset.client.AssetContracts.UpdateAssetRequest;
  * <p>所有写请求都带幂等键；所有请求都生成或透传 correlationId。
  */
 public class AssetClient {
+
+    /**
+     * 解析 asset-service 响应用的 mapper。
+     *
+     * <p>必须**容忍未知字段**：契约是「服务端先加字段、消费方后升级」的，
+     * asset-service 与消费方（Backend / MoonAgent / XiaoYueCanvas）各自独立部署，
+     * 服务端一旦新增字段，尚未重新打包的消费方就会解析失败。
+     * 2026-10-19 的事故正是如此：asset-service 的 AssetSummary 新增了
+     * {@code conversationId} 等字段，画布服务（10-17 打的包）在
+     * {@code /api/internal/library/assets/by-source} 上直接抛
+     * {@code Unrecognized field "conversationId"}，画布资产同步永久卡在 failed。
+     *
+     * <p>原来这里是每次响应都 {@code new ObjectMapper()}（Jackson 默认
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES=true}），比 Spring Boot 自动配置的 mapper
+     * 严格，且每个响应都重建一次 mapper；现在复用同一个实例。
+     */
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     private final RestClient restClient;
     private final String internalToken;
@@ -343,7 +363,7 @@ public class AssetClient {
         }
 
         return spec.exchange((request, response) -> {
-            ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+            ObjectMapper mapper = MAPPER;
             JavaType innerType = mapper.getTypeFactory().constructType(type.getType());
             JavaType javaType = mapper.getTypeFactory().constructParametricType(ApiEnvelope.class, innerType);
             var responseBody = response.getBody();

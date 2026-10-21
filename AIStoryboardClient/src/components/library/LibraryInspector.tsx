@@ -140,7 +140,7 @@ export function GroupUsagePanel({
           const stale = insight ? binding.groupVersion !== insight.version : false;
           return (
             <span key={binding.conversationId} className="library-group-usage__chip">
-              <button type="button" title="打开对话" onClick={() => onOpenConversation(binding.conversationId)}>
+              <button type="button" title={`打开对话：${title}（${binding.conversationId}）`} onClick={() => onOpenConversation(binding.conversationId)}>
                 <MessageSquare size={12} /> {title}
               </button>
               {stale && <em title="绑定后资产组已更新，重新绑定可刷新快照">快照过期</em>}
@@ -450,7 +450,8 @@ function AssetInspector({
                     <button
                       key={ref.id}
                       type="button"
-                      title="打开对话"
+                      // 同名对话（多个「新对话」）只能靠 ID 区分：tooltip 里给出真实会话 ID 便于核对
+                      title={`打开对话：${ref.title}（${ref.id}）`}
                       onClick={() => onOpenConversation?.(ref.id)}
                     >
                       {ref.title}
@@ -482,7 +483,7 @@ function AssetInspector({
         <button
           type="button"
           className="library-inspector__conversation"
-          title="回到产出这张素材的对话"
+          title={`回到产出这张素材的对话（${asset.conversationId}）`}
           onClick={() => onOpenConversation?.(asset.conversationId!)}
         >
           <MessageSquare size={13} />

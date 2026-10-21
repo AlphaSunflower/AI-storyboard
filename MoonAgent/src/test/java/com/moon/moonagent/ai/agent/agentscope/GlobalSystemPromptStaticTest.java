@@ -169,6 +169,8 @@ class GlobalSystemPromptStaticTest {
                 AgentScopeCreativeTools.LIST_CRITIQUES,
                 AgentScopeCreativeTools.SAVE_TIMELINE,
                 AgentScopeCreativeTools.GET_TIMELINE,
+                AgentScopeMemoryTools.REMEMBER_MEMORY,
+                AgentScopeMemoryTools.RECALL_MEMORY,
                 AgentScopeStoryboardTools.START_STORYBOARD,
                 AgentScopeStoryboardTools.REVISE_STORYBOARD,
                 AgentScopeStoryboardTools.APPROVE_STORYBOARD,

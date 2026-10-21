@@ -15,6 +15,7 @@ import com.moon.moonagent.mapper.AgentTimelineManifestMapper;
 import com.moon.moonagent.mapper.AgentTurnEventMapper;
 import com.moon.moonagent.mapper.AgentTurnMapper;
 import com.moon.moonagent.mapper.AgentWorkflowRunMapper;
+import com.moon.moonagent.mapper.AgentWorkflowStepMapper;
 
 /**
  * 单测用的 MyBatis-Plus 实体元数据引导。
@@ -45,6 +46,7 @@ public final class MyBatisPlusLambdaCache {
             AgentTimelineManifestMapper.class,
             AgentMediaCritiqueMapper.class,
             AgentWorkflowRunMapper.class,
+            AgentWorkflowStepMapper.class,
             AgentExternalActionMapper.class,
     };
 

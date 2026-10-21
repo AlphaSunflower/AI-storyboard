@@ -154,6 +154,42 @@ class AssetClientTest {
         });
     }
 
+    @Test
+    void ignoresAssetFieldsAddedByTheService() throws IOException {
+        // 回归：asset-service 与消费方各自独立打包，服务端先加字段是常态。
+        // 2026-10-19 画布服务因为跑的是旧包、而 asset-service 已多返回 conversationId，
+        // 在 by-source 上直接解析失败，画布资产同步永久卡在 failed。
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/internal/library/assets/by-source", exchange -> {
+            respond(exchange, 200, """
+                    {
+                      "code":200,
+                      "message":"success",
+                      "data":{"asset":{
+                        "id":"asset-1","ownerUserId":"u1","scope":"PROJECT","ownerProjectId":"p1",
+                        "type":"IMAGE","name":"画布产出","description":null,"aiDescription":null,
+                        "manualOverride":false,"metadataState":"NONE","status":"ACTIVE",
+                        "coverUrl":null,"version":1,"tags":[],"projects":[],
+                        "folderId":null,"folderPath":[],"sourceType":"canvas-generation",
+                        "sourceId":"gen-1:frame.png","createdAt":"2026-10-19T14:00:00+08:00",
+                        "updatedAt":"2026-10-19T14:00:00+08:00",
+                        "conversationId":"conv-1",
+                        "brandNewServerField":"服务端将来才会加的字段"
+                      }},
+                      "timestamp":"2026-10-19T14:00:00+08:00"
+                    }
+                    """);
+        });
+        server.start();
+
+        AssetClient client = AssetClient.create(new AssetClientProperties(
+                "http://localhost:" + server.getAddress().getPort(), "secret", 30, 10));
+        var found = client.findAssetBySource("u1", "canvas-generation", "gen-1:frame.png", "corr-1");
+
+        assertThat(found.asset().id()).isEqualTo("asset-1");
+        assertThat(found.asset().conversationId()).isEqualTo("conv-1");
+    }
+
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");

@@ -232,8 +232,8 @@ export function SidebarDrawer({
           {/* 工具栏 */}
           <View style={s.utilityRow}>
             <TouchableOpacity style={s.utilityBtn} onPress={() => { onClose(); router.replace('/(tabs)/assets'); }}>
-              <Ionicons name="cube-outline" size={16} color={tokens.colors.textSecondary} />
-              <Text style={s.utilityText}>资产库</Text>
+              <Ionicons name="folder-open-outline" size={16} color={tokens.colors.textSecondary} />
+              <Text style={s.utilityText}>项目库</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.utilityBtn} onPress={() => Linking.openURL('http://192.168.100.61:8080/docs')}>
               <Ionicons name="document-text-outline" size={16} color={tokens.colors.textSecondary} />

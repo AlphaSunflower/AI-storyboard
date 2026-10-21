@@ -4,13 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.storyboard.dto.response.SceneFull;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.ScenePrompt;
-import com.storyboard.mapper.AssetImageMapper;
-import com.storyboard.mapper.AssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.service.AssetService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -36,8 +35,7 @@ class InternalApiServiceImplStoryboardReplaceTest {
                 promptMapper,
                 mock(SceneReferenceImageMapper.class),
                 mock(SceneAssetMapper.class),
-                mock(AssetMapper.class),
-                mock(AssetImageMapper.class));
+                mock(AssetService.class));
 
         List<String> sceneIds = service.replaceProjectScenes("project-1", List.of(
                 scene("第一镜"),

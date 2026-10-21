@@ -20,7 +20,7 @@ export function MobileEditorHeader({ onMenuClick, onScript, showMenu = true, sho
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '0 12px',
       borderBottom: `1px solid ${DS.border}`,
-      background: 'white',
+      background: 'var(--color-panel)',
     }}>
       {/* 左：☰ 菜单（应用子窗内隐藏，保留等宽占位维持标题居中） */}
       {showMenu ? (

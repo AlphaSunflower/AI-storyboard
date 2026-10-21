@@ -566,7 +566,7 @@ const overlay: React.CSSProperties = {
 };
 const dialog: React.CSSProperties = {
   width: '100%', maxWidth: 820, maxHeight: '86dvh', display: 'flex', flexDirection: 'column',
-  overflow: 'hidden', borderRadius: 16, background: 'white',
+  overflow: 'hidden', borderRadius: 16, background: 'var(--color-panel)',
   boxShadow: '0 18px 48px rgba(15,17,21,0.24)',
 };
 const header: React.CSSProperties = {
@@ -624,7 +624,7 @@ const assetMeta: React.CSSProperties = {
 };
 const check: React.CSSProperties = {
   position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10,
-  display: 'grid', placeItems: 'center', color: 'white', background: 'var(--color-primary)',
+  display: 'grid', placeItems: 'center', color: 'var(--color-on-primary)', background: 'var(--color-primary)',
 };
 const errorBar: React.CSSProperties = {
   padding: '8px 18px', borderTop: '1px solid var(--color-hairline)',
@@ -639,20 +639,20 @@ const iconButton: React.CSSProperties = {
 };
 const uploadButton: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
-  border: '1px solid var(--color-primary)', color: 'var(--color-primary)', background: 'white',
+  border: '1px solid var(--color-primary)', color: 'var(--color-primary)', background: 'var(--color-panel)',
   fontSize: 12, cursor: 'pointer',
 };
 const ghostButton: React.CSSProperties = {
   padding: '8px 16px', borderRadius: 10, border: '1px solid var(--color-hairline)',
-  background: 'white', color: 'var(--color-body)', fontSize: 13, cursor: 'pointer',
+  background: 'var(--color-panel)', color: 'var(--color-body)', fontSize: 13, cursor: 'pointer',
 };
 const primaryButton: React.CSSProperties = {
   padding: '8px 16px', borderRadius: 10, border: 'none',
-  background: 'var(--color-primary)', color: 'white', fontSize: 13, cursor: 'pointer',
+  background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 13, cursor: 'pointer',
 };
 const scopeButton = (active: boolean): React.CSSProperties => ({
   padding: '6px 12px', borderRadius: 8, border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-  background: active ? 'var(--color-primary)' : 'white', color: active ? 'white' : 'var(--color-muted)',
+  background: active ? 'var(--color-primary)' : 'var(--color-panel)', color: active ? 'var(--color-on-primary)' : 'var(--color-muted)',
   fontSize: 12, cursor: 'pointer',
 });
 // 顶层「素材 / 资产组」页签：与筛选 pill 区分，使用下划线式 tablist 语义。
@@ -663,5 +663,5 @@ const tabButton = (active: boolean): React.CSSProperties => ({
 });
 const card = (active: boolean): React.CSSProperties => ({
   position: 'relative', padding: 0, overflow: 'hidden', border: `1.5px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-  borderRadius: 10, background: 'white', cursor: 'pointer', textAlign: 'left',
+  borderRadius: 10, background: 'var(--color-panel)', cursor: 'pointer', textAlign: 'left',
 });

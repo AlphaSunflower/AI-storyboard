@@ -29,15 +29,15 @@ const panelStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '8px 12px', border: '1px solid var(--color-hairline)',
   borderRadius: 'var(--rounded-md)', font: 'var(--text-body-sm)', color: 'var(--color-ink)',
-  outline: 'none', boxSizing: 'border-box', background: 'white',
+  outline: 'none', boxSizing: 'border-box', background: 'var(--color-panel)',
 };
 const primaryBtn: React.CSSProperties = {
   padding: '8px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-  background: 'var(--color-primary)', color: 'white', font: 'var(--text-caption)', cursor: 'pointer',
+  background: 'var(--color-primary)', color: 'var(--color-on-primary)', font: 'var(--text-caption)', cursor: 'pointer',
 };
 const ghostBtn: React.CSSProperties = {
   padding: '5px 10px', border: '1px solid var(--color-hairline)', borderRadius: 'var(--rounded-md)',
-  background: 'white', color: 'var(--color-muted)', font: 'var(--text-caption)', cursor: 'pointer',
+  background: 'var(--color-panel)', color: 'var(--color-muted)', font: 'var(--text-caption)', cursor: 'pointer',
   display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'center',
 };
 
@@ -220,7 +220,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
         onClick={() => (mode === 'pick' ? toggleAssociate(a) : openWorkbench(a))}
         style={{
           display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
-          background: linked ? 'var(--color-surface-card)' : 'white',
+          background: linked ? 'var(--color-surface-card)' : 'var(--color-panel)',
           border: `1px solid ${linked ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
           borderRadius: 'var(--rounded-md)', marginBottom: compact ? 8 : 0,
         }}
@@ -232,7 +232,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
             <span style={{ color: 'var(--color-muted-soft)', font: 'var(--text-caption)' }}>无图</span>
           )}
           {linked && (
-            <span style={{ position: 'absolute', top: 0, left: 0, background: 'var(--color-primary)', color: 'white', width: 18, height: 18, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>✓</span>
+            <span style={{ position: 'absolute', top: 0, left: 0, background: 'var(--color-primary)', color: 'var(--color-on-primary)', width: 18, height: 18, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>✓</span>
           )}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -265,7 +265,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
     <div style={{ display: 'flex', gap: 8 }}>
       {(['all', 'character', 'prop', 'scene'] as const).map((t) => (
         <button key={t} onClick={() => setTypeFilter(t)}
-          style={{ ...ghostBtn, background: typeFilter === t ? 'var(--color-surface-card)' : 'white', color: typeFilter === t ? 'var(--color-ink)' : 'var(--color-muted)', fontWeight: typeFilter === t ? 600 : 400 }}>
+          style={{ ...ghostBtn, background: typeFilter === t ? 'var(--color-surface-card)' : 'var(--color-panel)', color: typeFilter === t ? 'var(--color-ink)' : 'var(--color-muted)', fontWeight: typeFilter === t ? 600 : 400 }}>
           {t === 'all' ? '全部' : TYPE_LABEL[t]}
         </button>
       ))}
@@ -401,12 +401,12 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
         {/* 新建资产弹窗 */}
         {createOpen && (
           <div style={{ ...overlayStyle, zIndex: 220 }} onClick={() => setCreateOpen(false)}>
-            <div style={{ width: 460, background: 'white', borderRadius: 'var(--rounded-lg)', padding: 20, boxShadow: '0 12px 48px rgba(20,20,19,0.25)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ width: 460, background: 'var(--color-panel)', borderRadius: 'var(--rounded-lg)', padding: 20, boxShadow: '0 12px 48px rgba(20,20,19,0.25)' }} onClick={(e) => e.stopPropagation()}>
               <h3 style={{ margin: '0 0 14px', font: 'var(--text-title-md)', color: 'var(--color-ink)' }}>新建资产</h3>
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 {TYPES.map((t) => (
                   <button key={t.value} onClick={() => setCreateType(t.value)}
-                    style={{ ...ghostBtn, background: createType === t.value ? 'var(--color-primary)' : 'white', color: createType === t.value ? 'white' : 'var(--color-muted)', borderColor: createType === t.value ? 'var(--color-primary)' : 'var(--color-hairline)' }}>
+                    style={{ ...ghostBtn, background: createType === t.value ? 'var(--color-primary)' : 'var(--color-panel)', color: createType === t.value ? 'var(--color-on-primary)' : 'var(--color-muted)', borderColor: createType === t.value ? 'var(--color-primary)' : 'var(--color-hairline)' }}>
                     {t.label}
                   </button>
                 ))}
@@ -466,7 +466,7 @@ export function AssetLibraryPanel({ onClose, mode = 'manage', purpose = 'image' 
         {/* 编辑资产弹窗 */}
         {editTarget && (
           <div style={{ ...overlayStyle, zIndex: 220 }} onClick={() => setEditTarget(null)}>
-            <div style={{ width: 420, background: 'white', borderRadius: 'var(--rounded-lg)', padding: 20, boxShadow: '0 12px 48px rgba(20,20,19,0.25)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ width: 420, background: 'var(--color-panel)', borderRadius: 'var(--rounded-lg)', padding: 20, boxShadow: '0 12px 48px rgba(20,20,19,0.25)' }} onClick={(e) => e.stopPropagation()}>
               <h3 style={{ margin: '0 0 14px', font: 'var(--text-title-md)', color: 'var(--color-ink)' }}>编辑资产</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <input style={inputStyle} placeholder="名称" value={editName} onChange={(e) => setEditName(e.target.value)} />

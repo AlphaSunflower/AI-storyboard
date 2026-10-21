@@ -1,7 +1,9 @@
 # 构建所有应用产物（Java fat jar + 两套前端 dist）并暂存到 build/ 供打镜像
 param(
     [switch]$SkipJava,
-    [switch]$SkipFrontend
+    [switch]$SkipFrontend,
+    # 只暂存现有 dist（不跑 npm run build）：本机刚构建过前端、只想重打镜像时用
+    [switch]$SkipFrontendBuild
 )
 
 $ErrorActionPreference = 'Continue'
@@ -43,12 +45,16 @@ if (-not $SkipFrontend) {
         $appDir = Join-Path $RepoRoot $app
         Push-Location $appDir
         try {
-            if (-not (Test-Path (Join-Path $appDir 'node_modules'))) {
-                Write-Host "[build] $app 缺少 node_modules，先 npm ci"
-                & npm ci; if ($LASTEXITCODE -ne 0) { throw "$app npm ci 失败" }
+            if ($SkipFrontendBuild) {
+                Write-Host "[build] $app -SkipFrontendBuild：复用现有 dist"
+            } else {
+                if (-not (Test-Path (Join-Path $appDir 'node_modules'))) {
+                    Write-Host "[build] $app 缺少 node_modules，先 npm ci"
+                    & npm ci; if ($LASTEXITCODE -ne 0) { throw "$app npm ci 失败" }
+                }
+                Write-Host "[build] $app npm run build"
+                & npm run build; if ($LASTEXITCODE -ne 0) { throw "$app 构建失败" }
             }
-            Write-Host "[build] $app npm run build"
-            & npm run build; if ($LASTEXITCODE -ne 0) { throw "$app 构建失败" }
         } finally { Pop-Location }
         $src = Join-Path $appDir 'dist'
         $dst = Join-Path $BuildDir "frontend\$sub"

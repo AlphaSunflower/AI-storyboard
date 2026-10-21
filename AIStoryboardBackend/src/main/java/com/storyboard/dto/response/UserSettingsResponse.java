@@ -6,5 +6,6 @@ package com.storyboard.dto.response;
 public record UserSettingsResponse(
     String defaultApprovalMode,
     String busySendBehavior,
-    String workStepDisplay
+    String workStepDisplay,
+    String themePreference
 ) {}

@@ -4,25 +4,22 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.storyboard.common.BusinessException;
-import com.storyboard.dto.response.AssetImageVO;
 import com.storyboard.dto.response.AssetVO;
 import com.storyboard.dto.response.SceneFull;
 import com.storyboard.dto.response.SceneReferenceResponse;
 import com.storyboard.dto.request.SceneReferenceLinkRequest;
-import com.storyboard.entity.Asset;
 import com.storyboard.entity.Project;
 import com.storyboard.asset.client.AssetContracts.ProjectOwnership;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
 import com.storyboard.entity.ScenePrompt;
 import com.storyboard.entity.SceneReferenceImage;
-import com.storyboard.mapper.AssetImageMapper;
-import com.storyboard.mapper.AssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.service.AssetService;
 import com.storyboard.service.InternalApiService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -48,8 +45,7 @@ public class InternalApiServiceImpl implements InternalApiService {
     private final ScenePromptMapper scenePromptMapper;
     private final SceneReferenceImageMapper sceneReferenceImageMapper;
     private final SceneAssetMapper sceneAssetMapper;
-    private final AssetMapper assetMapper;
-    private final AssetImageMapper assetImageMapper;
+    private final AssetService assetService;
 
     @Override
     public Project getProject(String id) {
@@ -382,16 +378,10 @@ public class InternalApiServiceImpl implements InternalApiService {
 
     @Override
     public List<AssetVO> getProjectAssets(String projectId) {
-        List<Asset> assets = assetMapper.selectList(new LambdaQueryWrapper<Asset>()
-                .and(w -> w.eq(Asset::getProjectId, projectId).or().isNull(Asset::getProjectId))
-                .orderByDesc(Asset::getCreatedAt));
-        return assets.stream().map(a -> {
-            List<AssetImageVO> images = assetImageMapper.findByAssetId(a.getId()).stream()
-                    .map(i -> new AssetImageVO(i.getId(), i.getUrl(), i.getSortOrder(), i.getFileName(), i.getText()))
-                    .toList();
-            return new AssetVO(a.getId(), a.getType(), a.getName(), a.getDescription(),
-                    a.getProjectId(), images, a.getCreatedAt(), a.getUpdatedAt());
-        }).toList();
+        // 旧 public.assets/asset_images 已归档；项目可用资产统一从 asset-service 读取。
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || project.getUserId() == null) return List.of();
+        return assetService.listAgentAssets(project.getUserId(), projectId);
     }
 
     @Override

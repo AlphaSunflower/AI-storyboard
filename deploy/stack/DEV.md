@@ -5,7 +5,7 @@
 | 模式 | 起什么 | 命令 |
 |---|---|---|
 | **开发模式** | Docker 只跑依赖（Postgres/Redis/MinIO/沙箱），业务代码在本机改、本机跑 | `powershell -File scripts\dev-up.ps1` |
-| 部署模式 | 整套 11 个容器（业务也在容器里） | `powershell -File scripts\up.ps1` |
+| 部署模式 | 整套 12 个容器（业务也在容器里） | `powershell -File scripts\up.ps1` |
 
 退出开发模式：`scripts\dev-down.ps1`（停依赖）；`scripts\dev-down.ps1 -FullStack`（直接恢复整套部署）。
 
@@ -17,7 +17,7 @@
 |---|---|---|
 | PostgreSQL | `localhost:5432`（本机原生库，开发默认） / `127.0.0.1:5433`（容器库，交付数据） | 见下方「数据库怎么选」 |
 | Redis | `127.0.0.1:6379` | 缓存/限流/会话锁 |
-| MinIO | `127.0.0.1:9000`（API）/ `9001`（控制台 `minioadmin` / `minioadmin123`） | 对象目录就是 `deploy/docker/minio/data` |
+| MinIO | `127.0.0.1:9000`（API）/ `9001`（控制台 `minioadmin` / `minioadmin123`） | 对象目录就是本栈的 `data/minio` |
 | MoonSandbox | `127.0.0.1:8090` | 密钥 `local-moon-sandbox-secret` |
 
 没有 Nacos：服务发现默认关闭（`NACOS_DISCOVERY_ENABLED=false`），ApiGateway 走直连默认值
@@ -53,8 +53,8 @@ cd XiaoYueCanvasAgent  && npm run dev    # http://localhost:3000/canvas/
 
 | 选哪个 | 连接 | 数据 | 用法 |
 |---|---|---|---|
-| 本机原生 PG18（**默认**） | `localhost:5432` | 开发库：146 个账号 / 322 会话（含各种 e2e 测试账号） | 各服务 `application-local.yml` 就是这个，什么都不用改 |
-| 容器 PG | `localhost:5433` | 交付库：只有 `admin@qq.com` / `123456` + 250 会话 | 启动时加环境变量覆盖：<br>`$env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5433/ai_storyboard'` |
+| 本机原生 PG18（**默认**） | `localhost:5432` | 开发库：157 个账号 / 377 会话（含各种 e2e 测试账号） | 各服务 `application-local.yml` 就是这个，什么都不用改 |
+| 容器 PG | `localhost:5433` | 交付库：只有 `admin@qq.com`，业务数据为空（干净包） | 启动时加环境变量覆盖：<br>`$env:SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5433/ai_storyboard'` |
 
 两者账号都是 `postgres` / `123456`。
 

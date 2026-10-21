@@ -18,7 +18,7 @@ class SkillPackageTest {
     private static final Path SKILLS_ROOT = Path.of("src/main/resources/skills");
 
     @Test
-    void loadsOnlyTheSixProductionSkills() throws Exception {
+    void loadsProductionSkillsAndTheOptionalPptMaster() throws Exception {
         Set<String> names;
         try (Stream<Path> paths = Files.list(SKILLS_ROOT)) {
             names = paths.filter(Files::isDirectory)
@@ -26,8 +26,11 @@ class SkillPackageTest {
                     .collect(Collectors.toSet());
         }
 
+        // ppt-master 是可选技能：默认不挂载，只有本轮引用时才进入技能白名单；
+        // 这里只锁住「生产技能集合没有被意外增删」，不把它算作常驻技能。
         assertThat(names).containsExactlyInAnyOrder(
-                "storyboard", "image", "video", "canvas-design", "canvas-run", "general");
+                "storyboard", "image", "video", "canvas-design", "canvas-run", "general",
+                "ppt-master");
     }
 
     @Test
@@ -111,11 +114,11 @@ class SkillPackageTest {
     }
 
     /**
-     * 两段式流程：本轮只搭结构，生成要等用户确认。
+     * 两段式流程：本轮只搭结构 + 分组，生成要等用户在画布分组上点「执行」。
      *
-     * <p>真实背景：`canvas_execute_node` / `canvas_execute_graph` 曾在自动放行清单里，智能体会在
-     * 同一轮把整轮生成跑掉（每张图 30–60s、每段视频 2–5min），用户既没有"先只看结构"的机会，
-     * 也要一直等着。现在执行已改为 ASK（见 `MoonAgentRuntimePermissionTest`），技能负责告知模型别抢跑。
+     * <p>真实背景：智能体拿到的 `canvas_execute_node` / `canvas_execute_graph` 被服务端强制成
+     * 预览（只返回 status=preview / groupId），真正开跑的唯一入口是画布分组标题上的「执行」按钮。
+     * 所以技能必须要求模型先把参与节点分组，再把确认交回用户，而不是宣称"已提交执行"。
      */
     @Test
     void canvasDesignSkillKeepsGenerationBehindUserConfirmation() throws Exception {
@@ -123,8 +126,11 @@ class SkillPackageTest {
                 SKILLS_ROOT.resolve("canvas-design/SKILL.md"), StandardCharsets.UTF_8);
 
         assertThat(content)
-                .as("必须写明本轮只搭结构，并在结尾主动询问是否生成")
-                .contains("只搭结构", "需要我把工作流里的图片");
+                .as("必须写明本轮只搭结构 + 分组，开跑由用户点分组上的「执行」")
+                .contains("只搭结构", "分组", "执行");
+        assertThat(content)
+                .as("必须点名分组工具，否则模型不知道执行入口怎么产生")
+                .contains("canvas_group_nodes");
     }
 
     /**

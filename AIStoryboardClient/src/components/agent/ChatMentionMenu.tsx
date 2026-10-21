@@ -136,7 +136,7 @@ export function ChatMentionMenu({
       width: placement.width,
       maxHeight: Math.min(placement.maxHeight, MENTION_MENU_MAX_HEIGHT),
       overflowY: 'auto',
-      background: 'white', border: `1px solid ${T.border}`,
+      background: 'var(--color-panel)', border: `1px solid ${T.border}`,
       borderRadius: 14, boxShadow: '0 8px 28px rgba(0,0,0,0.14)',
       padding: 6, zIndex: 1100, display: 'flex', flexDirection: 'column', gap: 2,
     }}>

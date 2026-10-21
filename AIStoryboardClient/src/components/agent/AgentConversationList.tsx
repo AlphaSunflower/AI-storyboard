@@ -7,6 +7,7 @@ import type { AgentConversation } from '../../api/agent';
 import SpecularButton from '../SpecularButton';
 import { Archive, ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react';
 import { MoreMenu } from '../common/MoreMenu';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import { ContextMenu } from '../common/ContextMenu';
 import { Tooltip, TooltipGroup } from '../common/Tooltip';
 import MoonLogo from './MoonLogo';
@@ -55,7 +56,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
   const {
     conversations, activeConversationId, selectConversation,
     newConversation, renameConversation, setConversationStatus, deleteConversation,
-    taskUnread, generating, replyUnread,
+    taskUnread, generating, replyUnread, loadingConversations,
   } = useAgentStore();
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -204,7 +205,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           onClick={() => setShowArchived(!showArchived)}
           aria-label={showArchived ? '返回进行中的对话' : '查看已归档对话'}
           style={{ padding: '6px 8px', marginLeft: -8, border: 'none', background: 'none', color: DS.textCaption, fontSize: 12.5, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s' }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.ink; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textCaption; }}
         >
           {showArchived ? (
@@ -230,8 +231,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
               color: multiSelect ? 'var(--color-primary)' : DS.textCaption,
               fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, borderRadius: 8, transition: 'background 0.15s, color 0.15s',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = multiSelect ? 'var(--color-primary)' : DS.textCaption; }}
           >
             {/* 多选图标：两个叠加方块 */}
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -329,7 +330,8 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                       <div style={{
                         flex: 1, minWidth: 0, fontSize: 14,
                         fontWeight: c.id === activeConversationId ? 600 : 400,
-                        color: c.id === activeConversationId ? DS.brand : 'var(--color-ink)',
+                        color: (c.id === activeConversationId || hoverId === c.id) ? DS.brand : 'var(--color-ink)',
+                        transition: 'color 160ms ease',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
                         {c.title}
@@ -358,7 +360,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
                           style={{
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                             minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
-                            background: DS.brand, color: 'white', fontSize: 10, fontWeight: 700,
+                            background: DS.brand, color: 'var(--color-on-primary)', fontSize: 10, fontWeight: 700,
                             flexShrink: 0,
                           }}
                         >
@@ -406,9 +408,23 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
       ))}
 
       {visible.length === 0 && (
-        <p style={{ padding: 16, fontSize: 13, color: DS.textCaption, textAlign: 'center' }}>
-          {showArchived ? '暂无已归档对话' : '暂无对话'}
-        </p>
+        loadingConversations ? (
+          // 会话列表也是异步的：没回来之前先占位，别让侧栏空着（输入框/生成中心照常可用）
+          <div className="conversation-list-skeleton" aria-busy="true" aria-label="正在加载对话列表">
+            <p className="conversation-list-skeleton__hint">正在把对话一条条捞回来…</p>
+            {[0, 1, 2, 3].map((index) => (
+              <span
+                key={index}
+                className="conversation-list-skeleton__row"
+                style={{ width: `${88 - index * 11}%` }}
+              />
+            ))}
+          </div>
+        ) : (
+          <p style={{ padding: 16, fontSize: 13, color: DS.textCaption, textAlign: 'center' }}>
+            {showArchived ? '暂无已归档对话' : '暂无对话'}
+          </p>
+        )
       )}
       </div>
       </div>
@@ -420,7 +436,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
           style={{
             flexShrink: 0,
             padding: '12px 14px',
-            background: 'white',
+            background: 'var(--color-panel)',
             borderTop: `1px solid ${DS.border}`,
             display: 'flex',
             alignItems: 'center',
@@ -441,7 +457,7 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
               border: 'none',
               borderRadius: 'var(--rounded-md)',
               background: selectedCount > 0 ? 'var(--color-error)' : 'var(--color-hairline)',
-              color: selectedCount > 0 ? 'white' : 'var(--color-muted)',
+              color: selectedCount > 0 ? 'var(--color-on-danger)' : 'var(--color-muted)',
               fontSize: 13,
               cursor: selectedCount > 0 ? 'pointer' : 'not-allowed',
               opacity: selectedCount > 0 ? 1 : 0.55,
@@ -452,73 +468,25 @@ export function AgentConversationList({ width, toolbar, onSelectOverride, hideHe
         </div>
       )}
 
-      {/* 单条删除二次确认 */}
-      {confirmDeleteId && (
-        <div
-          onClick={() => setConfirmDeleteId(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(20, 20, 19, 0.35)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 200,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'white',
-              borderRadius: 'var(--rounded-md)',
-              boxShadow: '0 8px 32px rgba(20, 20, 19, 0.18)',
-              padding: 24,
-              minWidth: 320,
-              maxWidth: 440,
-            }}
-          >
-            <h3 style={{ margin: '0 0 12px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>
-              删除对话
-            </h3>
-            <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>
-              确定要删除对话「{conversations.find((c) => c.id === confirmDeleteId)?.title ?? ''}」吗？此操作无法撤销。
-            </p>
-            <div style={{ textAlign: 'right' }}>
-              <button
-                onClick={() => setConfirmDeleteId(null)}
-                style={{
-                  padding: '6px 18px',
-                  height: 32,
-                  border: '1px solid var(--color-hairline)',
-                  borderRadius: 'var(--rounded-md)',
-                  background: 'white',
-                  color: 'var(--color-muted)',
-                  font: 'var(--text-caption)',
-                  cursor: 'pointer',
-                  marginRight: 8,
-                }}
-              >
-                取消
-              </button>
-              <button
-                onClick={() => { deleteConversation(confirmDeleteId); setConfirmDeleteId(null); }}
-                style={{
-                  padding: '6px 18px',
-                  height: 32,
-                  border: 'none',
-                  borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-error)',
-                  color: 'white',
-                  font: 'var(--text-caption)',
-                  cursor: 'pointer',
-                }}
-              >
-                删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/*
+        单条删除二次确认。
+        必须走 ConfirmDialog（portal 到 document.body）：侧栏面板 .chat-sidebar-panel 带
+        `transform: translateX(0)`（收起动画），任何带 transform 的祖先都会成为
+        `position: fixed` 的包含块，手写 fixed 遮罩会被压在侧栏那块小方框里。
+      */}
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="删除对话"
+        description={`确定要删除对话「${conversations.find((c) => c.id === confirmDeleteId)?.title ?? ''}」吗？此操作无法撤销。`}
+        confirmLabel="删除"
+        danger
+        onCancel={() => setConfirmDeleteId(null)}
+        onConfirm={() => {
+          const id = confirmDeleteId;
+          setConfirmDeleteId(null);
+          if (id) void deleteConversation(id);
+        }}
+      />
     </div>
   );
 }

@@ -15,7 +15,7 @@ const labelStyle: React.CSSProperties = {
 const sharedInputStyle: React.CSSProperties = {
   width: '100%', padding: '8px 10px', borderRadius: 'var(--rounded-md)',
   border: '1px solid var(--color-hairline)', fontSize: 13,
-  background: 'white', color: 'var(--color-body)', outline: 'none',
+  background: 'var(--color-panel)', color: 'var(--color-body)', outline: 'none',
 };
 
 /** 手机端右侧剧本输入抽屉（80vw, max 360px） */
@@ -81,7 +81,7 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.35)' }}>
         <div onClick={(e) => e.stopPropagation()} style={{
           position: 'absolute', top: 0, right: 0, bottom: 0,
-          width: '80vw', maxWidth: 360, background: 'white',
+          width: '80vw', maxWidth: 360, background: 'var(--color-panel)',
           display: 'flex', flexDirection: 'column',
           boxShadow: '-4px 0 24px rgba(0,0,0,0.12)',
           animation: 'scriptDrawerIn 0.25s ease-out',
@@ -129,7 +129,7 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
                       <img src={uri} style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6, background: 'var(--color-surface-soft)', border: '1px solid var(--color-hairline)' }} />
                       <span onClick={() => setRefImages((p) => p.filter((_, j) => j !== i))} style={{
                         position: 'absolute', top: -5, right: -5,
-                        background: 'var(--color-error)', color: 'white',
+                        background: 'var(--color-error)', color: 'var(--color-on-danger)',
                         borderRadius: '50%', width: 16, height: 16, fontSize: 11,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
                       }}>×</span>
@@ -150,7 +150,7 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
                 border: `1px solid ${DS.border}`, borderRadius: 12,
                 fontSize: 14, lineHeight: 1.6, color: DS.ink,
                 resize: 'none', outline: 'none', fontFamily: 'inherit',
-                background: agentGeneratedScenes ? '#f5f5f5' : 'white',
+                background: agentGeneratedScenes ? '#f5f5f5' : 'var(--color-panel)',
               }}
             />
             {agentGeneratedScenes && (
@@ -167,7 +167,7 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
               disabled={!scriptText.trim() || generating || agentGeneratedScenes}
               style={{
                 width: '100%', height: 44, border: 'none', borderRadius: 12,
-                background: DS.brand, color: 'white', fontSize: 15, fontWeight: 600,
+                background: DS.brand, color: 'var(--color-on-primary)', fontSize: 15, fontWeight: 600,
                 cursor: !scriptText.trim() || generating || agentGeneratedScenes ? 'not-allowed' : 'pointer',
                 opacity: !scriptText.trim() || generating || agentGeneratedScenes ? 0.45 : 1,
               }}
@@ -180,13 +180,13 @@ export function ScriptInputDrawer({ onClose }: ScriptInputDrawerProps) {
       {/* 覆盖/追加/不生成 确认弹窗 */}
       {confirmOverwrite && (
         <div onClick={() => setConfirmOverwrite(null)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(20,20,19,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: 'white', borderRadius: 10, boxShadow: '0 8px 32px rgba(20,20,19,0.18)', padding: 24, minWidth: 300, maxWidth: 380 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--color-panel)', borderRadius: 10, boxShadow: '0 8px 32px rgba(20,20,19,0.18)', padding: 24, minWidth: 300, maxWidth: 380 }}>
             <h3 style={{ margin: '0 0 8px', fontSize: 15, color: DS.ink }}>项目已有 {scenes.length} 个分镜</h3>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: DS.textSecondary }}>选择如何处理本次生成：</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} style={{ padding: 10, borderRadius: 10, border: 'none', background: DS.brand, color: 'white', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
-              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} style={{ padding: 10, borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white', color: DS.ink, fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
-              <button onClick={() => setConfirmOverwrite(null)} style={{ padding: 10, borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white', color: DS.textSecondary, fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} style={{ padding: 10, borderRadius: 10, border: 'none', background: DS.brand, color: 'var(--color-on-primary)', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} style={{ padding: 10, borderRadius: 10, border: `1px solid ${DS.border}`, background: 'var(--color-panel)', color: DS.ink, fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
+              <button onClick={() => setConfirmOverwrite(null)} style={{ padding: 10, borderRadius: 10, border: `1px solid ${DS.border}`, background: 'var(--color-panel)', color: DS.textSecondary, fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
             </div>
           </div>
         </div>

@@ -1,5 +1,12 @@
 server:
   port: 8084
+  compression:
+    # 聊天接口的 JSON 又大又啰嗦（一条 50 条消息的会话 ~79KB、任务列表 ~395KB），
+    # gzip 后实测能压到 1/8 左右，切会话首屏的传输时间直接砍掉一个量级。
+    enabled: true
+    # 注意：绝不能把 text/event-stream 加进来 —— 压缩会攒包，SSE 的逐字流会被缓冲住。
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,text/javascript,application/javascript
+    min-response-size: 1024
 
 spring:
   application:
@@ -107,6 +114,32 @@ ai:
   gateway:
     base-url: ${LLM_GATEWAY_BASE_URL:http://localhost:8083}
     api-key: ${LLM_GATEWAY_API_KEY:}
+
+  # 定期清理
+  cleanup:
+    # 过期 HITL checkpoint（已消费/已过期，超出保留天数）
+    checkpoint-cron: ${AI_CLEANUP_CHECKPOINT_CRON:0 0 3 * * *}
+    # 已归档会话：只清运行时派生数据（轮次事件/checkpoint/画布运行/文档索引/异步任务/工作流运行 + 沙箱工作区），
+    # 消息、产出素材行、审计记录与 MinIO 图片/文档对象一律保留。
+    # grace-days 是「误归档 → 恢复」窗口：0=下一次任务即清理，默认 3 天。
+    archive:
+      enabled: ${AI_ARCHIVE_CLEANUP_ENABLED:true}
+      cron: ${AI_ARCHIVE_CLEANUP_CRON:0 40 3 * * *}
+      grace-days: ${AI_ARCHIVE_CLEANUP_GRACE_DAYS:3}
+      batch-size: ${AI_ARCHIVE_CLEANUP_BATCH_SIZE:50}
+      max-batches: ${AI_ARCHIVE_CLEANUP_MAX_BATCHES:10}
+    # 保留期清理（默认演练：只统计不删除）。保留天数配 0 = 关闭该项。
+    retention:
+      enabled: ${AI_RETENTION_ENABLED:true}
+      cron: ${AI_RETENTION_CRON:0 20 4 * * *}
+      # true：只统计「本来会删多少行」并打日志；确认后置 false 才真正删除
+      dry-run: ${AI_RETENTION_DRY_RUN:true}
+      batch-size: ${AI_RETENTION_BATCH_SIZE:5000}
+      max-batches: ${AI_RETENTION_MAX_BATCHES:20}
+      turn-events-days: ${AI_RETENTION_TURN_EVENTS_DAYS:30}
+      subagent-runs-days: ${AI_RETENTION_SUBAGENT_RUNS_DAYS:90}
+      orphan-sessions-days: ${AI_RETENTION_ORPHAN_SESSIONS_DAYS:7}
+      outbox-days: ${AI_RETENTION_OUTBOX_DAYS:7}
 
   agent:
     workflow:

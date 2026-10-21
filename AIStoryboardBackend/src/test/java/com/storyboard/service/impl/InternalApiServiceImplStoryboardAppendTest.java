@@ -6,13 +6,12 @@ import com.storyboard.dto.request.SceneReferenceLinkRequest;
 import com.storyboard.entity.Project;
 import com.storyboard.entity.Scene;
 import com.storyboard.entity.ScenePrompt;
-import com.storyboard.mapper.AssetImageMapper;
-import com.storyboard.mapper.AssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneAssetMapper;
 import com.storyboard.mapper.SceneMapper;
 import com.storyboard.mapper.ScenePromptMapper;
 import com.storyboard.mapper.SceneReferenceImageMapper;
+import com.storyboard.service.AssetService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -42,8 +41,7 @@ class InternalApiServiceImplStoryboardAppendTest {
                 promptMapper,
                 mock(SceneReferenceImageMapper.class),
                 mock(SceneAssetMapper.class),
-                mock(AssetMapper.class),
-                mock(AssetImageMapper.class));
+                mock(AssetService.class));
 
         List<String> sceneIds = service.appendProjectScenes(
                 "project-1", List.of(fullScene("第三段"), fullScene("第四段")));
@@ -71,8 +69,7 @@ class InternalApiServiceImplStoryboardAppendTest {
                 promptMapper,
                 referenceMapper,
                 mock(SceneAssetMapper.class),
-                mock(AssetMapper.class),
-                mock(AssetImageMapper.class));
+                mock(AssetService.class));
 
         service.replaceManagedVideoFrames("scene-2", List.of(
                 new SceneReferenceLinkRequest(

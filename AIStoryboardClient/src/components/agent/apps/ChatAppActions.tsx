@@ -45,7 +45,7 @@ export function ChatAppActions({
         style={{
           display: 'flex', alignItems: 'center', gap: 2,
           padding: 2, border: '1px solid var(--color-hairline)',
-          borderRadius: 8, background: 'white', boxShadow: 'var(--shadow-xs)',
+          borderRadius: 8, background: 'var(--color-panel)', boxShadow: 'var(--shadow-xs)',
         }}
       >
         {items.map((item) => (
@@ -58,7 +58,7 @@ export function ChatAppActions({
               style={appButtonStyle(compact, item.disabled)}
               onMouseEnter={(event) => {
                 event.currentTarget.style.background = 'var(--color-surface-soft)';
-                event.currentTarget.style.color = 'var(--color-ink)';
+                event.currentTarget.style.color = 'var(--color-primary)';
               }}
               onMouseLeave={(event) => {
                 event.currentTarget.style.background = 'transparent';

@@ -20,6 +20,9 @@ export const agentChatTokens = {
   surface: 'var(--color-canvas)',
   warning: 'var(--color-warning)',
   danger: 'var(--color-error)',
+  /** 技能标记（/ppt-master）：与 @ 引用资料区分开，用信息蓝灰色 */
+  skill: 'var(--color-info)',
+  skillBg: 'color-mix(in srgb, var(--color-info) 12%, transparent)',
   /** 悬浮提示卡（深色）底 + 两级前景 */
   onDark: 'var(--color-on-dark)',
   onDarkSoft: 'var(--color-on-dark-soft)',

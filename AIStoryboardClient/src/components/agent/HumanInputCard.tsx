@@ -158,7 +158,7 @@ export function HumanInputCard({
 
   return (
     <div style={{
-      background: "white",
+      background: "var(--color-panel)",
       borderRadius: 16,
       border: "1px solid var(--color-hairline)",
       boxShadow: "0 2px 8px rgba(20,20,19,0.06)",
@@ -351,7 +351,7 @@ export function HumanInputCard({
               onClick={() => submitHumanInput("custom", customInputText.trim(), withApprovedTools(selectedParams))}
               style={{
                 padding: "10px 18px", border: "none", borderRadius: "var(--rounded-md)",
-                background: "var(--color-primary)", color: "white", fontSize: 15,
+                background: "var(--color-primary)", color: 'var(--color-on-primary)', fontSize: 15,
                 cursor: streaming || !customInputText.trim() ? "not-allowed" : "pointer",
                 opacity: streaming || !customInputText.trim() ? 0.6 : 1,
               }}

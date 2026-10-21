@@ -13,12 +13,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 @Service
 public class SandboxExecutionService {
@@ -123,6 +125,8 @@ public class SandboxExecutionService {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new SandboxPathException("shell execution interrupted", error);
+        } finally {
+            cleanupOldFiles(tmpDir, properties.getTransientTtl());
         }
     }
 
@@ -183,11 +187,42 @@ public class SandboxExecutionService {
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new SandboxPathException("python execution interrupted", error);
+        } finally {
+            // 每次执行都写一个 UUID 脚本；不删就会在 work/.runner/ 里越积越多。
+            deleteQuietly(scriptPath);
+            cleanupOldFiles(tmpDir, properties.getTransientTtl());
         }
     }
 
-    private List<FileEntryView> files(String conversationId) {
-        return sessions.listOutput(conversationId).stream()
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // 删除失败不覆盖原始执行结果；下一轮清理任务会再试
+        }
+    }
+
+    /** 只清超过 TTL 的临时文件，避免误删仍在执行的进程刚写下的中间文件。 */
+    private static void cleanupOldFiles(Path directory, Duration ttl) {
+        if (!Files.isDirectory(directory)) return;
+        Instant cutoff = Instant.now().minus(ttl);
+        try (Stream<Path> stream = Files.walk(directory)) {
+            for (Path path : stream.toList()) {
+                if (!Files.isRegularFile(path)) continue;
+                try {
+                    if (Files.getLastModifiedTime(path).toInstant().isBefore(cutoff)) {
+                        Files.deleteIfExists(path);
+                    }
+                } catch (IOException ignored) {
+                    // 正在被占用：留给下一轮
+                }
+            }
+        } catch (IOException ignored) {
+            // 目录不可读：不影响执行结果
+        }
+    }
+
+    private List<FileEntryView> files(String conversationId) {        return sessions.listOutput(conversationId).stream()
                 .map(this::view)
                 .toList();
     }

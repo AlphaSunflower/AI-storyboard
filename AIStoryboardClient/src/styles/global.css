@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './theme.css';
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -72,7 +73,7 @@ p {
 /* 滚动条跟随暖色表面，不再露出浏览器灰蓝。 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #d8d1c6 transparent;
+  scrollbar-color: var(--color-scrollbar) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -88,11 +89,11 @@ p {
   border: 3px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
-  background-color: #d8d1c6;
+  background-color: var(--color-scrollbar);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: #c4bcb0;
+  background-color: var(--color-scrollbar-hover);
 }
 
 /* lucide 图标与行内文字基线对齐（inline 渲染时默认偏上，统一 middle 视觉居中）

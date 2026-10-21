@@ -423,6 +423,45 @@ export const canvasCommandService = {
     };
   },
 
+  /**
+   * 把多个节点分成一组。
+   *
+   * <p>执行入口只存在于分组上：分组标题条渲染「执行」按钮，未分组的节点没有任何执行入口。
+   * 因此智能体要跑一整条工作流时，必须先把参与节点分到同一组，再由用户在分组上点执行。
+   */
+  createGroup(context: CanvasCommandContext, params: { nodeIds: string[]; title?: string }): CanvasCommandResult<{ groupId?: string; title?: string; nodeIds: string[] }> {
+    const invalid = check(context);
+    if (invalid) return invalid as CanvasCommandResult<{ groupId?: string; title?: string; nodeIds: string[] }>;
+    const nodeIds = [...new Set(params.nodeIds ?? [])];
+    if (nodeIds.length < 2) return failure('INVALID_ARGUMENTS', '至少选择 2 个节点才能创建分组');
+    const state = useCanvasStore.getState();
+    const missing = nodeIds.filter((nodeId) => !state.nodes.some((node) => node.id === nodeId));
+    if (missing.length) return failure('NODE_NOT_FOUND', `节点不存在：${missing.join('、')}`, { nodeIds: missing });
+    const title = params.title?.trim();
+    if (context.dryRun) {
+      return {
+        ok: true,
+        status: 'preview',
+        transactionId: `tx-preview-${createId()}`,
+        revision: state.revision,
+        changes: { affectedNodeIds: nodeIds, description: `创建分组（${nodeIds.length} 个节点）` },
+        result: { title: title || undefined, nodeIds },
+      };
+    }
+    const created = useCanvasStore.getState().groupNodes(nodeIds);
+    if (!created) return failure('GROUP_FAILED', '创建分组失败：至少需要 2 个存在于当前画布的节点');
+    if (title) useCanvasStore.getState().renameGroup(created.id, title);
+    const effectiveTitle = title || created.title;
+    return {
+      ok: true,
+      status: 'applied',
+      transactionId: `tx-${createId()}`,
+      revision: useCanvasStore.getState().revision,
+      changes: { affectedNodeIds: nodeIds, description: `创建分组「${effectiveTitle}」（${nodeIds.length} 个节点）` },
+      result: { groupId: created.id, title: effectiveTitle, nodeIds },
+    };
+  },
+
   async markResultSlots(context: CanvasCommandContext, params: {
     producerNodeId: string;
     nodeIds: string[];

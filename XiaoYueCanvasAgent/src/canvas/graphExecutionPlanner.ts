@@ -133,20 +133,46 @@ export function planGraphExecution(
   }
 
   const byId = new Map(planned.map((node) => [node.nodeId, node]));
-  const order: string[] = [];
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (nodeId: string) => {
-    if (visited.has(nodeId)) return;
-    if (visiting.has(nodeId)) throw new Error(`画布存在循环依赖：${nodeId}`);
-    visiting.add(nodeId);
-    for (const dependency of byId.get(nodeId)?.dependencies ?? []) visit(dependency);
-    visiting.delete(nodeId);
-    visited.add(nodeId);
-    if (byId.has(nodeId)) order.push(nodeId);
-  };
-  for (const node of [...planned].sort((left, right) => left.nodeId.localeCompare(right.nodeId))) visit(node.nodeId);
+  const order = topologicalOrderByPosition(graph, byId);
   return { nodes: order.map((nodeId) => byId.get(nodeId)!), order };
+}
+
+/**
+ * 拓扑排序，同一层内按画布位置（上 → 下、左 → 右）决定先后。
+ *
+ * <p>节点 id 是随机 UUID：以前按 id 字典序做 DFS，「执行分组」的先后和用户看到的上下顺序
+ * 完全无关（实测：分组里视觉上的第 3 个节点被第一个跑，用户会以为只有它生成）。
+ * 分组执行是串行的（maxParallel=1），用户必须能从画布上预期「第几个先跑」。
+ */
+const topologicalOrderByPosition = (
+  graph: CanvasGraphV2,
+  byId: Map<string, PlannedNode>,
+): string[] => {
+  const positionOf = (nodeId: string) => graph.nodes.find((node) => node.id === nodeId)?.position;
+  const candidates = [...byId.keys()].sort((left, right) => {
+    const a = positionOf(left) ?? { x: 0, y: 0 };
+    const b = positionOf(right) ?? { x: 0, y: 0 };
+    return a.y - b.y || a.x - b.x || left.localeCompare(right);
+  });
+  const remaining = new Map<string, Set<string>>();
+  for (const [nodeId, node] of byId) {
+    remaining.set(nodeId, new Set(
+      node.dependencies.filter((dependency) => dependency !== nodeId && byId.has(dependency)),
+    ));
+  }
+  const order: string[] = [];
+  const emitted = new Set<string>();
+  while (order.length < candidates.length) {
+    const next = candidates.find((nodeId) => !emitted.has(nodeId)
+      && [...(remaining.get(nodeId) ?? [])].every((dependency) => emitted.has(dependency)));
+    if (!next) {
+      // 没有可推进的节点 = 成环；调用方靠这个异常提示用户。
+      throw new Error(`画布存在循环依赖：${candidates.find((nodeId) => !emitted.has(nodeId)) ?? ''}`);
+    }
+    emitted.add(next);
+    order.push(next);
+  }
+  return order;
 }
 
 export function newlyReachableExecutableNodes(

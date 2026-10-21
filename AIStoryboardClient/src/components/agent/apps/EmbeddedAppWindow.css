@@ -167,7 +167,7 @@
   display: none;
   overflow: hidden;
   border-radius: 9px;
-  background: white;
+  background: var(--color-panel);
 }
 
 .embedded-app-window__frame.is-active {
@@ -184,7 +184,7 @@
   height: 100%;
   display: block;
   border: 0;
-  background: white;
+  background: var(--color-panel);
 }
 
 .embedded-app-window.is-minimized {
@@ -267,7 +267,7 @@
 
 .embedded-app-window__download:hover {
   border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-hairline));
-  background: #fff;
+  background: var(--color-panel);
   color: var(--color-primary);
 }
 

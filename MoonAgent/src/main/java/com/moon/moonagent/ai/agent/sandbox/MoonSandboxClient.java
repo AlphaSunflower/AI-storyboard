@@ -82,8 +82,17 @@ public class MoonSandboxClient {
                 SandboxShellResult.class);
     }
 
-    public void upload(String conversationId, String path, byte[] content) {
-        String uri = base(conversationId) + "/files/upload?path=" + urlEncode(path == null ? "" : path);
+    /**
+     * 把镜像里预置的只读技能包按需复制到会话工作区 {@code skills/<skill>}。
+     * 幂等；未引用技能的会话不会产生任何技能目录。
+     */
+    public SandboxSkillResult materializeSkill(String conversationId, String skillName) {
+        return post(conversationId,
+                "/skills/" + urlEncode(skillName) + "/materialize",
+                Map.of(), SandboxSkillResult.class);
+    }
+
+    public void upload(String conversationId, String path, byte[] content) {        String uri = base(conversationId) + "/files/upload?path=" + urlEncode(path == null ? "" : path);
         try {
             HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(uri))
                     .timeout(properties.getReadTimeout())

@@ -43,7 +43,7 @@
   flex: 0 0 auto;
   margin: 0;
   overflow: hidden;
-  background: white;
+  background: var(--color-paper);
   box-shadow: 0 1px 3px rgba(32, 37, 44, 0.08), 0 10px 32px rgba(32, 37, 44, 0.08);
 }
 
@@ -62,7 +62,7 @@
   margin: 0 auto;
   padding: 64px 74px 86px;
   border: 1px solid #e4e6e9;
-  background: #fff;
+  background: var(--color-paper);
   box-shadow: 0 1px 3px rgba(32, 37, 44, 0.06), 0 10px 32px rgba(32, 37, 44, 0.06);
 }
 
@@ -198,7 +198,7 @@
   height: 100%;
   min-height: 620px;
   border: none;
-  background: white;
+  background: var(--color-paper);
 }
 
 .document-preview__image {
@@ -207,7 +207,7 @@
   max-height: min(78vh, 900px);
   margin: 0 auto;
   border-radius: 8px;
-  background: white;
+  background: var(--color-paper);
   box-shadow: 0 1px 3px rgba(32, 37, 44, 0.08), 0 10px 32px rgba(32, 37, 44, 0.08);
   object-fit: contain;
 }

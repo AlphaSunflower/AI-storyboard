@@ -58,7 +58,7 @@ export function FullAccessConfirmDialog({
           overflow: 'hidden',
           borderRadius: 16,
           border: '1px solid rgba(15,17,21,0.08)',
-          background: 'white',
+          background: 'var(--color-panel)',
           boxShadow: '0 24px 64px rgba(15,17,21,0.24)',
         }}
       >
@@ -145,7 +145,7 @@ export function FullAccessConfirmDialog({
               padding: '0 17px',
               borderRadius: 10,
               border: '1px solid rgba(15,17,21,0.10)',
-              background: 'white',
+              background: 'var(--color-panel)',
               color: 'rgb(70,74,82)',
               fontSize: 13,
               fontWeight: 600,
@@ -163,7 +163,7 @@ export function FullAccessConfirmDialog({
               borderRadius: 10,
               border: 'none',
               background: 'rgb(234,88,12)',
-              color: 'white',
+              color: 'var(--color-on-primary)',
               fontSize: 13,
               fontWeight: 650,
               cursor: 'pointer',

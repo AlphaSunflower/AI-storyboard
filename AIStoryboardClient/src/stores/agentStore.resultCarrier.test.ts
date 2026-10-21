@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { attachResultToMessage, useAgentStore } from './agentStore';
+import {
+  attachResultToMessage,
+  confirmResultFromToolResult,
+  useAgentStore,
+} from './agentStore';
 import type { AgentMessage, AgentTaskView, ConfirmResultInfo } from '../api/agent';
 
 const IMAGE_RESULT: ConfirmResultInfo = {
@@ -81,6 +85,23 @@ describe('attachResultToMessage — 结果只能有一个载体', () => {
     attachResultToMessage('assistant-1', null);
 
     expect(useAgentStore.getState().messages[0].metadata?.confirmResult).toBeUndefined();
+  });
+});
+
+describe('结果确认动作只认媒体生成工具', () => {
+  const mediaPayload = JSON.stringify({ url: '/api/files/images/a.png', assetId: 'asset-a' });
+
+  it('request_human_input 的 url 不能被当成生成结果', () => {
+    // 回归：HITL「请求用户补充信息」卡片下面曾凭空出现「继续完善 / 满意完成」。
+    expect(confirmResultFromToolResult('request_human_input', mediaPayload)).toBeNull();
+  });
+
+  it('媒体生成工具的 url 正常产生确认动作', () => {
+    expect(confirmResultFromToolResult('generate_image', mediaPayload)?.kind).toBe('image');
+    expect(confirmResultFromToolResult(
+      'generate_video',
+      JSON.stringify({ url: '/api/files/videos/a.mp4', mediaType: 'video' }),
+    )?.kind).toBe('video');
   });
 });
 

@@ -12,7 +12,7 @@ const modalOverlayStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300,
 };
 const modalStyle: React.CSSProperties = {
-  background: 'white', borderRadius: 'var(--rounded-md)',
+  background: 'var(--color-panel)', borderRadius: 'var(--rounded-md)',
   boxShadow: '0 8px 32px rgba(20, 20, 19, 0.18)', padding: 24,
   minWidth: 320, maxWidth: 440,
 };
@@ -23,12 +23,12 @@ const inputStyle: React.CSSProperties = {
 };
 const secondaryBtnStyle: React.CSSProperties = {
   padding: '6px 18px', height: 32, border: '1px solid var(--color-hairline)',
-  borderRadius: 'var(--rounded-md)', background: 'white', color: 'var(--color-muted)',
+  borderRadius: 'var(--rounded-md)', background: 'var(--color-panel)', color: 'var(--color-muted)',
   font: 'var(--text-caption)', cursor: 'pointer', marginRight: 8,
 };
 const primaryBtnStyle: React.CSSProperties = {
   padding: '6px 18px', height: 32, border: 'none', borderRadius: 'var(--rounded-md)',
-  background: 'var(--color-primary)', color: 'white', font: 'var(--text-caption)', cursor: 'pointer',
+  background: 'var(--color-primary)', color: 'var(--color-on-primary)', font: 'var(--text-caption)', cursor: 'pointer',
 };
 
 /**
@@ -176,7 +176,7 @@ export function ProjectDropdown({ open, onClose, popupRight, anchor }: {
   // 项目菜单浮层（控件 8 / 浮层 12；阴影走 token）
   const menuStyle: React.CSSProperties = {
     width: 264,
-    background: 'white',
+    background: 'var(--color-panel)',
     border: '1px solid var(--color-hairline)',
     borderRadius: 12,
     boxShadow: 'var(--shadow-popover)',

@@ -22,7 +22,8 @@ export interface TooltipProps {
 
 /** 应用侧统一观感：深墨底 + 浅色字，颜色全部走 tokens.css */
 const DEFAULTS = {
-  surfaceColor: 'var(--color-ink)',
+  // 提示气泡始终是深色表面，不跟 --color-ink 在夜间反转。
+  surfaceColor: 'var(--color-surface-dark)',
   inkColor: 'var(--color-on-dark)',
   size: 'sm' as const,
   radius: 8,

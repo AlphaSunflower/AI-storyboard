@@ -130,7 +130,7 @@ export default function AssetsTab() {
     <View style={s.container}>
       {/* Header */}
       <View style={[s.header, { height: 56 + insets.top, paddingTop: insets.top }]}>
-        <Text style={s.headerTitle}>AI 资产库</Text>
+        <Text style={s.headerTitle}>项目库</Text>
         <TouchableOpacity style={s.addBtn} onPress={() => setCreateOpen(true)}>
           <Ionicons name="add" size={20} color={tokens.colors.white} />
           <Text style={s.addBtnText}>新建</Text>

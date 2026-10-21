@@ -11,7 +11,7 @@ metadata:
     hitl:
       - { id: execute, title: 确认执行 }
       - { id: cancel, title: 取消 }
-allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph canvas_execute_node canvas_execute_graph canvas_get_execution canvas_cancel_execution request_human_input
+allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node canvas_graph_list_node_types canvas_graph_apply_plan canvas_graph_create_node canvas_graph_create_nodes canvas_graph_create_edges canvas_graph_import_media canvas_graph_import_media_batch canvas_graph_update_node canvas_graph_create_edge canvas_graph_create_result_slots canvas_graph_mark_result_slots canvas_graph_layout_graph canvas_group_nodes canvas_execute_node canvas_execute_graph canvas_get_execution canvas_cancel_execution request_human_input
 ---
 
 # 画布执行
@@ -30,15 +30,18 @@ allowed-tools: canvas_create_run canvas_graph_get_state canvas_graph_get_node ca
 4. 执行前必须检查所有目标节点及其 missingInputs，并确认每个媒体生产节点都有完整的结果槽中继。结果槽是空 image/video 占位：origin 输入接收生成结果，输出口继续连接下游；最终占位只保留输入。
 5. 发现“生产节点 → 下游”缺少中间占位，或下游 missingInputs 指向媒体输入时，先自动补齐：**首选一次 `canvas_graph_apply_plan`**，在生产节点规格里带 `resultSlots: { kind, count }` 并用 `refs` 写清引用（`"<ref>"` 连到该节点选中的输入端口，`"<ref>.result.<n>"` 连到第 n 个结果槽输出；ordered 端口按 refs 数组顺序）。单点补齐时才用 `canvas_graph_create_result_slots`（参数必须是 `{ producerNodeId, kind: "image"|"video", count, position?, gapY? }`）+ `canvas_graph_create_edges` 批量连线；只有一条边才用 `canvas_graph_create_edge`。不得省略 producerNodeId，kind 只能填 `image` 或 `video`；默认数量为 1，用户指定 n、数量或 variations 时按该数量创建。结果槽名称由服务端在整张画布内递增生成，不要指定 label。
 6. 只有一个明确的生产节点候选时自动补齐后继续；存在多个候选或无法判断阶段顺序时，调用 request_human_input，不得猜测。补齐后必须重新读取节点和连线确认 missingInputs 已清空。连线被拒（端口数量上限 / 端口类型不匹配 / 重复边）时先读取节点端口定义再决定重连，不要重复提交同一条边。
-   画布模式下 `plan_enter` / `plan_write` / `plan_exit` / `todo_write` **已被服务端禁用**：调用只会返回 `PLAN_TOOLS_DISABLED_IN_CANVAS_MODE` 纠偏错误，不要用它们做执行计划拆解；执行顺序直接用 `canvas_execute_graph` 表达。
+   画布模式下 `plan_enter` / `plan_write` / `plan_exit` / `todo_write` **已被服务端禁用**：调用只会返回 `PLAN_TOOLS_DISABLED_IN_CANVAS_MODE` 纠偏错误，不要用它们做执行计划拆解；执行顺序由「分组 + 节点依赖」表达，提交执行前先按第 9 条分组。
 7. 需要选择或调整生成模型时，先读取当前配置、可用模型和参数 Schema，再写入。禁止通过节点创建或 canvas_graph_update_node 绕过校验。
 8. 用户明确指定模型或参数时严格按指令设置；用户未指定时保留已有配置，新节点可补网关默认。只有用户明确要求自动优化时才主动选择其他模型。
-9. 单节点执行使用 canvas_execute_node；多节点或依赖链使用 canvas_execute_graph。未指定 nodeIds 时，canvas_execute_graph 会执行所有具备可启动动作的节点。
-10. 节点存在多个动作时必须在 actionByNode 中明确 actionId，不要静默猜测视频或图片动作。
-11. 工具只提交任务并返回 jobId 或 executionId，不得声称模型已经生成完成；结果槽必须等真实 asset.created 落地后才能视为完成，并在此之后才允许下游执行。
+9. **执行入口只存在于画布分组上，智能体不能自己开跑**：服务端把 `canvas_execute_node` / `canvas_execute_graph` 强制成预览——只会返回 `status: "preview"`、`awaitingConfirmation: true`、`groupId`，**永远不会真正提交生成**。你要做的是把执行准备好，而不是"提交执行"：
+   - 先用 `canvas_group_nodes` 把这条工作流里所有参与节点（图片 + 视频，至少 2 个）分成同一组，可带 `title`（例如「赛亚人转场」）。**未分组或跨组的执行预览会返回 `code: "GROUP_REQUIRED"`**（`ok:true`，不是失败，别重试同一次调用）——那就先分组，再重新预览。
+   - 分组后用 `canvas_execute_graph` 提交一次预览（可带 `nodeIds`），拿到 `groupId` / `groupTitle`。
+   - 然后如实告诉用户：「已在画布上准备好，请点分组「X」标题上的「执行」按钮确认开跑」。**不要**声称已经提交执行、不要报 `executionId`/`jobId`、不要说"正在生成"。
+10. 节点存在多个动作时必须在 actionByNode 中明确 actionId，不要静默猜测视频或图片动作（预览阶段同样适用）。
+11. 画布执行工具只给预览、不提交任务，也不会返回 jobId 或 executionId；真实生成要等用户在分组上点「执行」。结果槽必须等真实 asset.created 落地后才能视为完成，并在此之后才允许下游执行。
 12. 用户询问进度时调用 canvas_get_execution 或 canvas_get_node 读取真实状态。
-13. 使用工具循环完成执行前补齐、模型参数调整、执行提交和状态确认；需要新画布时使用 canvas_create_run，不得等待 iframe 打开。
+13. 使用工具循环完成执行前补齐、模型参数调整、分组与状态确认；需要新画布时使用 canvas_create_run，不得等待 iframe 打开。
 14. 分镜链路允许 storyboardPlanner → shot 的结构化数据连接；shot 生成图片或视频时仍必须经过媒体结果槽。
-15. 最终回复报告 executionId、已受理节点和读取到的真实状态。
+15. 最终回复报告分组的 groupId/groupTitle、本次纳入执行的节点，以及"等待用户在画布上确认"这一真实状态。
 16. 目标不明确或存在多个候选画布时，必须调用 request_human_input 让用户按名称点击选择，禁止展示或要求输入 projectId、canvasId、nodeId；ID 仅作为工具隐藏参数传递。
 17. 服务端图命令不依赖浏览器 iframe；节点和连线可在后台完成。浏览器执行工具不可用时只报告执行阶段尚未开始，不回退到聊天暂停。

@@ -341,7 +341,9 @@ export function GenerationReferenceArea({ nodeId, kind, mode, pool, onDeleteRef 
     return (
       <div className="gen-refs" role="group" aria-label="源图片">
         {imageEntries.map((entry) => <ReferenceThumb key={entry.assetId} entry={entry} onDelete={onDeleteRef} />)}
-        {!imageEntries.length && <span className="gen-refs__hint">从图片节点的「区域重绘」发起，或连接一张源图片</span>}
+        {!imageEntries.length && <span className="gen-refs__hint">连接源图片，或点「＋」添加（多张会一起作为参考）</span>}
+        {/* 图生图不再是「只能带一张」：没有区域掩码时按整图编辑跑，多张参考图也会一起下发。 */}
+        {orderedEntries.length < (rule?.referenceMax ?? 14) && plusButton}
       </div>
     );
   }

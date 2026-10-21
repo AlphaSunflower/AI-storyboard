@@ -14,8 +14,12 @@ sandbox-runner ── sandbox-internal（internal: true）
    └── sandbox-edge（主机访问入口，默认 127.0.0.1:8090）
 ```
 
-- `sandbox-runner`：Java 25 + Python 3.12，预装 `python-docx`、`matplotlib`、`pandas`、`openpyxl`、`Pillow`、Noto CJK 字体和常用证书/图形库。runner 通过 `sandbox-edge` 发布内部 HTTP 端口。
+- `sandbox-runner`：Java 25 + Python 3.12，预装 `python-docx`、`matplotlib`、`pandas`、`openpyxl`、`Pillow`、`python-pptx`、`PyYAML`、`XlsxWriter`、`skia-pathops`、`uharfbuzz`、Noto CJK 字体和常用证书/图形库。runner 通过 `sandbox-edge` 发布内部 HTTP 端口。
 - `sandbox-workspaces`：命名卷，挂载到 `/workspaces`。会话目录由 runner 内部按会话隔离，最终产物仍应上传 MinIO。
+- **按需技能包**：`deploy/skills/ppt-master-skill-v6.7.2.zip` 在构建时解压到镜像的 `/opt/moon-skills/ppt-master`（只读，不挂进任何会话）。只有会话显式引用 PPT 技能时，MoonAgent 才调
+  `POST /internal/sandbox/{conversationId}/skills/ppt-master/materialize`，runner 在会话锁内把它复制到
+  `/workspaces/{conversationId}/skills/ppt-master`（`.moon-skill-version` 幂等）。未引用的会话不会出现 `skills/` 目录。
+  根 `.dockerignore` 必须放行该 zip，否则构建会报 `"/deploy/skills/...zip": not found`。
 - `sandbox-egress-proxy`：Squid 代理，支持 HTTP 与 HTTPS CONNECT，只放行 `SANDBOX_ALLOWED_DOMAINS` 中的目标域名。
 - runner 使用非 root 用户、只读根文件系统、`tmpfs /tmp`、CPU/内存/PIDs 限额、健康检查和 `unless-stopped` 重启策略。
 

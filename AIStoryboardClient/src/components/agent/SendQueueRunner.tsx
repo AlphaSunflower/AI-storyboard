@@ -20,6 +20,13 @@ export function SendQueueRunner() {
   const queuedLength = useSendQueueStore((state) => (
     activeConversationId ? state.queues[activeConversationId]?.length ?? 0 : 0
   ));
+  /**
+   * 暂缓发送：队列面板正在编辑某条消息，或「插队发送」正在打断当前回合时，
+   * 自动出队必须让路，否则会把旧正文先发出去 / 抢在插队消息之前发送。
+   */
+  const held = useSendQueueStore((state) => (
+    activeConversationId ? (state.holds[activeConversationId] ?? 0) > 0 : false
+  ));
   const shift = useSendQueueStore((state) => state.shift);
   const lockRef = useRef(false);
 
@@ -27,7 +34,7 @@ export function SendQueueRunner() {
     || !!canvasBinding || canvasExitPending;
 
   useEffect(() => {
-    if (busy) {
+    if (busy || held) {
       lockRef.current = false;
       return;
     }
@@ -41,7 +48,7 @@ export function SendQueueRunner() {
     sendMessage(next.content, next.opts);
     // sendMessage 会同步把 streaming 置真；下一帧再解锁，避免同一轮里连发。
     window.setTimeout(() => { lockRef.current = false; }, 0);
-  }, [busy, activeConversationId, queuedLength, sendMessage, shift]);
+  }, [busy, held, activeConversationId, queuedLength, sendMessage, shift]);
 
   return null;
 }

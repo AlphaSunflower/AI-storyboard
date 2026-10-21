@@ -40,11 +40,12 @@ class NacosAssetConfigurationTest {
             context.refresh();
 
             AgentSkillRepository repository = context.getBean(AgentSkillRepository.class);
+            // classpath 回退里有 6 个常驻技能 + 可选的 ppt-master（默认不挂载，只有引用时才进技能白名单）。
             assertThat(repository.getAllSkills())
                     .extracting(AgentSkill::getName)
                     .containsExactlyInAnyOrder(
                             "image", "video", "storyboard",
-                            "canvas-design", "canvas-run", "general");
+                            "canvas-design", "canvas-run", "general", "ppt-master");
             assertThat(context.getBean(GlobalPromptRepository.class).getPrompt(java.util.Map.of()))
                     .contains("你是 Moon 智能体");
             assertThat(context.getBean(NacosMcpMetadataRepository.class).snapshot().source())

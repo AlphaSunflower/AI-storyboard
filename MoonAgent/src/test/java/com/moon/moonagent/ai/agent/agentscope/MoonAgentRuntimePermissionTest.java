@@ -102,11 +102,14 @@ class MoonAgentRuntimePermissionTest {
                     "canvas_graph_create_edges",
                     "canvas_graph_apply_plan",
                     "todo_write");
-            // 画布执行 = 真实花费与长等待（图 30–60s / 视频 2–5min）：必须先经用户确认，
-            // 不允许被自动放行——否则智能体会在同一轮把整轮生成跑掉，用户没有插话机会。
-            assertThat(context.getAskRules()).containsKeys(
+            assertThat(context.getAllowRules()).containsKeys(
+                    "canvas_group_nodes");
+            // 执行类工具已被服务端强制成预览（CanvasBrowserMailbox 的 FORCED_DRY_RUN_METHODS）：
+            // 它们不会真正开跑，只返回 status=preview + groupId，所以不再叠加一道点了也没用的
+            // HITL 确认；真正花钱的执行由用户在画布分组上点「执行」触发。
+            assertThat(context.getAllowRules()).containsKeys(
                     "canvas_execute_node", "canvas_execute_graph");
-            assertThat(context.getAllowRules()).doesNotContainKeys(
+            assertThat(context.getAskRules()).doesNotContainKeys(
                     "canvas_execute_node", "canvas_execute_graph");
         }
     }

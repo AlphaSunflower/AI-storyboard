@@ -48,6 +48,17 @@ const hexToRgb = (hex: string): Rgb | null => {
   };
 };
 
+/** Canvas 不认 var()，但设计 token 只暴露 CSS 变量；绘制前解析成实际色值。 */
+const resolveCssColor = (value: string): string => {
+  if (typeof document === 'undefined') return value;
+  const match = value.match(/^var\((--[a-z0-9-]+)\)$/i);
+  if (!match) return value;
+  const resolved = window.getComputedStyle(document.documentElement)
+    .getPropertyValue(match[1])
+    .trim();
+  return resolved || value;
+};
+
 const mixRgb = (from: Rgb, to: Rgb, amount: number): Rgb => ({
   r: Math.round(from.r + (to.r - from.r) * amount),
   g: Math.round(from.g + (to.g - from.g) * amount),
@@ -325,15 +336,19 @@ const ParticleText = ({
 
       const maxParticles = Math.max(900, Math.min(5200, Math.floor((width * height) / 90)));
       const stride = Math.max(1, Math.ceil(targets.length / maxParticles));
-      const baseRgb = hexToRgb(color);
-      const highlightRgb = hexToRgb(highlightColor);
+      const resolvedColor = resolveCssColor(color);
+      const resolvedHighlightColor = resolveCssColor(highlightColor);
+      const baseRgb = hexToRgb(resolvedColor);
+      const highlightRgb = hexToRgb(resolvedHighlightColor);
       const selected = targets.filter((_, index) => index % stride === 0);
 
       particles = selected.map((target, index) => {
         const seed = ((index * 9301 + 49297) % 233280) / 233280;
         const depth = 0.45 + (((index * 233 + 97) % 1000) / 1000) * 0.9;
         const blend = baseRgb && highlightRgb ? clamp(target.x / Math.max(1, width) + (seed - 0.5) * 0.35, 0, 1) : 0;
-        const particleColor = baseRgb && highlightRgb ? rgbToCss(mixRgb(baseRgb, highlightRgb, blend)) : color;
+        const particleColor = baseRgb && highlightRgb
+          ? rgbToCss(mixRgb(baseRgb, highlightRgb, blend))
+          : resolvedColor;
         const angle = seed * Math.PI * 2;
         const distance = (reducedMotion ? 0 : scatter) * (0.35 + depth * 0.75);
         const startX = target.x + Math.cos(angle) * distance + (seed - 0.5) * scatter * 0.45;

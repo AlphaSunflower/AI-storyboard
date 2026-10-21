@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ViewportPortal, useReactFlow } from '@xyflow/react';
@@ -27,8 +27,11 @@ import {
   type CanvasGroup,
 } from '../canvas/groups';
 import { getAsset } from '../services/projectStorage';
+import { resolveResultSlots } from '../canvas/resultSlots';
+import type { CanvasGraphV2 } from '../canvas/graphContracts';
 import { useCanvasStore } from '../store/canvasStore';
 import { useMediaStore } from '../store/mediaStore';
+import { usePendingGroupRunStore } from '../canvas/pendingGroupRun';
 import { useObjectUrl } from '../hooks/useObjectUrl';
 import { ImagePreviewOverlay, type ImagePreviewTarget } from './ImagePreviewOverlay';
 import type { CanvasNode } from '../types';
@@ -108,12 +111,28 @@ export function CanvasFrameLayer({ nodes, onNotify, onRunGroup }: {
   const nestGroup = useCanvasStore((state) => state.nestGroup);
   const deleteNodes = useCanvasStore((state) => state.deleteNodes);
   const generationRecords = useCanvasStore((state) => state.generationRecords);
+  const edges = useCanvasStore((state) => state.edges);
+  const pendingGroupRuns = usePendingGroupRunStore((state) => state.byGroup);
+  const clearPendingRun = usePendingGroupRunStore((state) => state.clear);
   const { screenToFlowPosition } = useReactFlow();
   const dragRef = useRef<DragState | null>(null);
   const renameClosedRef = useRef(false);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [previewTarget, setPreviewTarget] = useState<ImagePreviewTarget | null>(null);
   const [frameMenu, setFrameMenu] = useState<{ group: CanvasGroup; x: number; y: number } | null>(null);
+  /** 生成节点是否已经有产出（自身素材，或它的结果槽已填上）：有产出就不再算失败。 */
+  const hasProducedResult = useCallback((node: CanvasNode) => {
+    if (node.data.assetId) return true;
+    const graph = {
+      schemaVersion: 2 as const,
+      nodes: nodes as CanvasGraphV2['nodes'],
+      edges: edges as CanvasGraphV2['edges'],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      generationRecords,
+    };
+    return resolveResultSlots(graph, node.id, { includeFilled: true })
+      .some((slot) => Boolean(nodes.find((candidate) => candidate.id === slot.nodeId)?.data.assetId));
+  }, [edges, generationRecords, nodes]);
 
   useEffect(() => {
     if (!frameMenu) return;
@@ -244,7 +263,7 @@ export function CanvasFrameLayer({ nodes, onNotify, onRunGroup }: {
           if (hiddenByCollapsedAncestor) return null;
           const collapsed = group.collapsed;
           const members = groupMemberNodes(groups, group.id);
-          const progress = groupExecutionProgress(members);
+          const progress = groupExecutionProgress(members, { hasProducedResult });
           const results = groupResultAssetIds(members, generationRecords);
           const parent = group.parentId ? groups.find((candidate) => candidate.id === group.parentId) : undefined;
           const descendants = groupDescendantIds(groups, group.id);
@@ -252,6 +271,7 @@ export function CanvasFrameLayer({ nodes, onNotify, onRunGroup }: {
             candidate.id !== group.id && candidate.id !== group.parentId && !descendants.has(candidate.id));
           const resultLimit = collapsed || bounds.width < 480 ? 2 : 4;
           const selected = members.some((node) => node.selected);
+          const pendingRun = pendingGroupRuns[group.id];
           return (
             <section
               key={group.id}
@@ -354,17 +374,20 @@ export function CanvasFrameLayer({ nodes, onNotify, onRunGroup }: {
                 {onRunGroup && (
                   <button
                     type="button"
-                    className="canvas-frame__run nodrag nopan"
-                    aria-label={`执行分组 ${group.title}`}
-                    title="执行分组（自动带上依赖节点）"
+                    className={`canvas-frame__run nodrag nopan${pendingRun ? ' is-pending' : ''}`}
+                    aria-label={pendingRun ? `确认执行分组 ${group.title}` : `执行分组 ${group.title}`}
+                    title={pendingRun
+                      ? '智能体已准备好这批节点的执行，但还没有开跑：点这里确认执行（按依赖顺序跑完整组）'
+                      : '执行分组（自动带上依赖节点）'}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (pendingRun) clearPendingRun(group.id);
                       onRunGroup(group.id);
                     }}
                   >
                     <Play size={10} fill="currentColor" />
-                    {!collapsed && <span className="canvas-frame__run-text">执行</span>}
+                    {!collapsed && <span className="canvas-frame__run-text">{pendingRun ? '确认执行' : '执行'}</span>}
                   </button>
                 )}
                 <span className="canvas-frame__actions">
@@ -449,8 +472,13 @@ export function CanvasFrameLayer({ nodes, onNotify, onRunGroup }: {
         >
           <div className="canvas-frame-context-menu__title">{frameMenu.group.title}</div>
           {onRunGroup && (
-            <button type="button" role="menuitem" onClick={() => { const group = frameMenu.group; setFrameMenu(null); onRunGroup(group.id); }}>
-              <Play size={13} />执行
+            <button type="button" role="menuitem" onClick={() => {
+              const group = frameMenu.group;
+              setFrameMenu(null);
+              clearPendingRun(group.id);
+              onRunGroup(group.id);
+            }}>
+              <Play size={13} />{pendingGroupRuns[frameMenu.group.id] ? '确认执行' : '执行'}
             </button>
           )}
           <button type="button" role="menuitem" onClick={() => { const group = frameMenu.group; setFrameMenu(null); startRename(group); }}>

@@ -988,7 +988,7 @@ export function LibraryPage() {
           <div className="library-empty">
             <span className="library-empty__icon"><Package size={26} /></span>
             <strong>{scopeView === 'TRASH' ? '回收站是空的' : '还没有匹配的资产'}</strong>
-            <span>{scopeView === 'TRASH' ? '移入回收站的资产会在这里保留 7 天。' : '上传文件或调整搜索条件后，素材会出现在这里。'}</span>
+            <span>{scopeView === 'TRASH' ? '移入回收站的资产会在这里保留 1 天。' : '上传文件或调整搜索条件后，素材会出现在这里。'}</span>
             {scopeView !== 'TRASH' && (query || type || selectedTagIds.length > 0 || filteringByProject) && (
               <button
                 className="library-empty__action"
@@ -1666,7 +1666,7 @@ function LibraryActionDialog({
               {dialog.kind === 'trash' && (
                 <div className="library-dialog__warning">
                   <span><Trash2 size={17} /></span>
-                  <p>「{dialog.asset.name}」会进入回收站，保留 7 天内仍可恢复。</p>
+                  <p>「{dialog.asset.name}」会进入回收站，保留 1 天内仍可恢复。</p>
                 </div>
               )}
 
@@ -1925,7 +1925,7 @@ function scopeDescription(scope: ViewScope, projectName?: string, selectedProjec
       ? `仅查看「${selectedProjectName}」项目中的资产。`
       : '聚合当前账号全部项目中的资产，可按项目筛选。';
     case 'GLOBAL': return '可跨项目复用的全局资产。';
-    case 'TRASH': return '回收站资产保留 7 天，可恢复。';
+    case 'TRASH': return '回收站资产保留 1 天，可恢复。';
   }
 }
 

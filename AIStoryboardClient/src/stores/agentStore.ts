@@ -32,6 +32,7 @@ import { useSideChatSelectionStore } from './sideChatSelectionStore';
 import { assetUrl, VIDEO_POLL_INTERVAL } from '../config';
 import type { GatewayModelOption } from '../api/ai';
 import { libraryApi, type LibraryMedia } from '../api/library';
+import { perfMark } from '../lib/devLongTaskLogger';
 import {
   refreshLibraryMediaAttachments,
   refreshLibraryMediaMessages,
@@ -843,6 +844,27 @@ export interface VideoPlanInfo {
   reasons?: Record<string, string>;
 }
 
+/**
+ * 一轮发送可携带的上下文快照。
+ *
+ * <p>排队消息「插队发送」会把排队时存下的 `opts` 原样交给 `sendMessage`，
+ * 因此这里必须是引用/附件等字段的完整集合，不能在打断路径上丢附件。</p>
+ */
+export interface AgentSendOptions {
+  picUrls?: string[];
+  assetIds?: string[];
+  assetGroupIds?: string[];
+  assetGroupSnapshotIds?: string[];
+  referenceVideos?: string[];
+  referenceAudios?: string[];
+  routingHint?: string;
+  cancelActiveTasks?: boolean;
+  editMessageId?: string;
+  clientRequestId?: string;
+  attachments?: AgentAttachment[];
+  references?: AgentReference[];
+}
+
 interface AgentState {
   // 画布编辑模式：同一画布窗口的所有消息和 HITL 续流持续携带，直到用户显式离开。
   canvasEditContext: CanvasEditContext | null;
@@ -912,11 +934,28 @@ interface AgentState {
    */
   clearContext: () => Promise<ClearContextResult | null>;
   selectConversation: (id: string) => Promise<void>;
+  /**
+   * 项目切换时的会话态重置。
+   *
+   * <p>不带参数 = 普通项目切换，清空会话态让 `loadConversations` 选中最近会话；
+   * 带 `deepLinkConversationId` = 本次跳转是「按会话 ID 深链」（项目库使用位置、产出对话、
+   * 通知中心、观测页），`selectConversation` 已经切过去了，这里必须原样保留，
+   * 否则目标会话会被「最近会话」顶掉。
+   */
+  resetConversationForProject: (deepLinkConversationId?: string | null) => void;
 
   // 消息
   messages: AgentMessage[];
   messageNextCursor: string | null;
   messageHasMore: boolean;
+  /**
+   * 消息已经落到 store 的会话 id（首屏骨架屏据此收起）。
+   *
+   * <p>切会话时 `messages` 会先被清空，光看 `messages.length === 0` 分不清
+   * 「还在加载」和「这个会话本来就没消息」——空会话会一直转骨架屏。
+   * 这里用"加载完成的会话 id"做判定，`newConversation` 也会同步写入。
+   */
+  messagesLoadedConversationId: string | null;
   loadOlderMessages: () => Promise<void>;
   streaming: boolean;
   /** Replay durable turn events after a known sequence, then reduce them in order. */
@@ -965,7 +1004,7 @@ interface AgentState {
    * <p>顺序是「先让智能体停下来 → 已说出的文字以「…」定格 → 再把我们的话发出去」；
    * 返回 false 表示打断没能及时生效（消息没发出去，调用方应把输入内容还给用户）。</p>
    */
-  interruptAndSend: (content: string) => Promise<boolean>;
+  interruptAndSend: (content: string, opts?: AgentSendOptions) => Promise<boolean>;
   /**
    * 回合中插入一条用户消息（steer）：不打断当前生成，在下一个模型步骤注入。
    * 回合已结束时自动改走普通发送（开新一轮）；失败返回 false，调用方负责把文字还给用户。
@@ -1033,20 +1072,7 @@ interface AgentState {
   deleteAsset: (id: string) => Promise<void>;
 
   // 发送
-  sendMessage: (content: string, opts?: {
-    picUrls?: string[];
-    assetIds?: string[];
-    assetGroupIds?: string[];
-    assetGroupSnapshotIds?: string[];
-    referenceVideos?: string[];
-    referenceAudios?: string[];
-    routingHint?: string;
-    cancelActiveTasks?: boolean;
-    editMessageId?: string;
-    clientRequestId?: string;
-    attachments?: AgentAttachment[];
-    references?: AgentReference[];
-  }) => Promise<void>;
+  sendMessage: (content: string, opts?: AgentSendOptions) => Promise<void>;
   submitHumanInput: (
     actionId: string,
     customText?: string,
@@ -1103,6 +1129,8 @@ let videoPollToken = 0;
 let taskStreamAbort: AbortController | null = null;
 let taskStreamRunning = false;
 let taskFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+/** 兜底轮询的可见性监听：后台标签页不轮询，回到前台立即补一次对账。 */
+let taskVisibilityHandler: (() => void) | null = null;
 // 流式期间被拦下的消息对账：等本轮结束再补拉，避免刷新整表覆盖正在生成的气泡。
 const pendingMessageReconcile = new Set<string>();
 
@@ -2162,6 +2190,35 @@ function confirmResultFromText(value: string): ConfirmResultInfo | null {
   };
 }
 
+/**
+ * 只有真正产出媒体结果的工具，才允许把工具结果里的 `url` 解析成「继续完善/满意完成」。
+ *
+ * <p>真实事故（2026-10-19）：`request_human_input` 的返回里带 `url`（表单/方案里的参考图），
+ * 旧逻辑对所有 TOOL_RESULT_END 一视同仁地跑 {@link confirmResultFromText}，于是 HITL
+ * 「请求用户补充信息」卡片下面凭空长出「继续完善 / 满意完成」两个按钮——它们既不属于这张卡，
+ * 也没有任何结果可完善。这里用白名单从源头切断。
+ */
+const MEDIA_RESULT_TOOLS = new Set([
+  'generate_image',
+  'generate_image_batch',
+  'refineImage',
+  'generate_video',
+  'generate_storyboard_image',
+  'generate_storyboard_images',
+  'generate_storyboard_video',
+  'generate_storyboard_videos',
+  'produce_video_journey',
+  'merge_storyboard_videos',
+]);
+
+export function confirmResultFromToolResult(
+  toolName: string,
+  value: string,
+): ConfirmResultInfo | null {
+  if (!MEDIA_RESULT_TOOLS.has(toolName)) return null;
+  return confirmResultFromText(value);
+}
+
 function turnMetadata(payload: Record<string, unknown>): AgentMessageMetadata | undefined {
   const raw = asRecord(payload.metadata);
   if (!raw) return undefined;
@@ -2703,7 +2760,13 @@ function applyOneEnvelope(
     if (eventType === 'TOOL_RESULT_END') {
       const draft = useAgentStore.getState().generating[context.conversationId]?.toolDrafts?.[toolCallId];
       if (!effects.taskAccepted) effects.taskAccepted = taskAcceptedFromText(draft?.text ?? '');
-      if (!effects.confirmResult) effects.confirmResult = confirmResultFromText(draft?.text ?? '');
+      // 只允许媒体生成工具产生「继续完善/满意完成」；HITL 等工具结果里的 url 不能当生成结果。
+      if (!effects.confirmResult) {
+        effects.confirmResult = confirmResultFromToolResult(
+          toolName || draft?.name || '',
+          draft?.text ?? '',
+        );
+      }
     }
     return;
   }
@@ -3170,7 +3233,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     const loadEpoch = ++conversationListEpoch;
     set({ loadingConversations: true });
-    const res = await agentApi.listConversations(projectId);
+    let res;
+    try {
+      res = await agentApi.listConversations(projectId);
+    } catch (error) {
+      // 失败也要收起骨架屏，否则侧栏会一直转"加载中"
+      if (loadEpoch === conversationListEpoch) set({ loadingConversations: false });
+      throw error;
+    }
     if (loadEpoch !== conversationListEpoch
         || useProjectStore.getState().currentProject?.id !== projectId) return;
     const list = res.data.data ?? [];
@@ -3193,6 +3263,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       canvasBindingStatus: '',
       canvasExitPending: false,
       messages: [],
+      messagesLoadedConversationId: null,
       streaming: false,
       waitingHumanInput: null,
       
@@ -3398,6 +3469,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     return result;
   },
 
+  resetConversationForProject: (deepLinkConversationId) => {
+    // 深链（项目库「使用位置 · 对话」/ 产出对话 / 通知 / 观测页）在跳转当下已经由
+    // selectConversation 切换到目标会话：这里再清一次有两个副作用——
+    // 1) activeConversationId 变空 → 紧随其后的 loadConversations 自动选中最近会话，
+    //    用户点的是 A 对话，落到的却是同名的 B 对话；
+    // 2) 抹掉目标会话在途生成的 streaming/workflowHint。
+    if (deepLinkConversationId) return;
+    set({
+      activeConversationId: null,
+      messages: [],
+      generating: {},
+      replyUnread: {},
+      streaming: false,
+      workflowHint: '',
+    });
+  },
+
   selectConversation: async (id) => {
     const loadEpoch = ++conversationLoadEpoch;
     // 切会话会清空本地消息：先把已定格的截断回复取出来，等服务端列表回来再合并回去
@@ -3405,6 +3493,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // HITL 按会话隔离（getPendingCheckpoint/hitlVideoPlan 各自恢复），允许切换会话
     set((s) => {
       const g = s.generating[id];
+      // 画布绑定/退出中都属于「会话级」状态：留着上一个会话的会让新会话的输入框一直禁用
+      // （busy 命中 canvasBinding / canvasExitPending，canSteer 又不成立 → textarea disabled）。
+      const bindingForThisConversation = !!s.canvasBinding?.conversationId
+        && s.canvasBinding.conversationId === id;
       return {
         activeConversationId: id,
         pendingApprovalMode: s.conversations.find((conversation) => conversation.id === id)
@@ -3413,6 +3505,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         streaming: generationInProgress(g),
         workflowHint: generationHint(g),
         waitingHumanInput: null,
+        canvasExitPending: false,
+        canvasBinding: bindingForThisConversation ? s.canvasBinding : null,
+        canvasBindingStatus: bindingForThisConversation ? s.canvasBindingStatus : '',
       
         waitingVideoPlan: s.hitlVideoPlan[id] ?? null,
         streamError: null,
@@ -3422,18 +3517,30 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         taskUnread: { ...s.taskUnread, [id]: 0 },
         replyUnread: { ...s.replyUnread, [id]: false },
         taskFocusId: null,
+        // 进入加载态：ChatPage 用骨架屏顶住首屏，等消息落到 store 再收起
+        messagesLoadedConversationId: null,
       };
     });
     void get().loadTasks(id);
+    perfMark('switch:start');
     const page = await loadMessagePage(id);
     if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
-    await get().restoreCanvasMode(id);
+    perfMark('switch:messages-loaded');
+    // 画布态只影响画布 UI，绝不能拖住消息首屏：给 3 秒预算，超时就先渲染消息，
+    // 结果晚到也没关系（restoreCanvasMode 自己会在回来时把 canvasEditContext 补上）。
+    // 之前这里是裸 await：网关到后端是 900s 响应超时，后端一卡，整个会话就一直空白。
+    await Promise.race([
+      get().restoreCanvasMode(id),
+      new Promise<void>((resolve) => { window.setTimeout(resolve, 3000); }),
+    ]);
     if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
+    perfMark('switch:canvas-settled');
     const g = get().generating[id];
     const base = await refreshLibraryMediaMessages(
       page.records,
       (mediaId) => resolveLibraryMedia(id, mediaId),
     );
+    perfMark('switch:media-refreshed');
     const savedAttachments = readPendingAttachments(id);
     // 只恢复「用户加了但还没发出去」的附件：已发送的素材不再回到输入框
     // （否则用户会以为本轮又带了一遍旧素材），它们留在会话消息里可见。
@@ -3442,10 +3549,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           savedAttachments, (mediaId) => resolveLibraryMedia(id, mediaId))
       : [];
     if (loadEpoch !== conversationLoadEpoch || get().activeConversationId !== id) return;
+    perfMark('switch:render');
     set({
       messages: g?.assistantId
         ? [...mergeInterruptedReplies(base, localInterrupted), { id: g.assistantId, conversationId: id, role: 'assistant' as const, content: g.assistantContent ?? '', createdAt: new Date().toISOString(), metadata: buildGeneratingMetadata(g) }]
         : mergeInterruptedReplies(base, localInterrupted),
+      // 首屏骨架屏据此收起：空会话也能正确结束加载态
+      messagesLoadedConversationId: id,
       messageNextCursor: page.nextCursor,
       messageHasMore: page.hasMore,
       pendingAttachments: restoredAttachments,
@@ -3513,6 +3623,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   messages: [],
+  messagesLoadedConversationId: null,
   messageNextCursor: null,
   messageHasMore: false,
   loadOlderMessages: async () => {
@@ -3624,14 +3735,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
    *
    * @return true=新消息已发出；false=打断没能在超时内生效（消息未发出，调用方应回填输入框）
    */
-  interruptAndSend: async (content) => {
+  interruptAndSend: async (content, opts?: AgentSendOptions) => {
     if (!content.trim()) return false;
     const conversationId = get().activeConversationId;
     const running = !!conversationId && get().streaming
       && !get().agentVideoTask && !get().waitingHumanInput && !get().waitingVideoPlan;
     if (!conversationId || !running) {
       // 没有在跑的回合：按普通发送处理（消息是否真的发出由 store 自身的错误态兜底）
-      void get().sendMessage(content);
+      void get().sendMessage(content, opts);
       return true;
     }
     // 同一条"先停后发"的链路只允许一个在跑：重复点击不再排第二条
@@ -3676,7 +3787,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await new Promise((resolve) => window.setTimeout(resolve, INTERRUPT_RELEASE_GRACE_MS));
       manualStop = false;
       // ③ 现在发送我们的话：不 await 整轮，否则这一轮期间再点「停止并发送」会被上面的互斥挡掉
-      void get().sendMessage(content);
+      void get().sendMessage(content, opts);
       return true;
     } finally {
       pendingInterruptSends.delete(conversationId);
@@ -3794,13 +3905,39 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       if (taskFallbackTimer) clearTimeout(taskFallbackTimer);
       taskFallbackTimer = null;
     };
+    /**
+     * 兜底对账：只拉「在跑」的任务。
+     *
+     * <p>原来每 5 秒拉一次全量（`status=all&size=100`）：本机 39 条 / **395 KB**，
+     * 实测 40 秒里 2.77 MB、每次 39 次合并。这是 /chat 一路常驻的隐性开销，
+     * 叠在切会话的渲染峰值上就是"莫名卡"。`status=active` 只有 1 条 / **4.6 KB**。
+     *
+     * <p>不在 active 列表里、但本地还当成在跑的任务，单独补一次终态，
+     * 避免界面永远停在"运行中"（兜底轮询的意义正在于此）。
+     */
+    const reconcileFromSnapshot = async () => {
+      const response = await agentApi.listTasks({ status: 'active', page: 1, size: 50 });
+      const records = response.data.data.records ?? [];
+      records.forEach((task) => get().upsertTask(task));
+      const seen = new Set(records.map((task) => task.taskId));
+      const vanished = Object.values(get().tasks)
+        .filter((task) => isActiveTask(task) && !seen.has(task.taskId))
+        .slice(0, 10);
+      await Promise.all(vanished.map((task) => agentApi.getTask(task.taskId)
+        .then((res) => get().upsertTask(res.data.data))
+        .catch(() => undefined)));
+    };
     const scheduleFallback = () => {
       clearFallback();
+      // 后台标签页不轮询：回到前台由 visibilitychange 立刻补一次
+      if (typeof document !== 'undefined' && document.hidden) return;
       const hasActive = Object.values(get().tasks).some(isActiveTask);
+      // SSE 正常时只做「静默卡死」兜底（30s）；SSE 断了才回到 5s；没有在跑的任务就慢查。
+      const delay = hasActive ? (get().taskStreamConnected ? 30_000 : 5_000) : 60_000;
       taskFallbackTimer = setTimeout(async () => {
-        await get().loadTasks().catch(() => undefined);
+        await reconcileFromSnapshot().catch(() => undefined);
         if (!taskStreamAbort?.signal.aborted) scheduleFallback();
-      }, hasActive ? 5000 : 30000);
+      }, delay);
     };
     const pump = async () => {
       const signal = taskStreamAbort?.signal;
@@ -3840,6 +3977,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     };
     void get().loadTasks().catch(() => undefined);
     void pump();
+    if (typeof document !== 'undefined') {
+      if (taskVisibilityHandler) {
+        document.removeEventListener('visibilitychange', taskVisibilityHandler);
+      }
+      taskVisibilityHandler = () => {
+        if (!document.hidden && taskStreamRunning) scheduleFallback();
+      };
+      document.addEventListener('visibilitychange', taskVisibilityHandler);
+    }
   },
   stopTaskStream: () => {
     taskStreamRunning = false;
@@ -3847,6 +3993,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     taskStreamAbort = null;
     if (taskFallbackTimer) clearTimeout(taskFallbackTimer);
     taskFallbackTimer = null;
+    if (taskVisibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', taskVisibilityHandler);
+    }
+    taskVisibilityHandler = null;
     set({ taskStreamConnected: false });
   },
   cancelTask: async (taskId) => {
@@ -4032,20 +4182,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, opts?: {
-    picUrls?: string[];
-    assetIds?: string[];
-    assetGroupIds?: string[];
-    assetGroupSnapshotIds?: string[];
-    referenceVideos?: string[];
-    referenceAudios?: string[];
-    routingHint?: string;
-    cancelActiveTasks?: boolean;
-    editMessageId?: string;
-    clientRequestId?: string;
-    attachments?: AgentAttachment[];
-    references?: AgentReference[];
-  }) => {
+  sendMessage: async (content, opts?: AgentSendOptions) => {
     const activeId = get().activeConversationId;
     const activeConversation = get().conversations.find((conversation) => conversation.id === activeId);
     if (activeConversation?.status === 'archived'

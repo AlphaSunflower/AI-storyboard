@@ -1,6 +1,7 @@
 import client from './client';
 import type { ApiResponse } from './auth';
 import type { AgentApprovalMode } from './agent';
+import type { ThemePreference } from '../lib/theme';
 
 export interface Profile {
   userId: string;
@@ -25,6 +26,7 @@ export interface AccountSettings {
   defaultApprovalMode: AgentApprovalMode;
   busySendBehavior: BusySendBehavior;
   workStepDisplay: WorkStepDisplay;
+  themePreference: ThemePreference;
 }
 
 export interface FeedbackResult {

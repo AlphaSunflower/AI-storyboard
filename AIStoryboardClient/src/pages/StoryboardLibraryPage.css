@@ -49,7 +49,7 @@
 
 .sb-back:hover {
   border-color: var(--color-hairline);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
 }
 
@@ -93,7 +93,7 @@
   width: 36px;
   height: 36px;
   border: 1px solid var(--color-hairline);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-muted);
 }
 
@@ -111,7 +111,7 @@
   padding: 0 14px;
   border: 1px solid var(--color-primary);
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   font-size: 13px;
   font-weight: 600;
 }
@@ -125,7 +125,7 @@
   min-height: 36px;
   padding: 0 14px;
   border: 1px solid var(--color-hairline);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   font-size: 13px;
 }
@@ -185,7 +185,7 @@
   display: flex;
   border: 1px solid var(--color-hairline);
   border-radius: 12px;
-  background: white;
+  background: var(--color-panel);
   overflow: hidden;
 }
 
@@ -274,7 +274,7 @@
   border: 1px solid var(--color-hairline);
   border-radius: 8px;
   outline: none;
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   font-size: 13px;
 }
@@ -302,7 +302,7 @@
 }
 
 .sb-segmented button.is-active {
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   box-shadow: 0 1px 4px rgba(20, 20, 19, 0.08);
 }
@@ -432,7 +432,7 @@
   overflow: hidden;
   border: 1px solid var(--color-hairline);
   border-radius: 10px;
-  background: white;
+  background: var(--color-panel);
   color: inherit;
   text-align: left;
   box-shadow: 0 1px 3px rgba(20, 20, 19, 0.04);
@@ -602,7 +602,7 @@
   gap: 16px;
   padding: 11px 16px 11px 20px;
   border-bottom: 1px solid var(--color-hairline);
-  background: white;
+  background: var(--color-panel);
 }
 
 .sb-modal-title span {
@@ -743,7 +743,7 @@
   min-height: 0;
   overflow-y: auto;
   padding: 20px;
-  background: white;
+  background: var(--color-panel);
 }
 
 .sb-detail-status {
@@ -893,7 +893,7 @@
     width: 36px;
     padding: 0;
     border-color: var(--color-hairline);
-    background: white;
+    background: var(--color-panel);
   }
 
   .sb-back span {
@@ -1039,3 +1039,53 @@
     animation: none;
   }
 }
+
+/* ── 深色外观 ─────────────────────────────────────────────────────────── */
+
+:root[data-theme='dark'] .sb-page {
+  background: var(--color-canvas);
+  color: var(--color-body);
+}
+
+:root[data-theme='dark'] .sb-header {
+  background: color-mix(in srgb, var(--color-canvas) 94%, transparent);
+}
+
+:root[data-theme='dark'] .sb-toolbar {
+  background: color-mix(in srgb, var(--color-panel) 94%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme='dark'] .sb-search,
+:root[data-theme='dark'] .sb-project-select {
+  background: var(--color-panel);
+  color: var(--color-ink);
+}
+
+:root[data-theme='dark'] .sb-search input {
+  color: var(--color-ink);
+}
+
+:root[data-theme='dark'] .sb-segmented {
+  background: var(--color-surface-soft);
+}
+
+:root[data-theme='dark'] .sb-segmented button.is-active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+:root[data-theme='dark'] .sb-loading,
+:root[data-theme='dark'] .sb-empty {
+  background: color-mix(in srgb, var(--color-panel) 66%, transparent);
+}
+
+:root[data-theme='dark'] .sb-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme='dark'] .sb-card:hover {
+  border-color: var(--color-hairline-strong);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+

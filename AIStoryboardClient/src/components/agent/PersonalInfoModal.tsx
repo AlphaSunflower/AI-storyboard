@@ -13,11 +13,11 @@ const overlayStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '8px 12px', border: '1px solid var(--color-hairline)',
   borderRadius: 'var(--rounded-md)', font: 'var(--text-body-sm)', color: 'var(--color-ink)',
-  outline: 'none', boxSizing: 'border-box', background: 'white',
+  outline: 'none', boxSizing: 'border-box', background: 'var(--color-panel)',
 };
 const primaryBtn: React.CSSProperties = {
   padding: '7px 16px', border: 'none', borderRadius: 'var(--rounded-md)',
-  background: 'var(--color-primary)', color: 'white', font: 'var(--text-caption)', cursor: 'pointer',
+  background: 'var(--color-primary)', color: 'var(--color-on-primary)', font: 'var(--text-caption)', cursor: 'pointer',
 };
 
 function errMsg(e: unknown): string {

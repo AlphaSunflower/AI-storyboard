@@ -2270,7 +2270,7 @@ const MC_STANDARD_PARAMS = {
     { key: 'duration', label: '时长（秒）', type: 'range', min: 4, max: 15 },
     { key: 'resolution', label: '分辨率', type: 'enum' },
     { key: 'aspect_ratio', label: '画幅', type: 'enum' },
-    { key: 'image', label: '首帧图', type: 'string', role: 'image_upload', cardinality: 'single' },
+    { key: 'imageUrl', label: '首帧图', type: 'string', role: 'image_upload', cardinality: 'single' },
     { key: 'reference_images', label: '参考图', type: 'array', role: 'image_upload', cardinality: 'multi' },
     { key: 'negative_prompt', label: '负向提示词', type: 'string' },
     { key: 'seed', label: '随机种子', type: 'number' },
@@ -2350,7 +2350,7 @@ const MC_TEMPLATES = {
         { key: 'duration', label: '时长（秒）', type: 'range', min: 4, max: 15, default: 6, injectDefault: true },
         { key: 'resolution', label: '分辨率', type: 'enum', options: ['768P', '2K'], default: '768P', injectDefault: true },
         { key: 'aspect_ratio', label: '画幅', type: 'enum', options: ['16:9', '9:16', '4:3', '1:1'], default: '16:9', injectDefault: true },
-        { key: 'image', label: '首帧图', type: 'string', role: 'image_upload', cardinality: 'single',
+        { key: 'imageUrl', label: '首帧图', type: 'string', role: 'image_upload', cardinality: 'single',
           visibleWhen: { mode: 'image-to-video' }, requiredWhen: { mode: 'image-to-video' } },
       ],
       response: { async: {

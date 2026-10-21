@@ -17,10 +17,14 @@
  * </ol>
  */
 export type LiveRefreshDecision =
-  | { action: 'skip'; reason: 'hidden' | 'in-flight' | 'debounce' }
+  | { action: 'skip'; reason: 'hidden' | 'dragging' | 'executing' }
   | { action: 'retry-save'; reason: 'local-changes' }
   | { action: 'reload-after-conflict'; reason: 'retries-exhausted' }
-  | { action: 'check' };
+  /**
+   * 去读服务端 revision。`deferReload` = 本地还有保存在飞/排队：
+   * 仍然允许检查（只读、很便宜），但这一轮先不要整图重载，免得盖掉正在提交的本地改动。
+   */
+  | { action: 'check'; deferReload?: boolean };
 
 /** 连续重试保存的上限：约 3 个轮询周期（~12s）。用尽后优先显示智能体的数据。 */
 export const MAX_SAVE_RETRIES = 3;
@@ -36,12 +40,24 @@ export interface LiveRefreshInput {
   hasLocalChanges: boolean;
   /** 已经连续重试了几次保存（由调用方累计）。 */
   saveRetryCount?: number;
+  /** 正在拖动节点：整图重载会把节点位置打回服务端旧值，必须等松手落库。 */
+  dragging?: boolean;
+  /** 本地有正在跑的执行批次：整图重载会替换 executions，直接杀掉批次。 */
+  executing?: boolean;
 }
 
 export function decideLiveRefresh(input: LiveRefreshInput): LiveRefreshDecision {
   if (input.hidden) return { action: 'skip', reason: 'hidden' };
-  if (input.savingInFlight) return { action: 'skip', reason: 'in-flight' };
-  if (input.hasPendingDebounce) return { action: 'skip', reason: 'debounce' };
+  // 拖动中整图重载 = 节点被拽回原位（用户视角就是「突然弹回去」）。松手后 endNodeDrag 会
+  // commit 位置并触发保存，下一轮 tick 自然恢复检查。
+  if (input.dragging) return { action: 'skip', reason: 'dragging' };
+  // 批次在跑时不整图重载：executions 是本地内存态，重载会把它换成服务端旧快照，批次直接消失。
+  if (input.executing) return { action: 'skip', reason: 'executing' };
+  // 2026-10-19 回归：以前「有保存在飞 / 防抖窗口」直接 skip，连 revision 都不读。
+  // 生图/生视频期间节点进度每 1.5s 就 commit 一次 → 保存几乎从不空闲 →
+  // 智能体在服务端建的节点一直看不到，只能手动刷新。
+  // 现在只把「整图重载」推迟到保存落地，revision 检查照做（只读 GET，代价可忽略）。
+  if (input.savingInFlight || input.hasPendingDebounce) return { action: 'check', deferReload: true };
   if (input.hasLocalChanges) {
     return (input.saveRetryCount ?? 0) >= MAX_SAVE_RETRIES
       ? { action: 'reload-after-conflict', reason: 'retries-exhausted' }

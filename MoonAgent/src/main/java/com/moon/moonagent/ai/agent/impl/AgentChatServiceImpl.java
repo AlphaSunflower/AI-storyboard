@@ -17,6 +17,7 @@ import com.moon.moonagent.security.FileUrlSigner;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.client.StoryboardClient;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentMessageMetadataSlimmer;
 import com.moon.moonagent.ai.agent.ClearContextResult;
 import com.moon.moonagent.ai.agent.AgentReferenceUpload;
 import com.moon.moonagent.ai.agent.ConversationLock;
@@ -376,6 +377,8 @@ public class AgentChatServiceImpl implements AgentChatService {
         if (signedMetadata == null || (signedMetadata.isEmpty() && !metadata.isEmpty())) {
             signedMetadata = metadata;
         }
+        // 列表版瘦身：思考全文 / 轨迹换成标记，客户端展开时再拉详情（见 AgentMessageMetadataSlimmer）
+        signedMetadata = AgentMessageMetadataSlimmer.slim(signedMetadata);
         return new AgentMessageVO(
                 message.getId(),
                 message.getConversationId(),

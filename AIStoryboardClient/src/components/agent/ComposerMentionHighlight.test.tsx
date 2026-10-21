@@ -1,7 +1,7 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentReference } from '../../api/agent';
-import { mentionRanges } from '../../lib/mentionReferences';
+import { mentionRanges, skillHighlightRanges } from '../../lib/mentionReferences';
 import { agentChatTokens } from './agentChatTokens';
 import { ComposerMentionHighlight } from './ComposerMentionHighlight';
 
@@ -29,6 +29,23 @@ describe('ComposerMentionHighlight（输入框镜像高亮层）', () => {
     expect(marked).toHaveLength(1);
     expect(marked[0].textContent).toBe('@分镜3');
     expect((marked[0] as HTMLElement).style.color).toBe(agentChatTokens.brand);
+  });
+
+  it('技能标记 /ppt-master 用独立的技能色，和 @ 引用区分开', () => {
+    const value = '/ppt-master 做一份季度汇报';
+    const { container } = render(
+      <ComposerMentionHighlight
+        value={value}
+        ranges={skillHighlightRanges(value)}
+        scrollTop={0}
+        scrollbarWidth={0}
+      />,
+    );
+
+    const skill = container.querySelector<HTMLElement>('[data-skill="true"]');
+    expect(skill?.textContent).toBe('/ppt-master');
+    expect(skill?.style.color).toBe(agentChatTokens.skill);
+    expect(container.querySelectorAll('[data-mention="true"]')).toHaveLength(0);
   });
 
   it('没有标记时全是普通文本（不着色）', () => {

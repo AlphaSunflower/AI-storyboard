@@ -27,6 +27,7 @@ import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMessage;
 import com.storyboard.common.BusinessException;
 import com.moon.moonagent.ai.agent.AgentChatService;
+import com.moon.moonagent.ai.agent.AgentMessageMetadataSlimmer;
 import com.moon.moonagent.ai.agent.ClearContextResult;
 import com.moon.moonagent.ai.agent.AgentGenerationPreferences;
 import com.moon.moonagent.ai.agent.AgentReferenceUpload;
@@ -50,6 +51,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -136,11 +138,20 @@ public class AgentConversationController {
         return ApiResponse.ok("已移除资产组", null);
     }
 
-    /** 会话详情（含消息列表） */
+    /**
+     * 会话详情（默认含消息列表）。
+     *
+     * <p>{@code includeMessages=false} 只回会话元数据：切会话时客户端还会单独拉
+     * {@code /messages/page}，之前两边各回一份完整消息（77 KB × 2），白付一次传输与解析。
+     */
     @GetMapping("/conversations/{id}")
     public ApiResponse<Map<String, Object>> getConversation(
-            Authentication auth, @PathVariable String id) {
+            Authentication auth, @PathVariable String id,
+            @RequestParam(name = "includeMessages", defaultValue = "true") boolean includeMessages) {
         AgentConversation conversation = chatService.getOwnedConversation(auth.getName(), id);
+        if (!includeMessages) {
+            return ApiResponse.ok(Map.of("conversation", toVO(conversation), "messages", List.of()));
+        }
         List<AgentMessageVO> messages = chatService.listMessages(id).stream()
                 .map(this::toVO).toList();
         return ApiResponse.ok(Map.of("conversation", toVO(conversation), "messages", messages));
@@ -204,6 +215,26 @@ public class AgentConversationController {
             Authentication auth, @PathVariable String id) {
         chatService.getOwnedConversation(auth.getName(), id);
         return ApiResponse.ok(chatService.listMessages(id).stream().map(this::toVO).toList());
+    }
+
+    /**
+     * 消息的大块明细（思考全文 + 执行轨迹）。
+     *
+     * <p>列表接口只给 {@code reasoning.detailsAvailable} / {@code traceAvailable} 两个标记，
+     * 用户展开「思考过程」时前端再按需拉这里 —— 一条 10 KB 级的思考全文不必随首屏一起传。
+     */
+    @GetMapping("/conversations/{id}/messages/{messageId}/details")
+    public ApiResponse<Map<String, Object>> getMessageDetails(
+            Authentication auth, @PathVariable String id, @PathVariable String messageId) {
+        chatService.getOwnedConversation(auth.getName(), id);
+        AgentMessage message = chatService.listMessages(id).stream()
+                .filter(item -> messageId.equals(item.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(40401, "消息不存在"));
+        Map<String, Object> metadata = message.getMetadata() == null ? Map.of() : message.getMetadata();
+        Map<String, Object> details = new LinkedHashMap<>(AgentMessageMetadataSlimmer.details(metadata));
+        details.put("messageId", message.getId());
+        return ApiResponse.ok(details);
     }
 
     /** 消息稳定游标分页；旧接口保留 500 条兼容期。 */
@@ -697,6 +728,8 @@ public class AgentConversationController {
         if (signedMetadata == null || (signedMetadata.isEmpty() && !metadata.isEmpty())) {
             signedMetadata = metadata;
         }
+        // 与 service 的列表出口保持同一套瘦身规则：思考全文/轨迹只在详情接口里给
+        signedMetadata = AgentMessageMetadataSlimmer.slim(signedMetadata);
         return new AgentMessageVO(m.getId(), m.getConversationId(), m.getRole(),
                 signedContent == null ? content : signedContent,
                 signedMetadata,

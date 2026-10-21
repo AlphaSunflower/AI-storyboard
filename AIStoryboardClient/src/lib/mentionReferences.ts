@@ -52,6 +52,28 @@ export interface MentionRange {
   end: number;
   /** 含 token 后紧跟的一个空格（渲染不需要，删除时需要） */
   endWithSpace: number;
+  /** true = 技能引用（/ppt-master），用独立颜色渲染；普通 @ 引用不带此标记 */
+  skill?: boolean;
+}
+
+/** 前端输入框里代表「引用 ppt-master 技能」的 token；后端按正文里的 ppt-master 识别。 */
+export const PPT_MASTER_SKILL_TOKEN = '/ppt-master';
+
+/**
+ * 仅用于高亮的技能占位引用：不会进入 `pendingReferences`，也不会发给后端。
+ * 它的作用只是复用 `tokenRanges` 的定位逻辑，并把 `/ppt-master` 染成技能色。
+ */
+export const PPT_MASTER_HIGHLIGHT_REFERENCE: AgentReference = {
+  kind: 'local_file',
+  id: 'skill:ppt-master',
+  token: PPT_MASTER_SKILL_TOKEN,
+  name: 'ppt-master',
+};
+
+/** 正文里所有 `/ppt-master` 技能标记区间（镜像高亮层用）。 */
+export function skillHighlightRanges(value: string): MentionRange[] {
+  return tokenRanges(value, PPT_MASTER_HIGHLIGHT_REFERENCE)
+    .map((range) => ({ ...range, skill: true }));
 }
 
 /**
@@ -123,6 +145,8 @@ export interface MentionSegment {
   text: string;
   /** true = 这段是引用标记，渲染成品牌色 */
   mention: boolean;
+  /** true = 技能标记（/ppt-master），渲染成技能色 */
+  skill?: boolean;
   reference?: AgentReference;
 }
 
@@ -138,7 +162,7 @@ export function splitMentionSegments(value: string, ranges: MentionRange[]): Men
   for (const range of ranges) {
     if (range.start < cursor) continue;
     if (range.start > cursor) segments.push({ text: value.slice(cursor, range.start), mention: false });
-    segments.push({ text: value.slice(range.start, range.end), mention: true, reference: range.reference });
+    segments.push({ text: value.slice(range.start, range.end), mention: true, skill: range.skill, reference: range.reference });
     cursor = range.end;
   }
   if (cursor < value.length) segments.push({ text: value.slice(cursor), mention: false });

@@ -2,3 +2,8 @@
 !MoonSandbox/
 !MoonSandbox/target/
 !MoonSandbox/target/moon-sandbox.jar
+!deploy
+deploy/*
+!deploy/skills
+deploy/skills/*
+!deploy/skills/ppt-master-skill-v6.7.2.zip

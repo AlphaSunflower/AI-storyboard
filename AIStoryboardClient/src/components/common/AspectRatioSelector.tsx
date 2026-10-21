@@ -16,7 +16,7 @@ export function AspectRatioSelector({ value, onChange }: { value: string; onChan
               fontSize: 12,
               font: 'var(--text-caption-upper)',
               border: `1px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-              background: isSelected ? 'var(--color-surface-soft)' : 'white',
+              background: isSelected ? 'var(--color-surface-soft)' : 'var(--color-panel)',
               color: isSelected ? 'var(--color-primary)' : 'var(--color-muted)',
               cursor: 'pointer',
               transition: 'border-color 0.15s, color 0.15s',

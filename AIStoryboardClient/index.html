@@ -8,6 +8,26 @@
     <meta name="theme-color" content="#181715" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Moon 智能体 · AI 分镜</title>
+    <script>
+      // 先于样式与脚本应用主题，避免刷新时闪出另一套配色。
+      (function () {
+        try {
+          var preference = localStorage.getItem('moon.theme.v1');
+          if (preference !== 'light' && preference !== 'dark' && preference !== 'system') {
+            preference = 'light';
+          }
+          var dark = preference === 'dark'
+            || (preference === 'system'
+              && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var root = document.documentElement;
+          root.dataset.theme = dark ? 'dark' : 'light';
+          root.dataset.themePreference = preference;
+          root.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (error) {
+          // localStorage 不可用时保持默认浅色。
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

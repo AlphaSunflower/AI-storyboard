@@ -162,7 +162,7 @@ export function ConversationSearchModal({ open, onClose, onSelectConversation }:
         className={`chat-modal-surface${visible ? ' is-open' : ''}${closing ? ' is-closing' : ''}`}
         style={{
           width: 'min(640px, 92vw)', maxHeight: '70vh',
-          background: 'white', borderRadius: 16, boxShadow: '0 24px 72px rgba(0,0,0,0.3)',
+          background: 'var(--color-panel)', borderRadius: 16, boxShadow: '0 24px 72px rgba(0,0,0,0.3)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
       >

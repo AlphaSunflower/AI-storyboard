@@ -135,6 +135,7 @@
 .conversation-item {
   transition:
     background-color 160ms ease,
+    color 160ms ease,
     box-shadow 160ms ease;
 }
 
@@ -156,25 +157,27 @@
   animation: chat-fade-in 160ms ease;
 }
 
+/**
+ * 展开动画只用 opacity / transform。
+ *
+ * <p>之前用 `grid-template-rows: 0fr → 1fr` 做高度动画：面板里装着几十行工具轨迹，
+ * 每一帧都要重新布局整块面板并把它下面的消息整体推开 —— 展开那 260ms 就是明细卡顿的来源。
+ * 现在高度瞬时到位、只做淡入位移，动画全程在合成线程，不再触发 layout。
+ */
 .reasoning-expand {
-  display: grid;
-  grid-template-rows: 0fr;
   opacity: 0;
   transform: translateY(-4px);
   transition:
-    grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 180ms ease,
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .reasoning-expand.is-open {
-  grid-template-rows: 1fr;
   opacity: 1;
   transform: translateY(0);
 }
 
 .reasoning-expand.is-closing {
-  grid-template-rows: 0fr;
   opacity: 0;
   transform: translateY(-4px);
 }
@@ -188,7 +191,8 @@
 .reasoning-trace-item {
   opacity: 1;
   animation: reasoning-item-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--item-index, 0) * 36ms);
+  /* 级联上限 8 档：几十行轨迹逐行延迟会让动画拖到 1 秒以上，看着像卡住 */
+  animation-delay: calc(min(var(--item-index, 0), 8) * 36ms);
 }
 
 .chat-scroll-down {
@@ -375,7 +379,7 @@
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--color-primary) 16%, transparent);
   border-radius: 9px;
-  background: white;
+  background: var(--color-panel);
   overflow: hidden;
 }
 
@@ -779,9 +783,7 @@
 
   .reasoning-expand {
     transform: none;
-    transition:
-      grid-template-rows 200ms ease,
-      opacity 160ms ease;
+    transition: opacity 160ms ease;
   }
 
   .reasoning-detail-item,
@@ -838,3 +840,39 @@
 
 /* 顶栏应用入口：Tooltip 包裹层不能参与收缩，否则窄窗会把「项目库」挤成省略号 */
 .chat-app-actions > .warm-tooltip__trigger { flex: 0 0 auto; }
+
+/* 会话列表骨架：列表接口没回来之前先占位（输入框 / 生成中心不受影响） */
+.conversation-list-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+}
+
+.conversation-list-skeleton__hint {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: var(--color-muted-soft);
+}
+
+.conversation-list-skeleton__row {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    100deg,
+    var(--color-surface-soft) 30%,
+    var(--color-surface-subtle) 50%,
+    var(--color-surface-soft) 70%
+  );
+  background-size: 200% 100%;
+  animation: conversation-skeleton-shimmer 1.2s linear infinite;
+}
+
+@keyframes conversation-skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-list-skeleton__row { animation: none; }
+}

@@ -37,7 +37,7 @@ export function CanvasSessionCard() {
               key={choice.canvasId}
               type="button"
               onClick={() => beginOpen(choice.canvasId, false)}
-              style={{ minHeight: 36, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', textAlign: 'left', padding: '7px 10px' }}
+              style={{ minHeight: 36, display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', cursor: 'pointer', textAlign: 'left', padding: '7px 10px' }}
             >
               <Frame size={14} strokeWidth={1.8} />
               {choice.title}
@@ -46,7 +46,7 @@ export function CanvasSessionCard() {
           <button
             type="button"
             onClick={() => beginOpen(undefined, true)}
-            style={{ minHeight: 36, border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', padding: '7px 10px' }}
+            style={{ minHeight: 36, border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', cursor: 'pointer', padding: '7px 10px' }}
           >
             新建画布
           </button>
@@ -57,7 +57,7 @@ export function CanvasSessionCard() {
             type="button"
             onClick={() => beginOpen(session.canvasId, false)}
             disabled={!!status}
-            style={{ minHeight: 36, display: 'inline-flex', alignItems: 'center', gap: 7, border: 0, borderRadius: 8, background: 'var(--color-primary)', color: 'white', cursor: status ? 'default' : 'pointer', padding: '7px 12px' }}
+            style={{ minHeight: 36, display: 'inline-flex', alignItems: 'center', gap: 7, border: 0, borderRadius: 8, background: 'var(--color-primary)', color: 'var(--color-on-primary)', cursor: status ? 'default' : 'pointer', padding: '7px 12px' }}
           >
             <ExternalLink size={14} strokeWidth={1.8} />
             {status || '打开画布继续'}
@@ -65,7 +65,7 @@ export function CanvasSessionCard() {
           <button
             type="button"
             onClick={() => void cancel()}
-            style={{ minHeight: 36, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', cursor: 'pointer', padding: '7px 12px' }}
+            style={{ minHeight: 36, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', cursor: 'pointer', padding: '7px 12px' }}
           >
             <X size={14} strokeWidth={1.8} />
             取消

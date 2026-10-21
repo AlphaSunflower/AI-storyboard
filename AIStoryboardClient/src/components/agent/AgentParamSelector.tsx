@@ -267,7 +267,7 @@ export function AgentParamSelector({
 
   const selectStyle: CSSProperties = {
     padding: '4px 8px', borderRadius: 6, border: '1px solid var(--color-hairline)',
-    fontSize: 12, background: 'white', color: 'var(--color-ink)', outline: 'none',
+    fontSize: 12, background: 'var(--color-panel)', color: 'var(--color-ink)', outline: 'none',
   };
   const labelStyle: CSSProperties = { color: 'var(--color-muted)', width: 72, flexShrink: 0 };
 
@@ -349,7 +349,7 @@ export function AgentParamSelector({
   return (
     <div
       style={{
-        marginBottom: 10, padding: '8px 10px', background: '#faf9f5',
+        marginBottom: 10, padding: '8px 10px', background: 'var(--color-surface-soft)',
         borderRadius: 8, border: '1px solid var(--color-hairline)', fontSize: 12,
       }}
     >

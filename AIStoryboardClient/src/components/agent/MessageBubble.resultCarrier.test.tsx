@@ -142,6 +142,30 @@ describe('卡片分支不再吞掉产物', () => {
     expect(container.querySelector('.chat-message-attachments')).not.toBeNull();
   });
 
+  it('已提交的 HITL 卡片不渲染结果确认动作（没有结果可完善）', () => {
+    useAgentStore.setState({
+      messages: [assistantMessage({
+        content: '请求用户补充信息',
+        metadata: {
+          kind: 'hitl',
+          hitl: {
+            formContent: '请求用户补充信息',
+            actions: [{ id: 'done', title: '已完成' }],
+            selectedActionId: 'done',
+            selectedActionTitle: '已完成',
+          },
+          // 回放/旧数据里可能误挂；渲染层必须兜底不显示
+          confirmResult: CONFIRM,
+        },
+      })],
+    });
+
+    render(<Harness />);
+
+    expect(screen.queryByRole('button', { name: '继续完善' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '满意完成' })).toBeNull();
+  });
+
   it('已提交的 HITL 卡片消息仍渲染产物文件卡', () => {
     useAgentStore.setState({
       messages: [assistantMessage({

@@ -36,6 +36,11 @@ files:
 
 server:
   port: 8082
+  compression:
+    # 项目/素材列表等 JSON 同样值得压；mime-types 里刻意不含 text/event-stream
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,text/javascript,application/javascript
+    min-response-size: 1024
 
 # 只暴露 health 端点（部署探活），其余 actuator 端点不外泄
 management:

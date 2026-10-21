@@ -1109,13 +1109,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         if (existing) {
           updatedNodeIds.push(node.id);
           // 同 id 覆盖，但保留本地交互态（选中/拖拽）与本地 UI 标记（isGenerating / progress 等）。
+          // 正在拖的节点**不能**被远端位置覆盖：否则鼠标还没松手，节点会突然弹回原位。
+          const dragging = existing.dragging === true;
           nodeById.set(node.id, {
             ...existing,
             ...node,
-            position: node.position ?? existing.position,
+            position: dragging ? existing.position : (node.position ?? existing.position),
             data: { ...existing.data, ...node.data },
             selected: existing.selected,
-            dragging: false,
+            dragging,
           });
         } else {
           addedNodeIds.push(node.id);

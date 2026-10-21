@@ -34,6 +34,20 @@ export function assetUrl(path: string | null): string {
   return BACKEND_URL + path;
 }
 
+/**
+ * 聊天里的生成图走缩略图：`/api/files/images/**` 追加 `?w=`，后端按需缩放并落盘缓存。
+ *
+ * <p>生成图原图约 1 MB，聊天气泡里只按 220px 高显示；直出原图既费带宽，又要解码整张位图。
+ * 保留原有 query（`token` 签名只覆盖路径，加参数不影响校验）。
+ * 非 `/api/files/images/**`（外链、项目库 media、data URI）原样返回。
+ */
+export function imageThumbnailUrl(url: string | null, width = 480): string {
+  if (!url) return '';
+  if (!url.includes('/api/files/images/')) return url;
+  if (/[?&]w=\d+/.test(url)) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}w=${width}`;
+}
+
 // ═══════════════════════════════════════════════════
 //  Model definitions — single source of truth.
 //  Add/remove models here; all <select> pickers

@@ -84,4 +84,65 @@ describe('authSession', () => {
     expect(localStorage.getItem('accessToken')).toBeNull();
     expect(localStorage.getItem('user')).toBeNull();
   });
+
+  it('redirects to /login when a protected request stays 401 after refresh', async () => {
+    vi.resetModules();
+    const fresh = await import('./authSession');
+    fresh.setAccessToken('expired-token');
+    window.history.pushState({}, '', '/chat');
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return new Response(JSON.stringify({ message: '未登录' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ code: '40101', message: '未授权：缺少 token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const response = await fresh.authorizedFetch('/api/agent/tasks/events');
+
+      expect(response.status).toBe(401);
+      // 401 持久化后必须清掉本地会话（token + user），并走 /login 跳转。
+      expect(fresh.getAccessToken()).toBeNull();
+      expect(localStorage.getItem('user')).toBeNull();
+    } finally {
+      // 关闭本模块的 BroadcastChannel，避免后续用例从“已登录标签页”拿到陈旧 token。
+      fresh.setAccessToken(null);
+      window.history.pushState({}, '', '/');
+    }
+  });
+
+  it('backs off after a failed refresh instead of hammering /api/auth/refresh', async () => {
+    // 刷新本身 401（Cookie 过期）时，后续请求不能在冷却期内再打刷新接口：
+    // 之前每个轮询请求都会各触发一次 401 刷新，55 秒能打 20 次。
+    // 用独立模块实例，避免上一个用例留下的 BroadcastChannel / 冷却状态串场。
+    vi.resetModules();
+    const fresh = await import('./authSession');
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return new Response(JSON.stringify({ message: '未登录' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response('ok', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fresh.authorizedFetch('/api/agent/tasks/events');
+    await fresh.authorizedFetch('/api/agent/tasks/events');
+    await fresh.authorizedFetch('/api/agent/tasks/events');
+
+    const refreshCalls = fetchMock.mock.calls
+      .filter((call) => String(call[0]).includes('/api/auth/refresh'));
+    expect(refreshCalls).toHaveLength(1);
+  });
 });

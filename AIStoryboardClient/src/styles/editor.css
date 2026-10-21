@@ -77,11 +77,11 @@
 
 .btn--ghost:hover:not(:disabled) {
   background: var(--color-surface-soft);
-  color: var(--color-ink);
+  color: var(--color-primary-active);
 }
 
 .btn--outline {
-  background: white;
+  background: var(--color-panel);
   color: var(--color-body);
   border-color: var(--color-hairline);
 }
@@ -89,7 +89,7 @@
 .btn--outline:hover:not(:disabled) {
   background: var(--color-surface-subtle);
   border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-hairline));
-  color: var(--color-ink);
+  color: var(--color-primary-active);
 }
 
 .icon-btn {
@@ -115,7 +115,7 @@
   padding: 0 10px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   font: var(--text-body-sm);
   outline: none;
@@ -137,7 +137,7 @@
   gap: 16px;
   padding: 0 20px;
   border-bottom: 1px solid var(--color-hairline);
-  background: color-mix(in srgb, var(--color-canvas) 92%, white);
+  background: color-mix(in srgb, var(--color-canvas) 92%, var(--color-panel));
   position: relative;
   z-index: 30;
 }
@@ -174,6 +174,7 @@
 
 .app-brand:hover {
   background: var(--color-surface-soft);
+  color: var(--color-primary-active);
 }
 
 .app-brand__mark {
@@ -215,8 +216,9 @@
 }
 
 .project-switch:hover {
-  background: white;
+  background: var(--color-panel);
   border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-hairline));
+  color: var(--color-primary-active);
   box-shadow: var(--shadow-xs);
 }
 
@@ -252,7 +254,7 @@
   padding: 5px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-lg);
-  background: white;
+  background: var(--color-panel);
   box-shadow: var(--shadow-popover);
 }
 
@@ -308,7 +310,7 @@
   padding: 22px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-xl);
-  background: white;
+  background: var(--color-panel);
   box-shadow: var(--shadow-lg);
 }
 
@@ -421,7 +423,7 @@
   padding: 10px 11px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   font: 400 13px/1.65 var(--font-body);
   outline: none;
@@ -531,7 +533,7 @@
   padding: 6px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  background: white;
+  background: var(--color-panel);
   transition: border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -640,11 +642,11 @@
 
 .segmented__btn:hover {
   background: color-mix(in srgb, var(--color-ink) 5%, transparent);
-  color: var(--color-ink);
+  color: var(--color-primary-active);
 }
 
 .segmented__btn[aria-pressed='true'] {
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   box-shadow: var(--shadow-xs);
 }
@@ -845,7 +847,7 @@
   padding: 5px 9px;
   border: 1px solid var(--color-hairline);
   border-radius: 999px;
-  background: white;
+  background: var(--color-panel);
   color: var(--color-muted);
   font-size: 11.5px;
 }
@@ -897,7 +899,7 @@
   margin-bottom: 4px;
   border: 1px solid var(--color-hairline);
   border-radius: var(--rounded-md);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-muted-soft);
 }
 
@@ -958,3 +960,7 @@
     display: none;
   }
 }
+
+.scene-row:hover .scene-row__title { color: var(--color-primary-active); }
+.scene-row__title { transition: color 140ms ease; }
+.editor-library__card:hover .editor-library__name { color: var(--color-primary-active); }

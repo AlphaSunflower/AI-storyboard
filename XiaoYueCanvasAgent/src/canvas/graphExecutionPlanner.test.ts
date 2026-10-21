@@ -72,4 +72,48 @@ describe('planGraphExecution', () => {
     expect(plan.nodes.find((node) => node.nodeId === 'image-to-image')?.dependencies)
       .toEqual(expect.arrayContaining(['image-gen', 'slot']));
   });
+
+  it('orders independent nodes by canvas position, not by random node id', () => {
+    const result = graph();
+    result.nodes = [
+      { id: 'z-top', type: 'imageGeneration', position: { x: 80, y: 120 }, data: { kind: 'imageGeneration', label: '上', prompt: 'a', status: 'idle', accent: '#fff' } },
+      { id: 'm-middle', type: 'imageGeneration', position: { x: 80, y: 430 }, data: { kind: 'imageGeneration', label: '中', prompt: 'b', status: 'idle', accent: '#fff' } },
+      { id: 'a-bottom', type: 'imageGeneration', position: { x: 80, y: 720 }, data: { kind: 'imageGeneration', label: '下', prompt: 'c', status: 'idle', accent: '#fff' } },
+    ];
+    result.edges = [];
+
+    const plan = planGraphExecution(result);
+
+    // 字典序是 a-bottom / m-middle / z-top；用户看到的顺序必须是上 / 中 / 下。
+    expect(plan.order).toEqual(['z-top', 'm-middle', 'a-bottom']);
+  });
+
+  it('keeps dependencies ahead of the visual order', () => {
+    const result = graph();
+    result.nodes = [
+      { id: 'consumer', type: 'imageGeneration', position: { x: 400, y: 0 }, data: { kind: 'imageGeneration', label: '下游', prompt: 'c', status: 'idle', accent: '#fff' } },
+      { id: 'producer', type: 'imageGeneration', position: { x: 0, y: 900 }, data: { kind: 'imageGeneration', label: '上游（视觉在下）', prompt: 'p', status: 'idle', accent: '#fff' } },
+    ];
+    result.edges = [
+      { id: 'p-c', source: 'producer', sourceHandle: 'image', target: 'consumer', targetHandle: 'reference', type: 'canvas', data: { portOrder: 0 } },
+    ];
+
+    const plan = planGraphExecution(result);
+
+    expect(plan.order).toEqual(['producer', 'consumer']);
+  });
+
+  it('throws instead of silently dropping nodes when the graph has a cycle', () => {
+    const result = graph();
+    result.nodes = [
+      { id: 'a', type: 'imageGeneration', position: { x: 0, y: 0 }, data: { kind: 'imageGeneration', label: 'A', prompt: '', status: 'idle', accent: '#fff' } },
+      { id: 'b', type: 'imageGeneration', position: { x: 300, y: 0 }, data: { kind: 'imageGeneration', label: 'B', prompt: '', status: 'idle', accent: '#fff' } },
+    ];
+    result.edges = [
+      { id: 'a-b', source: 'a', sourceHandle: 'image', target: 'b', targetHandle: 'reference', type: 'canvas', data: { portOrder: 0 } },
+      { id: 'b-a', source: 'b', sourceHandle: 'image', target: 'a', targetHandle: 'reference', type: 'canvas', data: { portOrder: 0 } },
+    ];
+
+    expect(() => planGraphExecution(result)).toThrow(/循环依赖/);
+  });
 });

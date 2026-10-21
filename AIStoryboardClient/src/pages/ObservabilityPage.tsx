@@ -13,7 +13,7 @@ const pageStyle: React.CSSProperties = {
   padding: '32px 20px 64px',
 };
 const cardStyle: React.CSSProperties = {
-  background: 'white',
+  background: 'var(--color-panel)',
   border: '1px solid var(--color-hairline)',
   borderRadius: 'var(--rounded-lg)',
   padding: 18,
@@ -25,7 +25,7 @@ const btnStyle: React.CSSProperties = {
   padding: '7px 12px',
   border: '1px solid var(--color-hairline)',
   borderRadius: 'var(--rounded-md)',
-  background: 'white',
+  background: 'var(--color-panel)',
   color: 'var(--color-ink)',
   font: 'var(--text-caption)',
   cursor: 'pointer',
@@ -222,7 +222,7 @@ export function ObservabilityPage() {
           <select
             value={conversationId}
             onChange={(event) => setConversationId(event.target.value)}
-            style={{ minWidth: 260, padding: '7px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', font: 'var(--text-body-sm)' }}
+            style={{ minWidth: 260, padding: '7px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', font: 'var(--text-body-sm)' }}
           >
             {conversations.length === 0 && <option value="">暂无会话</option>}
             {conversations.map((conversation) => (
@@ -239,7 +239,7 @@ export function ObservabilityPage() {
           <select
             value={graphFilter}
             onChange={(event) => setGraphFilter(event.target.value)}
-            style={{ minWidth: 240, padding: '7px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', font: 'var(--text-body-sm)' }}
+            style={{ minWidth: 240, padding: '7px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', font: 'var(--text-body-sm)' }}
           >
             <option value="all">全部任务图（{graphs.length}）</option>
             {graphs.map((graph) => (
@@ -254,7 +254,7 @@ export function ObservabilityPage() {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as 'all' | 'failed' | 'completed')}
-            style={{ padding: '7px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', font: 'var(--text-body-sm)' }}
+            style={{ padding: '7px 10px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', font: 'var(--text-body-sm)' }}
           >
             <option value="all">全部状态</option>
             <option value="failed">只看失败</option>

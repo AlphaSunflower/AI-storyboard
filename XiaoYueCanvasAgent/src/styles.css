@@ -3127,7 +3127,11 @@ textarea.text-node-editor::placeholder,
 
 .canvas-frame__head {
   position: absolute;
-  inset: 0 0 auto;
+  /* 只裹住标题与操作，不再做成通栏长条：宽分组（十几个节点）里那条横线会一直拉到屏幕外，
+     控件也跟着飘走、点不到。 */
+  inset: 0 auto auto 0;
+  width: max-content;
+  max-width: 100%;
   height: 40px;
   display: flex;
   align-items: center;
@@ -3135,7 +3139,7 @@ textarea.text-node-editor::placeholder,
   padding: 0 8px 0 11px;
   overflow: hidden;
   border-bottom: 1px solid rgba(244,244,245,.1);
-  border-radius: 13px 13px 0 0;
+  border-radius: 13px;
   background: rgba(20,20,20,.62);
   color: rgba(244,244,245,.8);
   cursor: grab;
@@ -3182,6 +3186,8 @@ textarea.text-node-editor::placeholder,
 .canvas-frame.is-collapsed .canvas-frame__head {
   gap: 6px;
   padding: 0 7px 0 8px;
+  /* 折叠态整条就是分组本身：填满折叠框，不再按内容收缩。 */
+  width: 100%;
 }
 
 .canvas-frame.is-collapsed .canvas-frame__run-text {
@@ -3217,6 +3223,7 @@ textarea.text-node-editor::placeholder,
 
 .canvas-frame__title {
   min-width: 0;
+  max-width: 260px;
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
@@ -3225,7 +3232,9 @@ textarea.text-node-editor::placeholder,
 }
 
 .canvas-frame__count {
-  margin-left: auto;
+  /* 以前是 margin-left:auto：会把「执行」按钮顶到分组框最右端——宽分组（十几个节点）里
+     按钮落在屏幕外，用户根本点不到。所有操作都紧挨标题排布。 */
+  margin-left: 0;
   color: rgba(244,244,245,.42);
   font-size: 10px;
   white-space: nowrap;
@@ -3325,6 +3334,26 @@ textarea.text-node-editor::placeholder,
   border-color: rgba(244,244,245,.34);
   background: rgba(244,244,245,.14);
   color: #fff;
+}
+
+/* 智能体已请求执行、等用户确认：只用中性色反白 + 呼吸，不引入任何色相。 */
+.canvas-frame__run.is-pending {
+  border-color: rgba(244,244,245,.72);
+  background: rgba(244,244,245,.9);
+  color: #141413;
+  font-weight: 600;
+  animation: canvas-frame-run-pending 1.6s ease-in-out infinite;
+}
+
+.canvas-frame__run.is-pending:hover {
+  border-color: #fff;
+  background: #fff;
+  color: #141413;
+}
+
+@keyframes canvas-frame-run-pending {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(244,244,245,.3); }
+  50% { box-shadow: 0 0 0 4px rgba(244,244,245,0); }
 }
 
 .canvas-frame__actions {
@@ -6794,9 +6823,20 @@ html[data-view-motion='back'] .view-shell { transform-origin: 50% 100%; }
   color: var(--acid);
 }
 
+.project-home__grid article:hover strong,
+.canvas-home__grid article:hover strong {
+  color: var(--acid);
+}
+
+.project-home__grid article strong,
+.canvas-home__grid article strong {
+  transition: color 150ms ease;
+}
+
 .project-home__header button:not(:disabled):hover,
 .project-home__tabs button:hover {
   background: rgba(244, 244, 245, 0.08);
+  color: var(--acid);
 }
 
 /* 开合位移挂在内层内容上而不是面板本身：面板在手机端是 inset:0，位移会让文档多出横向滚动 */

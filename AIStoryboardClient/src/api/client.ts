@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { BACKEND_URL, API_TIMEOUT } from '../config';
 import {
-  clearAuthSession,
   getAccessToken,
+  redirectToLogin,
   refreshAccessToken,
 } from '../lib/authSession';
 
@@ -27,16 +27,19 @@ client.interceptors.response.use(
   async (error) => {
     const original = error.config as { _retryAuth?: boolean; url?: string; headers?: Record<string, string> } | undefined;
     const isRefreshRequest = original?.url?.includes('/auth/refresh');
-    if (error.response?.status === 401 && original && !original._retryAuth && !isRefreshRequest) {
-      original._retryAuth = true;
-      const token = await refreshAccessToken();
-      if (token) {
-        original.headers = original.headers ?? {};
-        original.headers.Authorization = `Bearer ${token}`;
-        return client(original);
+    if (error.response?.status === 401 && !isRefreshRequest) {
+      // 只重试一次；重试后仍是 401（或本来就没有 config）也必须回登录页，
+      // 不能因为 `_retryAuth` 已置位就把 401 继续丢给业务层。
+      if (original && !original._retryAuth) {
+        original._retryAuth = true;
+        const token = await refreshAccessToken();
+        if (token) {
+          original.headers = original.headers ?? {};
+          original.headers.Authorization = `Bearer ${token}`;
+          return client(original);
+        }
       }
-      clearAuthSession();
-      if (!window.location.pathname.startsWith('/login')) window.location.href = '/login';
+      redirectToLogin();
     }
     return Promise.reject(error);
   }

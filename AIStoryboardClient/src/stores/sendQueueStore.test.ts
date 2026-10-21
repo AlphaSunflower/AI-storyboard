@@ -7,7 +7,7 @@ const enqueue = (content: string, conversationId = 'c1') =>
 describe('sendQueueStore', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
-    useSendQueueStore.setState({ queues: {} });
+    useSendQueueStore.setState({ queues: {}, holds: {} });
   });
 
   afterEach(() => {
@@ -49,5 +49,67 @@ describe('sendQueueStore', () => {
     }
     expect(enqueue('超出的消息')).toBe(false);
     expect(useSendQueueStore.getState().queues.c1).toHaveLength(MAX_QUEUED_SENDS);
+  });
+
+  it('takes one queued message by id for immediate sending', () => {
+    enqueue('A');
+    enqueue('B');
+    const b = useSendQueueStore.getState().queues.c1[1];
+
+    const taken = useSendQueueStore.getState().take('c1', b.id);
+    expect(taken?.content).toBe('B');
+    expect(useSendQueueStore.getState().queues.c1.map((item) => item.content)).toEqual(['A']);
+    expect(useSendQueueStore.getState().take('c1', b.id)).toBeUndefined();
+  });
+
+  it('restores an immediately-sent message at its original position', () => {
+    enqueue('A');
+    enqueue('B');
+    enqueue('C');
+    const b = useSendQueueStore.getState().queues.c1[1];
+    const taken = useSendQueueStore.getState().take('c1', b.id);
+    expect(taken).toBeTruthy();
+
+    useSendQueueStore.getState().restore(taken!, 1);
+    expect(useSendQueueStore.getState().queues.c1.map((item) => item.content))
+      .toEqual(['A', 'B', 'C']);
+  });
+
+  it('edits queued content in place and keeps the attachment snapshot', () => {
+    useSendQueueStore.getState().enqueue({
+      conversationId: 'c1',
+      content: '旧正文',
+      picUrls: ['/api/files/a.png'],
+      attachments: [{ url: '/api/files/a.png', name: 'a.png', kind: 'image', mimeType: 'image/png' }],
+    });
+    const item = useSendQueueStore.getState().queues.c1[0];
+
+    expect(useSendQueueStore.getState().update('c1', item.id, ' 新正文 ')).toBe(true);
+    const updated = useSendQueueStore.getState().queues.c1[0];
+    expect(updated.content).toBe('新正文');
+    expect(updated.opts?.attachments).toHaveLength(1);
+    expect(updated.opts?.picUrls).toEqual(['/api/files/a.png']);
+    expect(updated.editedAt).toBeGreaterThan(0);
+    expect(window.sessionStorage.getItem('moon.send-queue.v1')).toContain('新正文');
+
+    expect(useSendQueueStore.getState().update('c1', item.id, '   ')).toBe(false);
+    expect(useSendQueueStore.getState().update('c1', 'missing', '任意')).toBe(false);
+  });
+
+  it('holds automatic flushing until every holder releases', () => {
+    expect(useSendQueueStore.getState().holds.c1).toBeUndefined();
+    useSendQueueStore.getState().holdQueue('c1');
+    useSendQueueStore.getState().holdQueue('c1');
+    expect(useSendQueueStore.getState().holds.c1).toBe(2);
+
+    useSendQueueStore.getState().releaseQueue('c1');
+    expect(useSendQueueStore.getState().holds.c1).toBe(1);
+
+    useSendQueueStore.getState().releaseQueue('c1');
+    expect(useSendQueueStore.getState().holds.c1).toBeUndefined();
+
+    // 多余的 release 不能把计数压成负数
+    useSendQueueStore.getState().releaseQueue('c1');
+    expect(useSendQueueStore.getState().holds.c1).toBeUndefined();
   });
 });

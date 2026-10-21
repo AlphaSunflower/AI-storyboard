@@ -189,6 +189,32 @@
   background: color-mix(in srgb, var(--color-primary) 7%, transparent);
 }
 
+/* 编辑态：正文换成输入框，隐藏 meta，操作列收到保存/取消两个按钮 */
+.chat-send-queue__item.is-editing {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.chat-send-queue__edit {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 38%, transparent);
+  border-radius: 6px;
+  background: var(--color-panel);
+  color: rgb(35, 43, 58);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+
+.chat-send-queue__edit:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
 .chat-send-queue__index {
   color: rgb(140, 146, 158);
   font-size: 10.5px;
@@ -247,6 +273,15 @@
 .chat-send-queue__actions button.is-danger:hover:not(:disabled) {
   background: rgba(198, 69, 69, 0.09);
   color: rgb(198, 69, 69);
+}
+
+.chat-send-queue__actions button.is-primary {
+  color: var(--color-primary-active);
+}
+
+.chat-send-queue__actions button.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-primary-active);
 }
 
 .chat-send-queue__actions button:disabled {

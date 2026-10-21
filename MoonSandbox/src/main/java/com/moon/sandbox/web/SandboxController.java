@@ -8,6 +8,8 @@ import com.moon.sandbox.session.ReadFileResult;
 import com.moon.sandbox.session.SandboxSessionService;
 import com.moon.sandbox.session.WriteFileResult;
 import com.moon.sandbox.session.WriteMode;
+import com.moon.sandbox.skills.SandboxSkillResult;
+import com.moon.sandbox.skills.SandboxSkillService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -29,11 +31,14 @@ public class SandboxController {
 
     private final SandboxSessionService sessions;
     private final SandboxExecutionService execution;
+    private final SandboxSkillService skills;
 
     public SandboxController(SandboxSessionService sessions,
-                             SandboxExecutionService execution) {
+                             SandboxExecutionService execution,
+                             SandboxSkillService skills) {
         this.sessions = sessions;
         this.execution = execution;
+        this.skills = skills;
     }
 
     @PostMapping("/files/write")
@@ -81,6 +86,15 @@ public class SandboxController {
     public ShellResult shell(@PathVariable String conversationId,
                              @Valid @RequestBody ShellCommandRequest request) {
         return execution.executeShell(conversationId, request.command(), request.timeoutSeconds());
+    }
+
+    /**
+     * 按需把只读技能包物化到当前会话工作区。幂等；未引用技能的会话不会产生任何目录。
+     */
+    @PostMapping("/skills/{skillName}/materialize")
+    public SandboxSkillResult materializeSkill(@PathVariable String conversationId,
+                                               @PathVariable String skillName) {
+        return skills.materialize(conversationId, skillName);
     }
 
     @GetMapping(value = "/archive", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)

@@ -50,7 +50,7 @@
   padding: 14px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 14px;
-  background: #ffffff;
+  background: var(--color-panel);
   box-shadow: 0 12px 32px rgba(15, 17, 21, 0.16);
   overflow-y: auto;
   scrollbar-width: thin;
@@ -99,7 +99,7 @@
 }
 
 .chat-generation-prefs__tab[data-active] {
-  background: #ffffff;
+  background: var(--color-panel);
   color: var(--color-ink);
   font-weight: 500;
   box-shadow: 0 1px 2px rgba(15, 17, 21, 0.08);
@@ -156,7 +156,7 @@
 }
 
 .chat-generation-prefs__ratio[data-active] {
-  background: #ffffff;
+  background: var(--color-panel);
   color: var(--color-ink);
   box-shadow: 0 1px 2px rgba(15, 17, 21, 0.12);
 }

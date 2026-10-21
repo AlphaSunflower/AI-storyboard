@@ -1,0 +1,80 @@
+/* ============================================================================
+   外观主题：深色（夜间）token
+   ----------------------------------------------------------------------------
+   浅色 token 仍在 tokens.css。这里只覆盖语义变量，所有页面通过 var() 取色；
+   `--color-panel` 是真正的卡片/浮层表面（浅色为纯白，深色为暖黑），
+   与页面底色 `--color-canvas` 拉开一层，避免深色模式糊成一片。
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+  --color-panel: #ffffff;
+  --color-paper: #ffffff;
+  --color-on-primary: #ffffff;
+  --color-on-danger: #ffffff;
+  --color-hairline-strong: #d8cfc4;
+  --color-scrollbar: #d8d1c6;
+  --color-scrollbar-hover: #c4bcb0;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* 夜间不用纯黑：带一点暖褐，和珊瑚品牌色是同一个世界。 */
+  --color-primary: #e0997d;
+  --color-primary-active: #f0b39b;
+  --color-primary-soft: #33231d;
+  --color-primary-tint: #251a16;
+  --color-primary-disabled: #38342d;
+  --color-on-primary: #24130d;
+  --color-on-danger: #2b0f0d;
+
+  --color-ink: #f4f0e7;
+  --color-body: #c9c3b7;
+  --color-body-strong: #e5dfd4;
+  --color-muted: #a29b8f;
+  --color-muted-soft: #9a9387;
+
+  --color-hairline: #3a352e;
+  --color-hairline-soft: #2e2a25;
+  --color-hairline-strong: #4b453c;
+
+  --color-bg: #131210;
+  --color-canvas: #151411;
+  --color-surface: #1a1916;
+  --color-surface-soft: #23211d;
+  --color-surface-subtle: #1b1a17;
+  --color-surface-card: #292621;
+  --color-surface-cream-strong: #342f27;
+  --color-surface-dark: #0e0e0d;
+  --color-surface-dark-elevated: #1d1b18;
+  --color-surface-dark-soft: #141311;
+
+  --color-panel: #1e1c19;
+  /* 文档阅读面保持纸张白：这是内容本身，不随界面外观反转。 */
+  --color-paper: #ffffff;
+  --color-on-dark: #faf9f5;
+  --color-on-dark-soft: #b3ada1;
+
+  --color-success: #7fbf8c;
+  --color-warning: #e0b05c;
+  --color-error: #ef8b84;
+  --color-info: #9fc3d3;
+  --color-focus-ring: color-mix(in srgb, var(--color-primary) 58%, transparent);
+  --color-scrollbar: #4a453d;
+  --color-scrollbar-hover: #5d574d;
+
+  /* 深色下阴影靠更深的黑和轻微的高光边界，而不是把页面压暗。 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 10px 26px -14px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 26px 60px -26px rgba(0, 0, 0, 0.72), 0 8px 18px -10px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 18px 44px -18px rgba(0, 0, 0, 0.68), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* 原生控件跟随主题，日期选择器、滚动条、自动填充不再白底黑字。 */
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] select {
+  color-scheme: dark;
+}

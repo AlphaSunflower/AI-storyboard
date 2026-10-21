@@ -215,7 +215,7 @@ function FormBody({ items }: { items: unknown[] }) {
               style={{
                 width: '100%', boxSizing: 'border-box', padding: '4px 8px', fontSize: 12,
                 border: '1px solid var(--color-hairline)', borderRadius: 8,
-                background: 'white', color: 'var(--color-ink)',
+                background: 'var(--color-panel)', color: 'var(--color-ink)',
               }}
             />
           </div>

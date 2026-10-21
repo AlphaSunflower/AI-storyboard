@@ -102,7 +102,7 @@ export function RefineImageModal({
           style={{
             width: '100%', boxSizing: 'border-box', padding: '10px 12px',
             borderRadius: 8, border: '1px solid var(--color-hairline)',
-            background: 'white', color: 'var(--color-ink)', fontSize: 13,
+            background: 'var(--color-panel)', color: 'var(--color-ink)', fontSize: 13,
             outline: 'none', resize: 'vertical', fontFamily: 'inherit', marginBottom: 10,
           }}
         />

@@ -316,7 +316,9 @@ public class AgentScopeToolkitFactory {
                 String name = canvasTool.getToolDefinition().name();
                 if (!isCanvasRunTool(name)) continue;
                 if (toolkit.getTool(name) != null) toolkit.removeTool(name);
-                if (name.startsWith("canvas_graph_")) {
+                // 分组属于「结构」而不是「执行」：设计阶段搭完图就要分组，
+                // 因此它和 canvas_graph_* 一样同时进设计组与执行组。
+                if (name.startsWith("canvas_graph_") || "canvas_group_nodes".equals(name)) {
                     registerCanvasTool(toolkit, canvasTool, CANVAS_DESIGN_TOOLS);
                     registerCanvasTool(toolkit, canvasTool, CANVAS_RUN_TOOLS);
                 } else {
@@ -348,7 +350,9 @@ public class AgentScopeToolkitFactory {
     private static boolean canvasRunTool(String name) {
         return Set.of(
                 "canvas_execute_node", "canvas_execute_graph",
-                "canvas_get_execution", "canvas_cancel_execution")
+                "canvas_get_execution", "canvas_cancel_execution",
+                // 分组：执行入口只存在于分组，设计阶段与执行阶段都要能用
+                "canvas_group_nodes")
                 .contains(name);
     }
 

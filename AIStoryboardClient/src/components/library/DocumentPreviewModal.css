@@ -17,7 +17,7 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 12px;
-  background: #fff;
+  background: var(--color-paper);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
   cursor: default;
 }
@@ -68,7 +68,7 @@
   padding: 0 11px;
   border: 1px solid #dfe3e8;
   border-radius: 8px;
-  background: #fff;
+  background: var(--color-paper);
   color: #33383f;
   font-size: 12px;
   text-decoration: none;

@@ -1,0 +1,224 @@
+/* ============================================================================
+   /chat 首次对话：画布 / 编辑器 / 项目库 三个工作台入口
+   ----------------------------------------------------------------------------
+   只使用聊天页的语义 token（白底 + 蓝品牌 + 深色模式由 chat-theme.css 覆盖）。
+   三张卡是等价目的地，所以同尺寸同权重；层级靠图标、名称和一句说明，不靠色块。
+   ========================================================================== */
+
+.chat-entry-cards {
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.chat-entry-card {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 150px;
+  padding: 15px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  font: inherit;
+  color: var(--color-ink);
+  background: var(--color-panel);
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease,
+    flex-grow 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.chat-entry-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-entry-card__icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-panel));
+  transition: background-color 180ms ease;
+}
+
+.chat-entry-card__arrow {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted-soft);
+  opacity: 0.6;
+  transition:
+    color 180ms ease,
+    opacity 180ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.chat-entry-card__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.chat-entry-card__title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.chat-entry-card__desc {
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--color-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 触屏设备没有 hover，避免点按后留下悬停态。 */
+@media (hover: hover) {
+  .chat-entry-card:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-hairline));
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-2px);
+  }
+
+  .chat-entry-card:not(:disabled):hover .chat-entry-card__icon {
+    background: color-mix(in srgb, var(--color-primary) 13%, var(--color-panel));
+  }
+
+  .chat-entry-card:not(:disabled):hover .chat-entry-card__arrow {
+    color: var(--color-primary);
+    opacity: 1;
+    transform: translate(2px, -2px);
+  }
+}
+
+/* 极矮的桌面窗口：三个方块占位后，隐藏大球给输入卡让出空间，品牌字标仍然保留。 */
+@media (max-height: 640px) and (min-width: 768px) {
+  .chat-hero-orb {
+    display: none;
+  }
+}
+
+/* 悬停手风琴：指针所在卡撑开，另外两栏被挤窄；说明文字随宽度收成省略号。 */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .chat-entry-cards:not(.chat-entry-cards--compact):hover > .chat-entry-card {
+    flex-grow: 0.76;
+  }
+
+  .chat-entry-cards:not(.chat-entry-cards--compact) > .chat-entry-card:not(:disabled):hover {
+    flex-grow: 1.48;
+  }
+
+  /* 键盘 Tab 到某张卡时给同样的展开，不让手风琴只服务鼠标；指针在容器上时以 hover 为准。 */
+  .chat-entry-cards:not(.chat-entry-cards--compact):not(:hover):focus-within > .chat-entry-card {
+    flex-grow: 0.76;
+  }
+
+  .chat-entry-cards:not(.chat-entry-cards--compact):not(:hover) > .chat-entry-card:focus-visible {
+    flex-grow: 1.48;
+  }
+}
+
+.chat-entry-card:active {
+  transform: translateY(0) scale(0.995);
+}
+
+.chat-entry-card:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.chat-entry-card:disabled {
+  cursor: default;
+  color: var(--color-muted);
+  background: var(--color-surface-soft);
+  border-color: var(--color-hairline-soft);
+}
+
+.chat-entry-card:disabled .chat-entry-card__icon {
+  color: var(--color-muted);
+  background: color-mix(in srgb, var(--color-ink) 5%, var(--color-panel));
+}
+
+.chat-entry-card:disabled .chat-entry-card__arrow {
+  display: none;
+}
+
+/* 手机端：三列小卡，只保留图标和名称，避免空态被三行说明撑高。 */
+.chat-entry-cards--compact {
+  gap: 8px;
+}
+
+.chat-entry-cards--compact .chat-entry-card {
+  min-height: 72px;
+  padding: 10px;
+  gap: 6px;
+  justify-content: flex-start;
+  border-radius: 10px;
+}
+
+.chat-entry-cards--compact .chat-entry-card__icon {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 8px;
+}
+
+.chat-entry-cards--compact .chat-entry-card__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.chat-entry-cards--compact .chat-entry-card__arrow,
+.chat-entry-cards--compact .chat-entry-card__desc {
+  display: none;
+}
+
+.chat-entry-cards--compact .chat-entry-card__title {
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-entry-card {
+    transition: border-color 120ms ease, background-color 120ms ease;
+  }
+
+  .chat-entry-card:hover,
+  .chat-entry-card:active {
+    transform: none;
+  }
+
+  .chat-entry-card__arrow {
+    transition: none;
+  }
+}

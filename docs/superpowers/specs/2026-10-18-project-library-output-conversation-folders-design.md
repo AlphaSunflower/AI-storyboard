@@ -170,6 +170,9 @@ GET /api/library/group-insights?projectId=...
 - `library_assets` 增加 `rating (0–5)`、`flag (pick/reject)`、`color_label`；
 - `POST /api/library/assets/{id}/mark` 与 `POST /api/library/assets/bulk/mark` 整组覆盖三项标记，
   空值即清除；`rating` 夹在 0–5，旗标/色标做白名单校验；
+- 挑片标记**不递增 `version`**：版本号只随名称/描述/媒体等真正的内容修订递增。标记是
+  即时保存的 last-write-wins 标注，连续点星不应把卡片上的 v 号刷高，也不应让正在编辑的
+  `expectedVersion` 被标记判成过期（回归：`LibraryRepositoryReferenceSqlTest`）；
 - 素材列表、产出对话聚合都支持 `minRating / flag / colorLabel` 过滤；
 - 前端筛选栏加评分/旗标/色标三个下拉；素材卡右上角显示色标、旗标和星级；
   检查器提供 5 星、已选/弃用、五色色标编辑。

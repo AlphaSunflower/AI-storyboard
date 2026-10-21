@@ -119,7 +119,7 @@ describe('MessageBubble project library import', () => {
     );
   });
 
-  it('renders exact token and duration metrics for completed assistant messages', () => {
+  it('renders exact token and duration metrics for completed assistant messages', async () => {
     render(
       <MessageBubble
         role="assistant"
@@ -139,13 +139,16 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
-    expect(screen.getByText('1,234 tokens')).toBeTruthy();
-    expect(screen.getByText('8.4s').parentElement?.getAttribute('title')).toContain(
-      '输入 1,000 · 输出 234 · 缓存 120',
-    );
+    // 用量/耗时是「审计」信息，首帧之后空闲才挂
+    await waitFor(() => {
+      expect(screen.getByText('1,234 tokens')).toBeTruthy();
+      expect(screen.getByText('8.4s').parentElement?.getAttribute('title')).toContain(
+        '输入 1,000 · 输出 234 · 缓存 120',
+      );
+    });
   });
 
-  it('renders a persistent canvas run card from message metadata', () => {
+  it('renders a persistent canvas run card from message metadata', async () => {
     render(
       <MessageBubble
         role="assistant"
@@ -163,11 +166,14 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
-    expect(screen.getByText('雪茄房转场画布')).toBeTruthy();
-    expect(screen.getByText('12 节点 · 13 连线')).toBeTruthy();
+    // 画布卡片属于「重内容」，首帧延迟挂载，等内容空闲后再断言
+    await waitFor(() => {
+      expect(screen.getByText('雪茄房转场画布')).toBeTruthy();
+      expect(screen.getByText('12 节点 · 13 连线')).toBeTruthy();
+    });
   });
 
-  it('marks partial usage as a lower bound', () => {
+  it('marks partial usage as a lower bound', async () => {
     render(
       <MessageBubble
         role="assistant"
@@ -187,11 +193,13 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
-    expect(screen.getByText('≥ 100 tokens').parentElement?.getAttribute('title'))
-      .toContain('部分模型未返回用量');
+    await waitFor(() => {
+      expect(screen.getByText('≥ 100 tokens').parentElement?.getAttribute('title'))
+        .toContain('部分模型未返回用量');
+    });
   });
 
-  it('renders duration without token text when usage is unavailable', () => {
+  it('renders duration without token text when usage is unavailable', async () => {
     render(
       <MessageBubble
         role="assistant"
@@ -211,8 +219,10 @@ describe('MessageBubble project library import', () => {
       />,
     );
 
+    await waitFor(() => {
+      expect(screen.getByText('350ms')).toBeTruthy();
+    });
     expect(screen.queryByText(/tokens/)).toBeNull();
-    expect(screen.getByText('350ms')).toBeTruthy();
   });
 
   it('renders markdown tables with dedicated chat styling', () => {
@@ -560,7 +570,7 @@ describe('MessageBubble 工具输出与渲染意图', () => {
     useAgentStore.setState({ activeConversationId: null, generating: {}, messages: [], streaming: false });
   });
 
-  it('重放路径（metadata.toolDrafts）也能看到工具输出', () => {
+  it('重放路径（metadata.toolDrafts）也能看到工具输出', async () => {
     render(
       <MessageBubble
         messageId="m-tool-replay"
@@ -582,9 +592,12 @@ describe('MessageBubble 工具输出与渲染意图', () => {
       />,
     );
 
-    expect(screen.getByText('工具调用（1）')).toBeDefined();
-    expect(screen.getByText('run_python_script')).toBeDefined();
-    expect(screen.getByText('已完成')).toBeDefined();
+    // 工具调用块首帧延迟挂载
+    await waitFor(() => {
+      expect(screen.getByText('工具调用（1）')).toBeDefined();
+      expect(screen.getByText('run_python_script')).toBeDefined();
+      expect(screen.getByText('已完成')).toBeDefined();
+    });
   });
 
   it('直播路径读 generating.toolDrafts，与重放共用同一渲染', () => {
@@ -630,7 +643,7 @@ describe('MessageBubble 工具输出与渲染意图', () => {
     expect(screen.getByText('执行中')).toBeDefined();
   });
 
-  it('metadata.renders 的未知 kind 走兜底卡片而不是崩溃', () => {
+  it('metadata.renders 的未知 kind 走兜底卡片而不是崩溃', async () => {
     render(
       <MessageBubble
         messageId="m-render"
@@ -644,9 +657,11 @@ describe('MessageBubble 工具输出与渲染意图', () => {
       />,
     );
 
-    expect(document.querySelector('[data-render-kind="timeline-future"]')).not.toBeNull();
-    expect(screen.getByText('通用展示')).toBeDefined();
-    expect(screen.getByText('未来块')).toBeDefined();
+    await waitFor(() => {
+      expect(document.querySelector('[data-render-kind="timeline-future"]')).not.toBeNull();
+      expect(screen.getByText('通用展示')).toBeDefined();
+      expect(screen.getByText('未来块')).toBeDefined();
+    });
   });
 
   it('空 formToken 的 HITL 卡片渲染为只读，动作按钮不可点击', () => {

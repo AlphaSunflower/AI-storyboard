@@ -65,6 +65,7 @@ public final class CanvasToolProgressCallback implements ToolCallback {
             case "canvas_pin_nodes" -> "正在固定节点";
             case "canvas_execute_node" -> "正在提交节点执行";
             case "canvas_execute_graph" -> "正在启动整张画布执行";
+            case "canvas_group_nodes" -> "正在把节点分成一组";
             case "canvas_get_execution" -> "正在读取执行进度";
             case "canvas_cancel_execution" -> "正在取消画布执行";
             case "canvas_image_crop" -> "正在裁剪图片";

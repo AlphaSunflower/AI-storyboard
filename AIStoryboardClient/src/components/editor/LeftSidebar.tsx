@@ -39,7 +39,7 @@ const sharedInputStyle: React.CSSProperties = {
   borderRadius: 'var(--rounded-md)',
   border: '1px solid var(--color-hairline)',
   fontSize: 13,
-  background: 'white',
+  background: 'var(--color-panel)',
   color: 'var(--color-ink)',
   outline: 'none',
 };
@@ -351,7 +351,7 @@ export function LeftSidebar() {
                   style={{
                     position: 'absolute', top: -5, right: -5,
                     width: 16, height: 16, padding: 0,
-                    background: 'var(--color-error)', color: 'white',
+                    background: 'var(--color-error)', color: 'var(--color-on-danger)',
                     border: '2px solid var(--color-canvas)',
                     borderRadius: '50%', fontSize: 10, lineHeight: 1,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -437,16 +437,16 @@ export function LeftSidebar() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: 'white', borderRadius: 'var(--rounded-md)',
+              background: 'var(--color-panel)', borderRadius: 'var(--rounded-md)',
               boxShadow: '0 8px 32px rgba(20, 20, 19, 0.18)', padding: 24, minWidth: 320, maxWidth: 400,
             }}
           >
             <h3 style={{ margin: '0 0 8px', font: 'var(--text-body)', color: 'var(--color-ink)' }}>项目已有 {scenes.length} 个分镜</h3>
             <p style={{ margin: '0 0 16px', font: 'var(--text-body-sm)', color: 'var(--color-muted)' }}>选择如何处理本次生成：</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary-active)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: 'none', background: 'var(--color-primary)', color: 'white', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
-              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-card)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-ink)', fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
-              <button onClick={() => setConfirmOverwrite(null)} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-card)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'white', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('overwrite'); }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary-active)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-primary)'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: 'none', background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 14, cursor: 'pointer' }}>覆盖更新（清空现有分镜）</button>
+              <button onClick={() => { setConfirmOverwrite(null); void doGenerate('append'); }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-card)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-panel)'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-panel)', color: 'var(--color-ink)', fontSize: 14, cursor: 'pointer' }}>追加到现有分镜</button>
+              <button onClick={() => setConfirmOverwrite(null)} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-card)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-panel)'; }} style={{ padding: '10px', borderRadius: 'var(--rounded-md)', border: '1px solid var(--color-hairline)', background: 'var(--color-panel)', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}>不生成（取消）</button>
             </div>
           </div>
         </div>

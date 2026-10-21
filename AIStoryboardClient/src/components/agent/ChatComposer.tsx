@@ -17,13 +17,13 @@ import {
   type ConversationAssetGroupBinding,
 } from '../../api/agent';
 import { useBusySendBehavior } from '../../stores/accountSettingsStore';
-import { EMPTY_QUEUE, MAX_QUEUED_SENDS, useSendQueueStore } from '../../stores/sendQueueStore';
+import { EMPTY_QUEUE, MAX_QUEUED_SENDS, useSendQueueStore, type QueuedSendItem } from '../../stores/sendQueueStore';
 import { SendQueuePanel } from './SendQueuePanel';
 import { FileText, Paperclip } from 'lucide-react';
 import {
   PlusCircle, Package, Trash2, ChevronUp, ChevronDown, Plus, X,
   Minimize2, Info, PanelRightOpen, Frame, MessagesSquare, ArrowUp,
-  FileUp, Library, Clapperboard,
+  FileUp, Library, Clapperboard, Presentation,
 } from 'lucide-react';
 import type { SceneResponse } from '../../api/projects';
 import { assetApi, type Asset, type AssetType, type SceneMaterialReferenceInput } from '../../api/assets';
@@ -58,11 +58,14 @@ import {
   libraryMediaReference,
   localFileReference,
   mentionRanges,
+  PPT_MASTER_HIGHLIGHT_REFERENCE,
+  PPT_MASTER_SKILL_TOKEN,
   parseConversationDragPayload,
   referenceQuotaExceeded,
   removeMentionSegment,
   resolveMentionQuery,
   sceneReference,
+  skillHighlightRanges,
 } from '../../lib/mentionReferences';
 import { ConversationStatusCard } from './ConversationStatusCard';
 import { matchMoonShortcut, MOON_COMPOSER_SHORTCUT_IDS, type MoonShortcutId } from '../../lib/moonShortcuts';
@@ -407,6 +410,30 @@ export function ChatComposer({
     || mentionRanges(text, pendingReferences).length > 0
   );
   const canSteerNow = canSteer && !steerBlocked;
+  /**
+   * 开发期诊断：输入框被禁用时，把「是谁把它按住」打出来。
+   * 之前只看到"切完会话打不了字"，得靠猜是 streaming / HITL / 画布绑定哪一个把 busy 置真。
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!readOnly && !(busy && !canSteer)) return;
+    console.warn('[composer] 输入框被禁用', {
+      readOnly,
+      archived,
+      legacyOrchestration,
+      busy,
+      canSteer,
+      streaming,
+      waitingHumanInput: !!waitingHumanInput,
+      waitingVideoPlan: !!waitingVideoPlan,
+      canvasBinding: !!canvasBinding,
+      canvasExitPending,
+      agentVideoTask: !!agentVideoTask,
+    });
+  }, [
+    agentVideoTask, archived, busy, canSteer, canvasBinding, canvasExitPending,
+    legacyOrchestration, readOnly, streaming, waitingHumanInput, waitingVideoPlan,
+  ]);
   const busySendBehavior = useBusySendBehavior();
   const queuedItems = useSendQueueStore((state) => (
     activeConversationId ? state.queues[activeConversationId] ?? EMPTY_QUEUE : EMPTY_QUEUE
@@ -611,8 +638,31 @@ export function ChatComposer({
 
   const slashItems: SlashCommandItem[] = [
     {
+      // 技能引用项：选中后才把 ppt-master 挂到本轮（后端按关键词/引用判断），
+      // 未引用时该技能不会出现在模型上下文，也不会占用会话沙箱目录。
+      id: 'ppt',
+      aliases: ['ppt', 'pptx', 'ppt-master'],
+      group: 'skill',
+      icon: <Presentation size={16} strokeWidth={2} />,
+      title: 'PPT 生成',
+      description: '引用 ppt-master 生成可编辑 PPTX（模板填充、美化、图片转 PPT）',
+      run: () => {
+        // 选中技能 = 在正文里插入一个技能标记（/ppt-master）并着技能色，
+        // 光标落在标记后的空格之后，用户可以直接继续写需求。
+        const prompt = `${PPT_MASTER_SKILL_TOKEN} `;
+        setText(prompt);
+        window.requestAnimationFrame(() => {
+          const input = inputRef.current;
+          if (!input) return;
+          input.focus();
+          input.setSelectionRange(prompt.length, prompt.length);
+        });
+      },
+    },
+    {
       id: 'compress',
       aliases: ['compact'],
+      group: 'tool',
       icon: <Minimize2 size={16} strokeWidth={2} />,
       title: '压缩上下文',
       description: '压缩此对话的上下文，保留最近若干轮',
@@ -626,6 +676,7 @@ export function ChatComposer({
       // 与「压缩上下文」的区别是这里不保留任何历史，也不只是标记删除。
       id: 'clear',
       aliases: ['clear', 'reset'],
+      group: 'tool',
       icon: <Trash2 size={16} strokeWidth={2} />,
       title: '清空上下文',
       description: '真删除此对话的全部上下文，清空后等同新对话（产出素材保留）',
@@ -637,6 +688,7 @@ export function ChatComposer({
     {
       id: 'status',
       aliases: ['status'],
+      group: 'tool',
       icon: <Info size={16} strokeWidth={2} />,
       title: '状态',
       description: statusSlashDescription,
@@ -646,6 +698,7 @@ export function ChatComposer({
     {
       id: 'side',
       aliases: ['side', 'branch'],
+      group: 'tool',
       icon: <PanelRightOpen size={16} strokeWidth={2} />,
       title: '侧边',
       description: '基于当前对话开启临时分支',
@@ -665,6 +718,7 @@ export function ChatComposer({
       // 画布子站：画布模式默认开启，通过 / 菜单显式进出（退出即回到普通 Moon 对话）
       id: canvasModeCommand?.active ? 'canvas-exit' : 'canvas-enter',
       aliases: canvasModeCommand?.active ? ['canvas-exit'] : ['canvas', 'canvas-enter'],
+      group: 'tool',
       icon: <Frame size={16} strokeWidth={2} />,
       title: canvasModeCommand?.active ? '退出画布模式' : '进入画布模式',
       description: canvasModeCommand?.active
@@ -836,7 +890,8 @@ export function ChatComposer({
 
   /** 正文里真正存在的引用区间（高亮与发送共用同一口径）。 */
   const activeRanges = useMemo(
-    () => mentionRanges(text, pendingReferences),
+    () => [...mentionRanges(text, pendingReferences), ...skillHighlightRanges(text)]
+      .sort((left, right) => left.start - right.start),
     [text, pendingReferences],
   );
 
@@ -933,6 +988,54 @@ export function ChatComposer({
     setPendingGroup(null);
     clearPickedAssetIds();
   };
+
+  /**
+   * 排队消息「插队发送」：不按队列顺序等下一轮，直接把这一条发出去。
+   *
+   * <p>当前正在生成时，按用户确认的口径**先停止当前回合并等它走到终态**，再发送这条
+   * （复用 `interruptAndSend`，避免抢跑撞会话锁）；附件/参考图/`@` 引用随队列快照一起带上。
+   * 等待确认卡片、画布绑定等不能安全打断的状态下只提示、不动队列。</p>
+   */
+  const handleQueuedSendNow = useCallback((item: QueuedSendItem) => {
+    if (readOnly) return;
+    const agentState = useAgentStore.getState();
+    if (agentState.activeConversationId !== item.conversationId) return;
+    if (agentState.waitingHumanInput || agentState.waitingVideoPlan
+      || agentState.canvasBinding || agentState.canvasExitPending) {
+      notify({
+        title: '现在不能插队发送',
+        description: '请先处理当前确认卡片或画布操作',
+        variant: 'info',
+      });
+      return;
+    }
+    const queue = useSendQueueStore.getState();
+    const index = queue.queues[item.conversationId]?.findIndex((entry) => entry.id === item.id) ?? -1;
+    if (index < 0) return;
+    const generating = agentState.streaming && !agentState.agentVideoTask;
+    if (generating && !window.confirm('插队发送会先停止当前回复，确定现在发送这条消息吗？')) return;
+    const taken = queue.take(item.conversationId, item.id);
+    if (!taken) return;
+    if (!generating) {
+      void agentState.sendMessage(item.content, item.opts);
+      return;
+    }
+    // 打断期间暂缓自动出队：否则旧回合刚收尾，SendQueueRunner 会抢先把队首发出去。
+    queue.holdQueue(item.conversationId);
+    void agentState.interruptAndSend(item.content, item.opts).then((sent) => {
+      useSendQueueStore.getState().releaseQueue(item.conversationId);
+      if (sent) return;
+      useSendQueueStore.getState().restore(taken, index);
+      notify({
+        title: '插队发送未生效',
+        description: '当前回合还没停下来，消息已放回队列',
+        variant: 'error',
+      });
+    }).catch(() => {
+      useSendQueueStore.getState().releaseQueue(item.conversationId);
+      useSendQueueStore.getState().restore(taken, index);
+    });
+  }, [readOnly]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -1302,7 +1405,7 @@ export function ChatComposer({
       // 底色保持不透明（只做一点点暖调）。
       background: dropActive
         ? 'var(--color-primary-tint)'
-        : collapsed ? 'color-mix(in srgb, white 78%, transparent)' : 'white',
+        : collapsed ? 'color-mix(in srgb, var(--color-panel) 78%, transparent)' : 'var(--color-panel)',
       backdropFilter: collapsed ? 'blur(10px)' : undefined,
       WebkitBackdropFilter: collapsed ? 'blur(10px)' : undefined,
       boxShadow: dropActive
@@ -1380,7 +1483,10 @@ export function ChatComposer({
         </div>
       )}
       {!readOnly && hasSideChatSelections && <SideChatContextChip />}
-      <SendQueuePanel conversationId={activeConversationId} />
+      <SendQueuePanel
+        conversationId={activeConversationId}
+        onSendNow={readOnly ? undefined : handleQueuedSendNow}
+      />
       {(canvasEditContext?.mediaRefs.length || refImageUrls.length > 0 || pickedAssetIds.length > 0
         || pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0
         || fileAttachments.length > 0 || pendingGroup || boundGroups.length > 0) && (
@@ -1431,7 +1537,7 @@ export function ChatComposer({
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
               <button onClick={handleAssetOpen} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none',
-                background: 'white', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
+                background: 'var(--color-panel)', color: DS.textSecondary, fontSize: 13, fontWeight: 500,
                 padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
               }}>
                 <Package size={14} strokeWidth={2} style={{ color: DS.brand }} />
@@ -1442,7 +1548,7 @@ export function ChatComposer({
                   onClick={() => clearPickedAssetIds()}
                   aria-label="移除已选资产"
                   style={{
-                    border: 'none', background: 'white', color: DS.textSecondary,
+                    border: 'none', background: 'var(--color-panel)', color: DS.textSecondary,
                     cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '5px 6px', borderRadius: 8,
                   }}
                 >×</button>
@@ -1452,7 +1558,7 @@ export function ChatComposer({
           {pendingGroup && (
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '5px 8px', borderRadius: 8, background: 'white',
+              padding: '5px 8px', borderRadius: 8, background: 'var(--color-panel)',
               color: DS.brand, fontSize: 12,
             }}>
               <Package size={14} strokeWidth={2} />
@@ -1466,7 +1572,7 @@ export function ChatComposer({
           {boundGroups.map((binding) => (
             <span key={binding.groupId} style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '5px 8px', borderRadius: 8, background: 'white',
+              padding: '5px 8px', borderRadius: 8, background: 'var(--color-panel)',
               color: binding.stale ? 'var(--color-error)' : DS.brand, fontSize: 12,
               border: `1px solid ${binding.stale ? 'rgba(217,45,32,0.35)' : DS.border}`,
             }}>
@@ -1488,7 +1594,7 @@ export function ChatComposer({
           {(pickedReferenceVideos.length > 0 || pickedReferenceAudios.length > 0) && (
             <span style={{
               display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '5px 8px', borderRadius: 8, background: 'white',
+              padding: '5px 8px', borderRadius: 8, background: 'var(--color-panel)',
               color: DS.textSecondary, fontSize: 12,
             }}>
               参考视频 {pickedReferenceVideos.length} · 音频 {pickedReferenceAudios.length}
@@ -1503,7 +1609,7 @@ export function ChatComposer({
             return (
               <span key={`${attachment.url}-${index}`} style={{
                 display: 'inline-flex', alignItems: 'center', maxWidth: 238,
-                padding: '4px 5px 4px 8px', borderRadius: 8, background: 'white',
+                padding: '4px 5px 4px 8px', borderRadius: 8, background: 'var(--color-panel)',
                 border: `1px solid ${DS.border}`, color: DS.textSecondary, fontSize: 12,
               }}>
                 <button
@@ -1554,7 +1660,7 @@ export function ChatComposer({
               disabled={readOnly}
               style={{
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
-                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: readOnly ? 'not-allowed' : 'pointer',
+                background: 'var(--color-panel)', color: DS.textSecondary, fontSize: 12, cursor: readOnly ? 'not-allowed' : 'pointer',
                 opacity: readOnly ? 0.45 : 1,
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
@@ -1564,7 +1670,7 @@ export function ChatComposer({
               disabled={readOnly}
               style={{
                 padding: '5px 10px', borderRadius: 8, border: `1px solid ${DS.border}`,
-                background: 'white', color: DS.textSecondary, fontSize: 12, cursor: readOnly ? 'not-allowed' : 'pointer',
+                background: 'var(--color-panel)', color: DS.textSecondary, fontSize: 12, cursor: readOnly ? 'not-allowed' : 'pointer',
                 opacity: readOnly ? 0.45 : 1,
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
@@ -1666,7 +1772,9 @@ export function ChatComposer({
               const input = e.currentTarget;
               if (input.selectionStart === input.selectionEnd) {
                 const removed = removeMentionSegment(
-                  input.value, input.selectionStart ?? 0, pendingReferences,
+                  input.value,
+                  input.selectionStart ?? 0,
+                  [...pendingReferences, PPT_MASTER_HIGHLIGHT_REFERENCE],
                 );
                 if (removed) {
                   e.preventDefault();
@@ -1684,7 +1792,7 @@ export function ChatComposer({
             }
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
           }}
-          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : dragKind === 'conversation' ? '松开鼠标引用该对话' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令插入当前回合…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能 @ 添加资料'}
+          placeholder={readOnly ? '该会话仅可查看历史记录' : dropActive ? (dragKind === 'scene' ? '松开鼠标提交分镜审核' : dragKind === 'library' ? '松开鼠标添加项目库素材' : dragKind === 'asset' ? '松开鼠标加入参考素材' : dragKind === 'conversation' ? '松开鼠标引用该对话' : '松开鼠标上传素材') : canvasBinding ? '正在准备画布…' : canvasExitPending ? '本轮结束后离开画布编辑模式…' : waitingHumanInput || waitingVideoPlan ? '请先完成对话中的确认' : hasSideChatSelections ? '针对选中的文本提问…' : streaming ? '可输入新指令插入当前回合…' : pendingPicUrls.length > 0 ? '例如：把色调调暖一点、换成日系风格…' : '发消息或创建任务… / 使用技能与工具 @ 添加资料'}
           disabled={readOnly || (busy && !canSteer)}
           rows={collapsed ? 1 : 2}
           style={{
@@ -1749,7 +1857,6 @@ export function ChatComposer({
               onClick={attachLocked ? undefined : openMenu}
               disabled={attachLocked}
               aria-label="上传"
-              title="上传素材"
               className={`chat-plus-trigger${menuOpen ? ' is-open' : ''}`}
               onMouseEnter={(e) => { e.currentTarget.style.background = DS.hover; e.currentTarget.style.color = DS.brand; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = DS.textSecondary; }}
@@ -1766,7 +1873,7 @@ export function ChatComposer({
             {menuPresence.mounted && menuPos && createPortal(
               <div ref={menuRef} className={`chat-plus-menu${menuPresence.visible ? ' is-open' : ''}${menuPresence.closing ? ' is-closing' : ''}`} style={{
                 position: 'fixed', top: menuPos.top, left: menuPos.left,
-                background: 'white', border: `1px solid ${DS.border}`,
+                background: 'var(--color-panel)', border: `1px solid ${DS.border}`,
                 borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
                 padding: 4, zIndex: 1000, minWidth: 140,
               }}>
@@ -1802,14 +1909,14 @@ export function ChatComposer({
               style={{
                 height: 36, width: narrowRow ? 36 : undefined,
                 padding: narrowRow ? 0 : '0 18px', borderRadius: 8, border: 'none',
-                background: 'rgba(184, 67, 63, 0.92)', color: 'white', fontSize: 13, fontWeight: 600,
+                background: 'rgba(184, 67, 63, 0.92)', color: '#fff', fontSize: 13, fontWeight: 600,
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 flexShrink: 0,
                 transition: 'background 0.15s',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-error)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(184, 67, 63, 0.92)'; }}
-            ><span style={{ width: 9, height: 9, borderRadius: 2, background: 'white', display: 'inline-block' }} />{!narrowRow && '停止生成'}</button>
+            ><span style={{ width: 9, height: 9, borderRadius: 2, background: '#fff', display: 'inline-block' }} />{!narrowRow && '停止生成'}</button>
           ) : (
             <button
               onClick={handleSend}
@@ -1820,7 +1927,7 @@ export function ChatComposer({
                 height: 36, width: narrowRow ? 36 : undefined,
                 padding: narrowRow ? 0 : '0 18px', borderRadius: 8, border: 'none',
                 background: canSend ? DS.brand : 'var(--color-surface-cream-strong)',
-                color: canSend ? 'white' : 'var(--color-muted)',
+                color: canSend ? 'var(--color-on-primary)' : 'var(--color-muted)',
                 fontSize: 13, fontWeight: 600,
                 cursor: canSend ? 'pointer' : 'not-allowed',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -1879,7 +1986,7 @@ export function ChatComposer({
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}
           onClick={() => setRemoveModalOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{
-            width: 480, maxWidth: '92vw', background: 'white', borderRadius: 16, padding: 18,
+            width: 480, maxWidth: '92vw', background: 'var(--color-panel)', borderRadius: 16, padding: 18,
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 14,
           }}>
             <div style={{ fontSize: 15, fontWeight: 600 }}>指定移除参考图（共 {refImageUrls.length} 张）</div>
@@ -1924,7 +2031,7 @@ export function ChatComposer({
           <div
             onClick={(event) => event.stopPropagation()}
             style={{
-              width: 620, maxWidth: '92vw', maxHeight: '82vh', background: 'white', borderRadius: 16,
+              width: 620, maxWidth: '92vw', maxHeight: '82vh', background: 'var(--color-panel)', borderRadius: 16,
               padding: 18, boxShadow: '0 10px 36px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 14,
             }}
           >
@@ -1955,7 +2062,7 @@ export function ChatComposer({
                   ) : ref.kind === 'image' ? (
                     <img src={ref.url} alt={ref.name ?? `画布媒体 ${index + 1}`} style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
                   ) : (
-                    <span style={{ width: 64, height: 64, borderRadius: 10, flexShrink: 0, background: 'white', display: 'grid', placeItems: 'center', color: DS.textSecondary }}>
+                    <span style={{ width: 64, height: 64, borderRadius: 10, flexShrink: 0, background: 'var(--color-panel)', display: 'grid', placeItems: 'center', color: DS.textSecondary }}>
                       <Paperclip size={20} strokeWidth={1.8} />
                     </span>
                   )}
@@ -1972,13 +2079,13 @@ export function ChatComposer({
                       onClick={() => moveCanvasMediaRef(ref.url ?? '', -1)}
                       disabled={index === 0}
                       aria-label="上移"
-                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'white', color: DS.textSecondary, cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? 0.35 : 1 }}
+                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'var(--color-panel)', color: DS.textSecondary, cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? 0.35 : 1 }}
                     ><ChevronUp size={15} /></button>
                     <button
                       onClick={() => moveCanvasMediaRef(ref.url ?? '', 1)}
                       disabled={index === canvasEditContext.mediaRefs.length - 1}
                       aria-label="下移"
-                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'white', color: DS.textSecondary, cursor: index === canvasEditContext.mediaRefs.length - 1 ? 'not-allowed' : 'pointer', opacity: index === canvasEditContext.mediaRefs.length - 1 ? 0.35 : 1 }}
+                      style={{ width: 30, height: 30, border: 'none', borderRadius: 8, background: 'var(--color-panel)', color: DS.textSecondary, cursor: index === canvasEditContext.mediaRefs.length - 1 ? 'not-allowed' : 'pointer', opacity: index === canvasEditContext.mediaRefs.length - 1 ? 0.35 : 1 }}
                     ><ChevronDown size={15} /></button>
                     <button
                       onClick={() => removeCanvasMediaRef(ref.url)}
@@ -1994,12 +2101,12 @@ export function ChatComposer({
                 onClick={() => fileRef.current?.click()}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10,
-                  border: 'none', background: DS.brand, color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  border: 'none', background: DS.brand, color: 'var(--color-on-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
                 }}
               ><Plus size={15} strokeWidth={2.2} /> 重新加入图片或视频</button>
               <button
                 onClick={() => setCanvasMediaOpen(false)}
-                style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white', color: DS.textSecondary, fontSize: 13, cursor: 'pointer' }}
+                style={{ padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'var(--color-panel)', color: DS.textSecondary, fontSize: 13, cursor: 'pointer' }}
               >完成</button>
             </div>
           </div>
@@ -2012,7 +2119,7 @@ export function ChatComposer({
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300 }}
           onClick={closeUploadDrafts}>
           <div onClick={(e) => e.stopPropagation()} style={{
-            width: 520, maxWidth: '92vw', background: 'white', borderRadius: 16, padding: 18,
+            width: 520, maxWidth: '92vw', background: 'var(--color-panel)', borderRadius: 16, padding: 18,
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
           }}>
             <div style={{ fontSize: 15, fontWeight: 600 }}>上传附件 · 写清每个文件是干什么的</div>
@@ -2038,7 +2145,7 @@ export function ChatComposer({
                       placeholder="这个文件是干什么的？（可留空，图片会自动识别）"
                       style={{
                         width: '100%', border: `1px solid ${DS.border}`, borderRadius: 8, padding: '7px 10px',
-                        fontSize: 13, color: DS.ink, outline: 'none', background: 'white', boxSizing: 'border-box',
+                        fontSize: 13, color: DS.ink, outline: 'none', background: 'var(--color-panel)', boxSizing: 'border-box',
                       }}
                     />
                   </div>
@@ -2048,11 +2155,11 @@ export function ChatComposer({
             {uploadError && <div style={{ color: 'rgb(217, 45, 32)', fontSize: 13 }}>{uploadError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={closeUploadDrafts} style={{
-                padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',
+                padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'var(--color-panel)',
                 color: DS.textSecondary, fontSize: 14, cursor: 'pointer',
               }}>取消</button>
               <button onClick={handleUploadConfirm} style={{
-                padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
+                padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'var(--color-on-primary)',
                 fontSize: 14, cursor: 'pointer',
               }}>上传 {uploadDrafts.length} 个文件</button>
             </div>
@@ -2066,7 +2173,7 @@ export function ChatComposer({
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
           onClick={() => setAssetOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{
-            width: 420, maxWidth: '90vw', background: 'white', borderRadius: 16, padding: 18,
+            width: 420, maxWidth: '90vw', background: 'var(--color-panel)', borderRadius: 16, padding: 18,
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 12,
           }}>
             <div style={{ fontSize: 15, fontWeight: 600 }}>选择资产（可多选，再次点击取消）</div>
@@ -2078,7 +2185,7 @@ export function ChatComposer({
                     <button key={a.id} onClick={() => toggleAsset(a.id)} style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: 8, borderRadius: 12,
                       border: `1px solid ${assetSelected.has(a.id) ? DS.brand : DS.border}`,
-                      background: assetSelected.has(a.id) ? DS.hover : 'white', cursor: 'pointer', textAlign: 'left',
+                      background: assetSelected.has(a.id) ? DS.hover : 'var(--color-panel)', cursor: 'pointer', textAlign: 'left',
                     }}>
                       {a.images?.[0]
                         ? <img src={assetUrl(a.images[0].url)} style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
@@ -2094,11 +2201,11 @@ export function ChatComposer({
             {assetError && <div style={{ color: 'rgb(217,45,32)', fontSize: 13 }}>{assetError}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={() => setAssetOpen(false)} style={{
-                padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'white',
+                padding: '8px 16px', borderRadius: 10, border: `1px solid ${DS.border}`, background: 'var(--color-panel)',
                 color: DS.textSecondary, fontSize: 14, cursor: 'pointer',
               }}>取消</button>
               <button onClick={handleAssetConfirm} style={{
-                padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'white',
+                padding: '8px 16px', borderRadius: 10, border: 'none', background: DS.brand, color: 'var(--color-on-primary)',
                 fontSize: 14, cursor: 'pointer', opacity: 1,
               }}>确认选择{assetSelected.size ? `（${assetSelected.size}）` : ''}</button>
             </div>

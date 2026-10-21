@@ -157,7 +157,7 @@ export function ApprovalModeSelector({
               padding: 6,
               borderRadius: 14,
               border: '1px solid rgba(0,0,0,0.08)',
-              background: 'white',
+              background: 'var(--color-panel)',
               boxShadow: '0 12px 36px rgba(15,17,21,0.16)',
               zIndex: 1200,
             }}

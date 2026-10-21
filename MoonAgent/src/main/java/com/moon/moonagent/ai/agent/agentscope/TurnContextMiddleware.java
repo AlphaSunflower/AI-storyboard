@@ -226,11 +226,20 @@ final class TurnContextMiddleware implements MiddlewareBase {
                         + "\n</project-creative-context>");
             }
             if (memories != null) {
-                String memoryContext = memories.promptContext(
-                        runContext.conversation().getProjectId(), request.getContent(), 5);
-                if (!memoryContext.isBlank()) {
-                    lines.add("<project-memories>\n" + memoryContext
-                            + "\n</project-memories>");
+                String userId = runContext.conversation().getUserId();
+                // 总开关关闭时既不注入全局记忆也不注入项目记忆，避免“关了还在用”。
+                if (memories.enabled(userId)) {
+                    String globalMemory = memories.globalPromptContext(userId);
+                    if (!globalMemory.isBlank()) {
+                        lines.add("<global-memory>\n" + globalMemory
+                                + "\n</global-memory>");
+                    }
+                    String memoryContext = memories.promptContext(
+                            runContext.conversation().getProjectId(), request.getContent(), 5);
+                    if (!memoryContext.isBlank()) {
+                        lines.add("<project-memories>\n" + memoryContext
+                                + "\n</project-memories>");
+                    }
                 }
             }
         }

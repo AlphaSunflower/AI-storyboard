@@ -1,6 +1,7 @@
 import { apiFetch } from '../services/morrowApi';
 import { createId } from '../utils/id';
 import { executeToolCall } from './toolRegistry';
+import { markPendingGroupRun } from './pendingGroupRun';
 import type { BridgeSource, CanvasBridgeResponse } from './bridgeTypes';
 
 // 画布命令信箱（canvas 服务）：浏览器每 1s 轮询一次，领取 MCP 侧投递的命令并在页面内执行。
@@ -11,6 +12,11 @@ const BRIDGE_POLL_INTERVAL_MS = 1000;
 const BRIDGE_RETRY_INTERVAL_MS = 2000;
 const BRIDGE_HTTP_TIMEOUT_MS = 5_000;
 const BRIDGE_BROWSER_COMMAND_TIMEOUT_MS = 10 * 60_000;
+const RESYNC_TIMEOUT_MS = 8_000;
+
+// 这两类失败都只说明「浏览器这份图落后于服务端」：命令是拿本地图执行的，
+// 智能体刚在服务端建的节点/推进的 revision 本地还没有。重载一次再重试即可。
+const STALE_GRAPH_CODES = new Set(['NODE_NOT_FOUND', 'CANVAS_REVISION_CONFLICT']);
 
 export interface CanvasBridgeStatus {
   state: 'connecting' | 'ready' | 'error';
@@ -123,6 +129,30 @@ export function startCanvasBridge(
     }, BRIDGE_RETRY_INTERVAL_MS);
   };
 
+  /**
+   * 让宿主（App）整图重载到服务端最新状态，重载完成后再继续。
+   *
+   * <p>命令在浏览器里跑，用的是本地图；智能体刚在服务端建的节点本地还没有时，
+   * 直接执行只会报 `NODE_NOT_FOUND`。这里握手成功后重试一次，把这类"假报错"收掉。
+   */
+  const resyncCanvas = () => new Promise<void>((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+    let timer: number | null = null;
+    const done = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener('morrow:canvas-resynced', done);
+      resolve();
+    };
+    window.addEventListener('morrow:canvas-resynced', done);
+    timer = window.setTimeout(done, RESYNC_TIMEOUT_MS);
+    window.dispatchEvent(new CustomEvent('morrow:canvas-resync', {
+      detail: { projectId, canvasId, reason: 'bridge-command-stale-graph' },
+    }));
+  });
+
   const poll = async () => {
     if (stopped) return;
     try {
@@ -132,7 +162,7 @@ export function startCanvasBridge(
         const data = (await response.json()) as BridgePollResult;
         if (data.command) {
           const { requestId, method, params, source, dryRun, expectedRevision } = data.command;
-          const result = await executeCommand(
+          const run = () => executeCommand(
             requestId,
             method,
             params,
@@ -140,6 +170,19 @@ export function startCanvasBridge(
             dryRun ?? false,
             expectedRevision,
           );
+          let result = await run();
+          // 本地图落后：先对齐服务端，再重试一次同一条命令。
+          if (!result.ok && STALE_GRAPH_CODES.has(String(result.error?.code ?? ''))) {
+            console.info(`[canvas-bridge] ${method} 需要最新图（${result.error?.code}）→ 重载后重试`);
+            await resyncCanvas();
+            if (stopped) return;
+            result = await run();
+          }
+          // 执行类命令被服务端强制成预览：把预览里的分组记下来，
+          // 让分组标题条上的「执行」按钮变成高亮的「确认执行」。
+          if (result.ok && (method === 'canvas.graph.execute' || method === 'canvas.node.execute')) {
+            markPendingGroupRun(result.result);
+          }
           const bridgeResponse: CanvasBridgeResponse = {
             version: 1,
             id: requestId,

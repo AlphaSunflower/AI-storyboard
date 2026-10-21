@@ -145,36 +145,40 @@ export class HttpJobAdapter implements JobAdapter {
       'job.cancelled',
     ];
     const listeners: Array<readonly [JobEvent['type'], EventListener]> = [];
+    const close = () => {
+      disposed = true;
+      listeners.forEach(([type, handler]) => source?.removeEventListener(type, handler));
+      source?.close();
+      source = null;
+    };
+    const dispatch = (parsed: JobEvent | null) => {
+      if (!parsed) return;
+      listener(parsed);
+      // 终态帧之后服务端会关闭连接；不主动 close 的话 EventSource 会自动重连，
+      // 对已经结束的任务反复重放补发，形成重连风暴（并把后面的新任务挤出连接池）。
+      if (parsed.type === 'job.completed' || parsed.type === 'job.failed' || parsed.type === 'job.cancelled') close();
+    };
     void getStreamTicket(new URL(base, window.location.origin).pathname).then((ticket) => {
-      if (disposed || !ticket) {
-        if (!disposed) listener({ type: 'job.failed', jobId, message: '任务事件流鉴权失败' });
-        return;
-      }
+      // 拿不到 ticket 只意味着没有直播事件，**不等于任务失败**：
+      // 终态由事件重放与调用方的任务快照轮询兜底，绝不能在这里伪造 job.failed。
+      if (disposed || !ticket) return;
       source = new EventSource(`${base}?ticket=${encodeURIComponent(ticket)}`);
       eventTypes.forEach((type) => {
         const handler = (event: MessageEvent<string>) => {
-          const parsed = normalizeEvent(event.data, jobId, type, event.lastEventId);
-          if (parsed) listener(parsed);
+          dispatch(normalizeEvent(event.data, jobId, type, event.lastEventId));
         };
         source?.addEventListener(type, handler as EventListener);
         listeners.push([type, handler as EventListener]);
       });
       if (!source) return;
       source.onmessage = (event) => {
-        const parsed = normalizeEvent(event.data, jobId, undefined, event.lastEventId);
-        if (parsed) listener(parsed);
+        dispatch(normalizeEvent(event.data, jobId, undefined, event.lastEventId));
       };
-      source.onerror = () => {
-        if (source?.readyState === EventSource.CLOSED) {
-          listener({ type: 'job.failed', jobId, message: '任务事件流已断开' });
-        }
-      };
+      // 连接关闭/断开同样不等于任务失败：浏览器会自动重连（带 Last-Event-ID 补齐），
+      // 真的收不到终态时由调用方轮询 /jobs/{id} 收敛。以前这里发 job.failed，
+      // 会把「服务端正常关闭连接」误判成失败，直接把结果槽和下游节点全打成失败。
     });
-    return () => {
-      disposed = true;
-      listeners.forEach(([type, handler]) => source?.removeEventListener(type, handler));
-      source?.close();
-    };
+    return close;
   }
 
   async cancel(jobId: string) {

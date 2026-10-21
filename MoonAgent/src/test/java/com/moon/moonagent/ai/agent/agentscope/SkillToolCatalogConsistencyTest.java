@@ -23,7 +23,8 @@ class SkillToolCatalogConsistencyTest {
             "agent_list", "load_skill_through_path", "reset_equipped_tools");
 
     private static final List<String> SKILLS = List.of(
-            "storyboard", "image", "video", "canvas-design", "canvas-run", "general");
+            "storyboard", "image", "video", "canvas-design", "canvas-run", "general",
+            "ppt-master");
 
     @Test
     void everyToolNamedByASkillExistsInTheCatalog() throws IOException {

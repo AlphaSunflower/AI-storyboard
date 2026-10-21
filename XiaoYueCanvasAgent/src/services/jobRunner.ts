@@ -34,6 +34,21 @@ const eventNumber = (eventId?: string) => {
 
 const terminalStatuses = new Set<GenerationRecord['status']>(['completed', 'failed', 'cancelled', 'interrupted']);
 
+/**
+ * 生成节点的自动化阶段补丁。
+ *
+ * <p>分组标题条的执行进度只看节点的 `data.automation.phase`。以前这个字段只由画布图执行器维护，
+ * 于是在节点上手动点生成（或单节点重跑）成功后，节点其实已经出图，分组却还挂着「失败 1/5」。
+ * 这里让所有生成入口（节点按钮 / 批量 / 分组）都维护同一份阶段。
+ */
+const nodePhasePatch = (nodeId: string, phase: string, error?: string) => {
+  const node = useCanvasStore.getState().nodes.find((candidate) => candidate.id === nodeId);
+  const automation = typeof node?.data.automation === 'object' && node.data.automation
+    ? node.data.automation as Record<string, unknown>
+    : {};
+  return { automation: { ...automation, phase, error } };
+};
+
 const markUnfilledResultSlots = (
   record: GenerationRecord,
   phase: 'blocked' | 'failed',
@@ -69,7 +84,11 @@ export async function cancelCanvasGeneration(recordId: string) {
     completedAt: Date.now(),
   };
   useCanvasStore.getState().updateGenerationRecord(cancelled);
-  useCanvasStore.getState().updateNode(record.producerNodeId, { isGenerating: false, progressPercent: 0 });
+  useCanvasStore.getState().updateNode(record.producerNodeId, {
+    isGenerating: false,
+    progressPercent: 0,
+    ...nodePhasePatch(record.producerNodeId, 'idle'),
+  });
   if (queueItem) {
     await putGenerationQueueItem({
       ...queueItem,
@@ -371,13 +390,89 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
   }
 
   useAgentStore.getState().putJob(projectId, { id: jobId, prompt: trimmed.slice(0, 24), sourceNodeId: targetNodeId, capabilityId: effectiveCapabilityId, status: 'queued', progress: 0, createdAt: Date.now() });
+  // 事件流只保证「尽力而为」：SSE 可能中途静默断掉（实测一个 12 条事件的 job 只收到前 8 条），
+  // 终态帧丢了以后 onTerminal 永远不会触发——画布图执行会一直等这个 Promise，
+  // 串行分组（maxParallel=1）就卡在第一个节点。轮询 /jobs/{id} 兜底，终态一定收敛且只通知一次。
+  let terminalNotified = false;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const stopWatchdog = () => {
+    if (watchdog !== null) {
+      clearInterval(watchdog);
+      watchdog = null;
+    }
+  };
   const notifyTerminal = (status: GenerationTerminalOutcome['status'], error?: string) => {
+    if (terminalNotified) return;
+    terminalNotified = true;
+    stopWatchdog();
     opts.onTerminal?.({
       status,
       jobId,
       recordId: useCanvasStore.getState().generationRecords.find((record) => record.jobId === jobId)?.id ?? generationRecord.id,
       error,
     });
+  };
+  const startWatchdog = () => {
+    if (watchdog !== null || typeof window === 'undefined') return;
+    let polling = false;
+    watchdog = setInterval(() => {
+      if (terminalNotified || polling) return;
+      const getJob = jobAdapter.getJob;
+      if (!getJob) return;
+      polling = true;
+      void getJob.call(jobAdapter, jobId)
+        .then((snapshot) => {
+          if (terminalNotified) return;
+          if (snapshot.status === 'completed') {
+            useCanvasStore.getState().updateNode(targetNodeId, {
+              isGenerating: false,
+              progressPercent: 0,
+              ...nodePhasePatch(targetNodeId, 'done'),
+            });
+            useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
+            const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id);
+            if (current && !terminalStatuses.has(current.status)) {
+              useCanvasStore.getState().updateGenerationRecord({
+                ...current,
+                status: 'completed',
+                queueStatus: 'terminal',
+                progress: 1,
+                completedAt: current.completedAt ?? Date.now(),
+              });
+            }
+            releaseExecutionSlot();
+            persistQueue('terminal', jobId);
+            notifyTerminal('succeeded');
+            return;
+          }
+          if (snapshot.status === 'cancelled' || snapshot.status === 'failed' || snapshot.status === 'interrupted') {
+            const message = snapshot.error
+              ?? (snapshot.status === 'cancelled' ? '任务已取消' : '任务执行失败');
+            useCanvasStore.getState().updateNode(targetNodeId, {
+              isGenerating: false,
+              progressPercent: 0,
+              ...nodePhasePatch(targetNodeId, snapshot.status === 'cancelled' ? 'idle' : 'failed', message),
+            });
+            useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' });
+            const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id);
+            if (current && !terminalStatuses.has(current.status)) {
+              markUnfilledResultSlots(current, 'failed', message);
+              useCanvasStore.getState().updateGenerationRecord({
+                ...current,
+                status: snapshot.status === 'cancelled' ? 'cancelled' : 'failed',
+                queueStatus: snapshot.status === 'cancelled' ? 'cancelled' : 'interrupted',
+                error: message,
+                completedAt: Date.now(),
+              });
+            }
+            releaseExecutionSlot();
+            persistQueue('interrupted', jobId, message);
+            notifyTerminal(snapshot.status === 'cancelled' ? 'cancelled' : 'failed', message);
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => { polling = false; });
+    }, 4000);
   };
   if (isMaterializedResult) {
     useCanvasStore.getState().updateGenerationRecord({
@@ -390,7 +485,12 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
     persistQueue('running', jobId);
   }
   // 立即置生成态（不依赖 job.started 事件顺序），completed/failed/asset.created 时复位
-  useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: true, generationStartedAt: Date.now(), progressPercent: 0 });
+  useCanvasStore.getState().updateNode(targetNodeId, {
+    isGenerating: true,
+    generationStartedAt: Date.now(),
+    progressPercent: 0,
+    ...nodePhasePatch(targetNodeId, 'running'),
+  });
 
   const seenAssets = new Set<string>();
   let assetQueue = Promise.resolve();
@@ -451,8 +551,16 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
         });
       }
     } else if (event.type === 'job.failed') {
+      // 迟到的失败事件不能覆盖已经完成的结果（典型：终态后 EventSource 断线，被误判成失败，
+      // 结果槽和下游节点会被全部打成失败——用户看到「分组跑一半就失败/卡住」）。
+      const settled = useCanvasStore.getState().generationRecords.find((record) => record.jobId === jobId);
+      if (settled?.status === 'completed') return;
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'failed' });
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'failed', event.message),
+      });
       onFeedback(event.message);
       if (isMaterializedResult) {
         const currentRecord = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
@@ -473,7 +581,11 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       useAgentStore.getState().updateJob(projectId, jobId, { status: 'completed', progress: 1 });
       // 兜底清生成态：正常由 asset.created 清，但 materializeGeneration 慢/挂起时 job.completed 可能先到，
       // 不处理会让节点永久卡"生成中 95%"。失败已由 job.failed 清。
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'done'),
+      });
       if (isMaterializedResult) {
         const currentRecord = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
         void assetQueue.finally(() => {
@@ -508,11 +620,17 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
       }
       releaseExecutionSlot();
       persistQueue('terminal', jobId);
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'idle'),
+      });
       notifyTerminal('cancelled', '任务已取消');
     }
   });
   // 取消/解绑：subscribe 返回的 unsubscribe 在提交后不再需要 ref（当前无取消入口）。
   // 修复：原在 string jobId 上挂 __unsub 属性（strict 下抛 TypeError），死代码，已删。
+  startWatchdog();
   return jobId;
 };
 
@@ -520,6 +638,27 @@ const submitGen = async (text: string, targetNodeId: string, onFeedback: (messag
 export const submitImageGeneration = async (prompt: string, targetNodeId: string, onFeedback: (message: string) => void, opts: GenSubmitOpts = {}) => {
   if (!prompt.trim()) throw new Error('请输入生图提示词');
   return submitGen(prompt, targetNodeId, onFeedback, 'image.generate', opts);
+};
+
+/**
+ * 图生图（整图编辑，无区域掩码）：把参考图交给网关按 edit 处理。
+ *
+ * <p>「区域重绘」需要一份掩码文档（由图片节点的重绘编辑器生成）。直接新建的图生图节点、
+ * 或者分组自动执行时并没有这份数据。这时不能把用户拒回另一个节点「重新发起」——那等于
+ * 白白再花一次生成费用；正确行为是在同一个节点按整图编辑继续跑。
+ */
+export const submitImageEdit = async (
+  prompt: string,
+  targetNodeId: string,
+  onFeedback: (message: string) => void,
+  opts: GenSubmitOpts = {},
+) => {
+  if (!prompt.trim()) throw new Error('请输入图生图提示词');
+  return submitGen(prompt, targetNodeId, onFeedback, 'image.redraw', {
+    ...opts,
+    capabilityId: 'image.redraw',
+    params: { ...(opts.params ?? {}), actionId: 'generate', mode: 'image-to-image' },
+  });
 };
 
 export const submitImageRedraw = async (
@@ -784,6 +923,7 @@ export const submitScriptDrafting = async (
     isGenerating: true,
     generationStartedAt: Date.now(),
     progressPercent: 0,
+    ...nodePhasePatch(targetNodeId, 'running'),
   });
   persistQueue('running', jobId);
 
@@ -801,7 +941,11 @@ export const submitScriptDrafting = async (
         error: event.message,
         completedAt: Date.now(),
       });
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'failed', event.message),
+      });
       persistQueue('interrupted', jobId, event.message);
       opts.onTerminal?.({ status: 'failed', jobId, recordId: generationRecord.id, error: event.message });
     } else if (event.type === 'job.completed') {
@@ -815,7 +959,11 @@ export const submitScriptDrafting = async (
         materializationStatus: current.materializationStatus === 'materializing' ? 'materializing' : 'completed',
         completedAt: Date.now(),
       });
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'done'),
+      });
       persistQueue('terminal', jobId);
       opts.onTerminal?.({ status: 'succeeded', jobId, recordId: generationRecord.id });
     } else if (event.type === 'job.progress') {
@@ -878,7 +1026,11 @@ export const submitScriptDrafting = async (
         materializationError: '任务已取消',
         completedAt: Date.now(),
       });
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'idle'),
+      });
       persistQueue('terminal', jobId);
       opts.onTerminal?.({ status: 'cancelled', jobId, recordId: generationRecord.id, error: '任务已取消' });
     }
@@ -937,6 +1089,7 @@ export const submitStoryboardFinalize = async (
     isGenerating: true,
     generationStartedAt: Date.now(),
     progressPercent: 0,
+    ...nodePhasePatch(targetNodeId, 'running'),
   });
   useAgentStore.getState().putJob(projectId, {
     id: jobId,
@@ -968,7 +1121,11 @@ export const submitStoryboardFinalize = async (
       });
     } else if (event.type === 'job.failed') {
       onFeedback(event.message);
-      useCanvasStore.getState().updateNode(targetNodeId, { productionStage: 'FAILED', isGenerating: false });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        productionStage: 'FAILED',
+        isGenerating: false,
+        ...nodePhasePatch(targetNodeId, 'failed', event.message),
+      });
     } else if (event.type === 'job.completed') {
       const current = useCanvasStore.getState().generationRecords.find((record) => record.id === generationRecord.id) ?? generationRecord;
       useCanvasStore.getState().updateGenerationRecord({
@@ -979,9 +1136,17 @@ export const submitStoryboardFinalize = async (
         materializationStatus: 'completed',
         completedAt: Date.now(),
       });
-      useCanvasStore.getState().updateNode(targetNodeId, { isGenerating: false, progressPercent: 0 });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        isGenerating: false,
+        progressPercent: 0,
+        ...nodePhasePatch(targetNodeId, 'done'),
+      });
     } else if (event.type === 'job.cancelled') {
-      useCanvasStore.getState().updateNode(targetNodeId, { productionStage: 'CANCELLED', isGenerating: false });
+      useCanvasStore.getState().updateNode(targetNodeId, {
+        productionStage: 'CANCELLED',
+        isGenerating: false,
+        ...nodePhasePatch(targetNodeId, 'idle'),
+      });
     }
   });
   return jobId;

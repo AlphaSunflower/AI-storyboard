@@ -146,6 +146,24 @@ describe('canvas groups', () => {
     expect(groupResultAssetIds(nodes)).toEqual(['asset-run', 'asset-fail', 'asset-done', 'asset-idle']);
   });
 
+  it('有产出的节点算完成，即使阶段停在上一次失败', () => {
+    const producer = (id: string, patch: Record<string, unknown>): CanvasNode => ({
+      ...node(id, 0, 0),
+      data: { ...node(id, 0, 0).data, kind: 'imageGeneration', ...patch },
+    });
+    const nodes = [
+      producer('stale-failed', { automation: { phase: 'blocked' } }),
+      producer('running', { automation: { phase: 'running' } }),
+    ];
+
+    // 不给回调时维持原判定
+    expect(groupExecutionProgress(nodes)).toEqual({ total: 2, active: 1, done: 0, failed: 1 });
+    // 结果已经落地 → 算完成，标题条不再显示「失败 1/2」
+    expect(groupExecutionProgress(nodes, {
+      hasProducedResult: (candidate) => candidate.id === 'stale-failed',
+    })).toEqual({ total: 2, active: 1, done: 1, failed: 0 });
+  });
+
   it('returns null for an empty group and picks the next free default title', () => {
     expect(groupFrameBounds([])).toBeNull();
     expect(nextGroupTitle([node('a', 0, 0, { id: 'g1', title: '分组 1' }), node('b', 0, 0, { id: 'g2', title: '分组 3' })]))

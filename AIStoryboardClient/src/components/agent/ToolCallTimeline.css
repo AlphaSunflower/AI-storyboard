@@ -73,22 +73,36 @@
   box-shadow: 0 0 0 3px var(--tc-dot-halo);
 }
 
-.tool-node[data-tone='running'] .tool-node__dot {
+/**
+ * 运行中的呼吸环：用伪元素做 transform/opacity 动画。
+ *
+ * <p>原来直接在圆点上报 `box-shadow` 关键帧——阴影不是合成属性，每帧都要重绘，
+ * 几个"进行中"的工具同时呼吸时整块面板一直在 paint，明细动画就发涩。
+ * 现在圆点本身不动，只让一个环形伪元素缩放淡出。
+ */
+.tool-node__dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--tc-dot-pulse);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tool-node[data-tone='running'] .tool-node__dot::after {
   animation: tool-node-breathe 1.7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-/* 呼吸环从白光晕外沿（4px）扩到 10px 并淡出，避免和 3px 光晕叠在同一圈上 */
 @keyframes tool-node-breathe {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 3px var(--tc-dot-halo),
-      0 0 0 4px var(--tc-dot-pulse);
+  0% {
+    transform: scale(0.7);
+    opacity: 0.9;
   }
-  50% {
-    box-shadow:
-      0 0 0 3px var(--tc-dot-halo),
-      0 0 0 10px transparent;
+
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
   }
 }
 

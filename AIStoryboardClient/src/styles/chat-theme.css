@@ -42,6 +42,46 @@ body:has(.chat-page-shell) {
   color-scheme: light;
 }
 
+/* 夜间：冷灰蓝品牌，和编辑器暖褐区分，但同样是低亮度而非纯黑。 */
+:root[data-theme='dark'] .chat-page-shell,
+:root[data-theme='dark'] body:has(.chat-page-shell) {
+  --color-primary: #8fa2ff;
+  --color-primary-active: #aebcff;
+  --color-primary-soft: #1d2540;
+  --color-primary-tint: #171d30;
+  --color-primary-disabled: #313641;
+  --color-on-primary: #101425;
+
+  --color-ink: #eef1f6;
+  --color-body: #c2c7d2;
+  --color-body-strong: #e4e8f0;
+  --color-muted: #9aa2af;
+  --color-muted-soft: #858d99;
+
+  --color-hairline: #2b303a;
+  --color-hairline-soft: #242832;
+  --color-hairline-strong: #3b414d;
+
+  --color-bg: #0f1115;
+  --color-canvas: #111318;
+  --color-surface: #161920;
+  --color-surface-soft: #1c2028;
+  --color-surface-subtle: #191d24;
+  --color-surface-card: #222731;
+  --color-surface-cream-strong: #2c323d;
+  --color-panel: #191c23;
+
+  --color-success: #4ecb8d;
+  --color-warning: #e7a94f;
+  --color-error: #ef8079;
+  --color-info: #9fb6c4;
+  --color-focus-ring: rgba(143, 162, 255, 0.52);
+  --color-scrollbar: #373d48;
+  --color-scrollbar-hover: #4a515e;
+
+  color-scheme: dark;
+}
+
 /* 聊天页内的滚动条用冷灰，不跟暖色编辑器的米色。 */
 .chat-page-shell * {
   scrollbar-color: #d5d8de transparent;
@@ -55,9 +95,26 @@ body:has(.chat-page-shell) {
   background-color: #bcc1ca;
 }
 
+:root[data-theme='dark'] .chat-page-shell * {
+  scrollbar-color: #373d48 transparent;
+}
+
+:root[data-theme='dark'] .chat-page-shell *::-webkit-scrollbar-thumb {
+  background-color: #373d48;
+}
+
+:root[data-theme='dark'] .chat-page-shell *::-webkit-scrollbar-thumb:hover {
+  background-color: #4a515e;
+}
+
 /* 选区高亮：蓝底，和 DeepSeek 一致。 */
 .chat-page-shell ::selection {
   background: rgba(77, 107, 254, 0.2);
+  color: var(--color-ink);
+}
+
+:root[data-theme='dark'] .chat-page-shell ::selection {
+  background: rgba(143, 162, 255, 0.28);
   color: var(--color-ink);
 }
 

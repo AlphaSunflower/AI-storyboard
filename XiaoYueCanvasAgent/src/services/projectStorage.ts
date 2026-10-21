@@ -6,6 +6,7 @@ import { createId } from '../utils/id';
 import { ApiRequestError, apiJson } from './morrowApi';
 import { migrateCanvasGraphV1ToV2 } from '../canvas/graphMigration';
 import { mergedGenerationKind } from '../canvas/generationModes';
+import { mergeCanvasGraph } from '../canvas/graphMerge';
 import type { GenerationQueueItem } from '../canvas/generationQueue';
 
 // Use a new versioned namespace instead of attempting to migrate the former demo prototype.
@@ -535,7 +536,6 @@ function normalizeCanvasGraph(canvas: CanvasDocumentV1): CanvasDocumentV1 {
 }
 
 export async function saveCanvas(canvas: CanvasDocumentV1): Promise<CanvasDocumentV1> {
-  const now = nowMs();
   const baseRevision = canvas.revision ?? 0;
   // 标题走后端元数据（失败不阻断图入库）
   await apiJson(`/canvases/${encodeURIComponent(canvas.id)}`, { method: 'PATCH', body: JSON.stringify({ title: canvas.title }) }).catch(() => undefined);
@@ -543,15 +543,53 @@ export async function saveCanvas(canvas: CanvasDocumentV1): Promise<CanvasDocume
     return await putCanvasGraph(canvas, baseRevision);
   } catch (error) {
     if (!isRevisionConflict(error)) throw error;
-    // 40901：服务端 revision 已被智能体/他人推进。以**本地意图为准**重试一次
-    // （last-writer-wins）：拿服务端最新 revision 当 baseRevision 再 PUT 同一份本地图。
-    //   - 只重试一次，避免与正在写入的智能体形成活锁；
-    //   - 冲突窗口内智能体刚写、而补丁还没到本地的节点，会在这次覆盖中丢失；
-    //     调用方（App）以“服务端补丁随后到达即应用”收口，用户本地编辑优先不丢（见 WS3 契约）。
-    // 仍冲突 → 继续抛给调用方：UI 明确提示 + 暂停轮询覆盖，等下一次本地保存成功再恢复。
-    const latest = await resolveConflictRevision(canvas.id, error);
-    return putCanvasGraph(canvas, latest);
+    return await mergeServerGraphAndSave(canvas, error);
   }
+}
+
+/**
+ * 409 冲突：服务端 revision 已被智能体/他人推进。
+ *
+ * <p>旧实现是 last-writer-wins——拿服务端最新 revision 当 base，把**本地旧图**整份再 PUT 一次，
+ * 智能体刚在服务端建的节点/连线会被当场覆盖掉（2026-10-19：apply_plan 建的 10 个节点被浏览器
+ * 自动保存抹掉，紧接着 `canvas_group_nodes` 报「节点不存在」）。现在改成：
+ * <b>先读服务端最新图 → 并回本地（本地优先 + 服务端新增补进来）→ 用服务端 revision 再 PUT</b>。
+ * 读不到服务端图就**不覆盖**，把冲突抛给上层（上层会提示并暂停轮询，等下一次保存或重载）。
+ */
+async function mergeServerGraphAndSave(canvas: CanvasDocumentV1, conflict: unknown): Promise<CanvasDocumentV1> {
+  let serverDto: CanvasGraphDto;
+  try {
+    serverDto = await apiJson<CanvasGraphDto>(`/canvases/${encodeURIComponent(canvas.id)}/graph`);
+  } catch {
+    throw conflict;
+  }
+  const merged = mergeCanvasGraph(
+    {
+      nodes: canvas.nodes ?? [],
+      edges: canvas.edges ?? [],
+      generationRecords: canvas.generationRecords ?? [],
+      executions: canvas.executions ?? [],
+    },
+    {
+      nodes: serverDto.graph?.nodes ?? [],
+      edges: serverDto.graph?.edges ?? [],
+      generationRecords: serverDto.graph?.generationRecords ?? [],
+      executions: serverDto.graph?.executions ?? [],
+    },
+  );
+  const baseRevision = typeof serverDto.revision === 'number' && Number.isFinite(serverDto.revision)
+    ? serverDto.revision
+    : await resolveConflictRevision(canvas.id, conflict);
+  if (typeof console !== 'undefined') {
+    console.info(`[canvas] 保存冲突：已把服务端新增的 ${merged.addedNodeIds.length} 个节点 / ${merged.addedEdgeIds.length} 条连线并回本地`);
+  }
+  return putCanvasGraph({
+    ...canvas,
+    nodes: merged.nodes,
+    edges: merged.edges,
+    generationRecords: merged.generationRecords,
+    executions: merged.executions,
+  }, baseRevision);
 }
 
 /** 一次 PUT：带 CAS baseRevision，成功返回应用了新 revision 的图，失败原样抛出。 */

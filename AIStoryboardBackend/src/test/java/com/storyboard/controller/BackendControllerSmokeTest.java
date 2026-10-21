@@ -26,8 +26,6 @@ import com.storyboard.entity.Scene;
 import com.storyboard.entity.SceneAsset;
 import com.storyboard.asset.client.AssetContracts.ProjectOwnership;
 import com.storyboard.mapper.AgentAssetMapper;
-import com.storyboard.mapper.AssetImageMapper;
-import com.storyboard.mapper.AssetMapper;
 import com.storyboard.mapper.ProjectMapper;
 import com.storyboard.mapper.SceneAssetMapper;
 import com.storyboard.mapper.SceneMapper;
@@ -42,6 +40,7 @@ import com.storyboard.security.JwtTokenProvider;
 import com.storyboard.service.AssetService;
 import com.storyboard.service.AuthService;
 import com.storyboard.service.FileStorageService;
+import com.storyboard.service.ImageThumbnailService;
 import com.storyboard.service.InternalApiService;
 import com.storyboard.service.ProjectService;
 import com.storyboard.service.SceneService;
@@ -108,6 +107,8 @@ class BackendControllerSmokeTest {
     @MockitoBean
     private FileStorageService fileStorageService;
     @MockitoBean
+    private ImageThumbnailService imageThumbnailService;
+    @MockitoBean
     private FileUrlSigner fileUrlSigner;
     @MockitoBean
     private InternalApiService internalApiService;
@@ -127,10 +128,6 @@ class BackendControllerSmokeTest {
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
     private AgentAssetMapper agentAssetMapper;
-    @MockitoBean
-    private AssetImageMapper assetImageMapper;
-    @MockitoBean
-    private AssetMapper assetMapper;
     @MockitoBean
     private ProjectMapper projectMapper;
     @MockitoBean

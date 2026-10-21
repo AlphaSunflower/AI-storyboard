@@ -86,7 +86,7 @@ export function MoreMenu({ items, size = 28 }: { items: MoreMenuItem[]; size?: n
             left: rect.right - 130 < 0 ? rect.left : undefined,
             minWidth: 120,
             padding: 6,
-            background: 'white',
+            background: 'var(--color-panel)',
             border: '1px solid rgba(0, 0, 0, 0.10)',
             borderRadius: 12,
             boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',

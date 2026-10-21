@@ -271,7 +271,7 @@ describe('ChatComposer project library drops', () => {
 
     render(<ChatComposer />);
 
-    expect(screen.getByPlaceholderText('发消息或创建任务… / 使用技能 @ 添加资料')).toBeTruthy();
+    expect(screen.getByPlaceholderText('发消息或创建任务… / 使用技能与工具 @ 添加资料')).toBeTruthy();
     expect(screen.getByRole('button', { name: '审批模式：方案批准' })).toBeTruthy();
     // 生成偏好入口：默认自动，可展开面板
     expect(screen.getByRole('button', { name: '生成偏好：自动' })).toBeTruthy();
@@ -640,11 +640,48 @@ describe('ChatComposer 斜杠命令', () => {
     expect(screen.getByText('压缩上下文')).toBeTruthy();
     expect(screen.getByText('状态')).toBeTruthy();
     expect(screen.getByText('侧边')).toBeTruthy();
+    // 新增：PPT 生成（ppt-master 技能按需引用），技能与工具分栏展示
+    expect(screen.getByText('技能')).toBeTruthy();
+    expect(screen.getByText('工具')).toBeTruthy();
+    expect(screen.getByText('PPT 生成')).toBeTruthy();
+    expect(screen.getByText('/ppt')).toBeTruthy();
     // 新增：清空上下文（真删除）
     expect(screen.getByText('清空上下文')).toBeTruthy();
     // 命令同时展示英文别名，便于 /clear 这类输入直接命中
     expect(screen.getByText('/compact')).toBeTruthy();
     expect(screen.getByText('/clear')).toBeTruthy();
+  });
+
+  it('/ppt 选中后写入 ppt-master 技能引用', () => {
+    render(<ChatComposer />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/ppt' } });
+
+    fireEvent.click(screen.getByText('PPT 生成'));
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value)
+      .toBe('/ppt-master ');
+    // 标记进入高亮层，渲染成技能色（不是普通 @ 引用色）
+    expect(document.querySelector('[data-skill="true"]')?.textContent).toBe('/ppt-master');
+  });
+
+  it('/ppt 用 Enter 选中只插入文本，不触发发送与建会话', async () => {
+    useProjectStore.setState({ currentProject: { id: 'p1', name: '测试项目' } as never });
+    useAgentStore.setState({
+      activeConversationId: null,
+      messages: [],
+      conversations: [],
+      streamError: null,
+    });
+    const create = vi.spyOn(agentApi, 'createConversation')
+      .mockRejectedValue(new Error('unauthorized'));
+
+    render(<ChatComposer />);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: '/ppt' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(input.value).toBe('/ppt-master '));
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('「清空上下文」点选后走真删除接口，并把会话态退回新对话', async () => {
@@ -1544,7 +1581,7 @@ describe('ChatComposer @ 引用资料', () => {
 describe('ChatComposer send queue', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
-    useSendQueueStore.setState({ queues: {} });
+    useSendQueueStore.setState({ queues: {}, holds: {} });
     useAccountSettingsStore.setState({
       settings: { ...DEFAULT_ACCOUNT_SETTINGS, busySendBehavior: 'queue' },
     });
@@ -1567,7 +1604,7 @@ describe('ChatComposer send queue', () => {
 
   afterEach(() => {
     cleanup();
-    useSendQueueStore.setState({ queues: {} });
+    useSendQueueStore.setState({ queues: {}, holds: {} });
     useAccountSettingsStore.setState({ settings: DEFAULT_ACCOUNT_SETTINGS });
     useAgentStore.setState({ streaming: false });
     useProjectStore.setState({ currentProject: null });
@@ -1620,5 +1657,106 @@ describe('ChatComposer send queue', () => {
       expect.objectContaining({}),
     ));
     expect(useSendQueueStore.getState().queues['conversation-queue']).toBeUndefined();
+  });
+
+  it('edits a queued message in place and keeps the rest of the queue untouched', () => {
+    const enqueue = useSendQueueStore.getState().enqueue;
+    enqueue({ conversationId: 'conversation-queue', content: '旧正文' });
+    enqueue({ conversationId: 'conversation-queue', content: '排队中的第二条' });
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑队列消息 1' }));
+    // 编辑期间暂缓自动出队，避免把未保存的旧正文发走
+    expect(useSendQueueStore.getState().holds['conversation-queue']).toBe(1);
+
+    const editor = screen.getByRole('textbox', { name: '编辑队列消息 1 内容' });
+    fireEvent.change(editor, { target: { value: '改过的正文' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(useSendQueueStore.getState().queues['conversation-queue'].map((item) => item.content))
+      .toEqual(['改过的正文', '排队中的第二条']);
+    expect(useSendQueueStore.getState().holds['conversation-queue']).toBeUndefined();
+    expect(screen.queryByRole('textbox', { name: '编辑队列消息 1 内容' })).toBeNull();
+  });
+
+  it('sends a queued message immediately when the conversation is idle', () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never, streaming: false });
+    useSendQueueStore.getState().enqueue({
+      conversationId: 'conversation-queue',
+      content: '不排队了',
+      references: [],
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByRole('button', { name: '插队发送队列消息 1' }));
+
+    // 没有在途回合时不需要「停止当前回复」的确认
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith('不排队了', expect.anything());
+    expect(useSendQueueStore.getState().queues['conversation-queue']).toBeUndefined();
+    confirmSpy.mockRestore();
+  });
+
+  it('sends a queued message immediately after stopping the current turn', async () => {
+    const interruptAndSend = vi.fn().mockResolvedValue(true);
+    useAgentStore.setState({ interruptAndSend: interruptAndSend as never, streaming: true });
+    useSendQueueStore.getState().enqueue({
+      conversationId: 'conversation-queue',
+      content: '插队这条',
+      picUrls: ['/api/files/queued.png'],
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByRole('button', { name: '插队发送队列消息 1' }));
+
+    await waitFor(() => expect(interruptAndSend).toHaveBeenCalledTimes(1));
+    expect(interruptAndSend.mock.calls[0][0]).toBe('插队这条');
+    // 队列快照里的附件/参考图必须跟着插队消息一起走，不能只发正文
+    expect(interruptAndSend.mock.calls[0][1]).toMatchObject({
+      picUrls: ['/api/files/queued.png'],
+    });
+    expect(useSendQueueStore.getState().queues['conversation-queue']).toBeUndefined();
+    // 打断流程结束后必须释放暂缓，否则后续队列永久卡住
+    expect(useSendQueueStore.getState().holds['conversation-queue']).toBeUndefined();
+    confirmSpy.mockRestore();
+  });
+
+  it('puts the message back into the queue when the interrupt does not settle', async () => {
+    const interruptAndSend = vi.fn().mockResolvedValue(false);
+    useAgentStore.setState({ interruptAndSend: interruptAndSend as never, streaming: true });
+    useSendQueueStore.getState().enqueue({ conversationId: 'conversation-queue', content: 'A' });
+    useSendQueueStore.getState().enqueue({ conversationId: 'conversation-queue', content: '要插队的' });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<ChatComposer />);
+
+    fireEvent.click(screen.getByRole('button', { name: '插队发送队列消息 2' }));
+
+    await waitFor(() => expect(interruptAndSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(
+      useSendQueueStore.getState().queues['conversation-queue'].map((item) => item.content),
+    ).toEqual(['A', '要插队的']));
+    expect(useSendQueueStore.getState().holds['conversation-queue']).toBeUndefined();
+    confirmSpy.mockRestore();
+  });
+
+  it('does not auto-flush while the queue is held for editing', async () => {
+    const sendMessage = vi.fn();
+    useAgentStore.setState({ sendMessage: sendMessage as never, streaming: false });
+    useSendQueueStore.getState().enqueue({
+      conversationId: 'conversation-queue',
+      content: '编辑中先别发',
+    });
+    useSendQueueStore.getState().holdQueue('conversation-queue');
+    render(<SendQueueRunner />);
+
+    await Promise.resolve();
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    act(() => useSendQueueStore.getState().releaseQueue('conversation-queue'));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    expect(sendMessage.mock.calls[0][0]).toBe('编辑中先别发');
   });
 });

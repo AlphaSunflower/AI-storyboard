@@ -394,7 +394,7 @@ export function AgentAssetBrowser({
               type="button"
               disabled={(assets?.page ?? 1) <= 1}
               onClick={() => void loadAssets((assets?.page ?? 1) - 1)}
-              style={{ fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '4px 12px', background: 'white', cursor: 'pointer' }}
+              style={{ fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '4px 12px', background: 'var(--color-panel)', cursor: 'pointer' }}
             >
               上一页
             </button>
@@ -405,7 +405,7 @@ export function AgentAssetBrowser({
               type="button"
               disabled={(assets?.page ?? 1) >= totalPages}
               onClick={() => void loadAssets((assets?.page ?? 1) + 1)}
-              style={{ fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '4px 12px', background: 'white', cursor: 'pointer' }}
+              style={{ fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6, padding: '4px 12px', background: 'var(--color-panel)', cursor: 'pointer' }}
             >
               下一页
             </button>
@@ -619,7 +619,7 @@ export function AgentAssetsModal({ open, onClose }: { open: boolean; onClose: ()
         onClick={(event) => event.stopPropagation()}
         style={{
           width: 680, maxWidth: '94vw', maxHeight: '80vh',
-          background: 'white', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.22)',
+          background: 'var(--color-panel)', borderRadius: 14, boxShadow: '0 12px 48px rgba(0,0,0,0.22)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
       >

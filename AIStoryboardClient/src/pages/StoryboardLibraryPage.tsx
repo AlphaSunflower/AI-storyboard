@@ -21,6 +21,7 @@ import { getSceneImageUrls } from '../lib/sceneImages';
 import { useAuthStore } from '../stores/authStore';
 import { useProjectStore } from '../stores/projectStore';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { Tooltip } from '../components/common/Tooltip';
 import type { ProjectResponse, SceneResponse } from '../api/projects';
 import './StoryboardLibraryPage.css';
@@ -42,6 +43,7 @@ const mediaFilterLabel: Record<MediaFilter, string> = {
 export function StoryboardLibraryPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const isMobile = useIsMobile();
   const embedded = new URLSearchParams(location.search).get('embedded') === '1';
   const projects = useProjectStore((s) => s.projects);
   const loadProjects = useProjectStore((s) => s.loadProjects);
@@ -322,7 +324,9 @@ export function StoryboardLibraryPage() {
           onOpenEditor={() => openEditor(selectedEntry.project.id, selectedEntry.scene.id)}
         />
       )}
-      {embedded && <MobileBottomNav embeddedEditor />}
+      {embedded
+        ? <MobileBottomNav embeddedEditor />
+        : isMobile && <MobileBottomNav fixed={false} />}
     </div>
   );
 }

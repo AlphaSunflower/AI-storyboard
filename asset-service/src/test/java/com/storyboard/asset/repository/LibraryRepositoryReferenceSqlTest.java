@@ -21,6 +21,17 @@ class LibraryRepositoryReferenceSqlTest {
                 .contains("NOT IN ('PURGE_PENDING', 'PURGED')");
     }
 
+    /** 挑片标记是标注，不是内容修订：写标记不能递增 version，否则点一次星就跳一个版本。 */
+    @Test
+    void marksSqlDoesNotBumpVersion() {
+        assertThat(LibraryRepository.UPDATE_MARKS_SQL)
+                .contains("rating = :rating")
+                .contains("flag = :flag")
+                .contains("color_label = :colorLabel")
+                .contains("updated_at = now()")
+                .doesNotContainIgnoringCase("version");
+    }
+
     @Test
     void uploadSessionSqlOnlyProtectsLiveSessions() {
         assertThat(LibraryRepository.ACTIVE_UPLOAD_SESSION_KEYS_SQL)

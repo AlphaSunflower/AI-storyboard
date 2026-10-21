@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'motion/react';
 import {
-  ArrowLeft, Brain, Check, ImagePlus, Inbox, LogOut, MessageSquareHeart, Pencil,
-  ReceiptText, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, UserRound, Wallet, Zap, X,
+  ArrowLeft, Brain, Check, ImagePlus, Inbox, LogOut, MessageSquareHeart, Monitor, Moon,
+  ReceiptText, ShieldAlert, ShieldCheck, SlidersHorizontal, Sun, Trash2,
+  UserRound, Wallet, Zap, X,
 } from 'lucide-react';
 import {
   userApi,
@@ -11,7 +12,7 @@ import {
   type FeedbackStatus,
   type UserStats,
 } from '../api/user';
-import { memoryApi, type AgentMemory } from '../api/memory';
+import { memoryApi, type AgentMemory, type AgentMemorySettings } from '../api/memory';
 import client from '../api/client';
 import { assetUrl } from '../config';
 import { useAuthStore } from '../stores/authStore';
@@ -20,7 +21,10 @@ import { useAgentStore } from '../stores/agentStore';
 import { useAccountSettingsStore } from '../stores/accountSettingsStore';
 import { notify } from '../stores/toastStore';
 import { FullAccessConfirmDialog } from '../components/agent/FullAccessConfirmDialog';
+import { MobileBottomNav } from '../components/layout/MobileBottomNav';
+import { useIsMobile } from '../hooks/useIsMobile';
 import type { AgentApprovalMode } from '../api/agent';
+import type { ThemePreference } from '../lib/theme';
 import './AccountPage.css';
 
 const KIND_LABEL: Record<string, string> = {
@@ -42,7 +46,7 @@ const SECTIONS: Array<{
   { id: 'profile', label: '个人信息', description: '资料、余额与密码', icon: UserRound },
   { id: 'billing', label: '余额明细', description: '充值、消费与退款记录', icon: ReceiptText },
   { id: 'memory', label: '记忆管理', description: 'Moon 记住的项目事实', icon: Brain },
-  { id: 'settings', label: '通用设置', description: '权限、发送与展示', icon: SlidersHorizontal },
+  { id: 'settings', label: '通用设置', description: '外观、权限与发送', icon: SlidersHorizontal },
   { id: 'feedback', label: '帮助与反馈', description: '截图并描述问题', icon: MessageSquareHeart },
   { id: 'inbox', label: '反馈收件箱', description: '查看并处理用户反馈', icon: Inbox },
 ];
@@ -104,6 +108,32 @@ const DISPLAY_OPTIONS = [
   },
 ];
 
+const THEME_OPTIONS: Array<{
+  id: ThemePreference;
+  label: string;
+  description: string;
+  icon: typeof Sun;
+}> = [
+  {
+    id: 'light',
+    label: '浅色',
+    description: '暖白界面，适合白天和明亮环境。',
+    icon: Sun,
+  },
+  {
+    id: 'dark',
+    label: '深色',
+    description: '低亮度暖黑，夜间查看不刺眼。',
+    icon: Moon,
+  },
+  {
+    id: 'system',
+    label: '跟随系统',
+    description: '随设备外观自动切换，无需手动改。',
+    icon: Monitor,
+  },
+];
+
 interface FeedbackImage {
   url: string;
   name: string;
@@ -125,6 +155,7 @@ function formatFeedbackTime(iso?: string): string {
 
 export function AccountPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const reduceMotion = useReducedMotion();
   const logout = useAuthStore((state) => state.logout);
   const [checking, setChecking] = useState(true);
@@ -138,10 +169,10 @@ export function AccountPage() {
   const [confirmPwd, setConfirmPwd] = useState('');
   const [memories, setMemories] = useState<AgentMemory[]>([]);
   const [memoryLoading, setMemoryLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editKind, setEditKind] = useState('decision');
-  const [editContent, setEditContent] = useState('');
-  const [editConfidence, setEditConfidence] = useState('0.8');
+  const [memorySettings, setMemorySettings] = useState<AgentMemorySettings | null>(null);
+  const [globalDraft, setGlobalDraft] = useState('');
+  const [savingGlobal, setSavingGlobal] = useState(false);
+  const [savingSwitch, setSavingSwitch] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState('');
   const [confirmFullAccess, setConfirmFullAccess] = useState(false);
@@ -217,12 +248,77 @@ export function AccountPage() {
   const loadMemories = async () => {
     setMemoryLoading(true);
     try {
-      const response = await memoryApi.list();
+      const [response, settingsResponse] = await Promise.all([
+        memoryApi.list(),
+        memoryApi.settings(),
+      ]);
       setMemories(response.data.data || []);
+      setMemorySettings(settingsResponse.data.data);
+      setGlobalDraft(settingsResponse.data.data.global?.content || '');
     } catch {
       setMemories([]);
     } finally {
       setMemoryLoading(false);
+    }
+  };
+
+  const toggleMemory = async () => {
+    if (!memorySettings || savingSwitch) return;
+    const next = !memorySettings.enabled;
+    setSavingSwitch(true);
+    try {
+      const response = await memoryApi.updateSettings(next);
+      setMemorySettings(response.data.data);
+      notify({ title: next ? '记忆管理已开启' : '记忆管理已关闭' });
+    } catch (error) {
+      notify({ title: '切换失败', description: errorMessage(error), variant: 'error' });
+    } finally {
+      setSavingSwitch(false);
+    }
+  };
+
+  const saveGlobalMemory = async () => {
+    const content = globalDraft.trim();
+    const maxChars = memorySettings?.limits.contentChars ?? 4000;
+    if (!memorySettings?.enabled) {
+      notify({ title: '记忆管理已关闭', description: '开启后才能修改全局记忆。', variant: 'error' });
+      return;
+    }
+    if (content.length < 2) {
+      notify({ title: '全局记忆至少 2 个字符', variant: 'error' });
+      return;
+    }
+    if (content.length > maxChars) {
+      notify({ title: `全局记忆最多 ${maxChars} 个字符`, variant: 'error' });
+      return;
+    }
+    setSavingGlobal(true);
+    try {
+      const response = await memoryApi.saveGlobal(content);
+      setMemorySettings((current) => current
+        ? { ...current, global: response.data.data }
+        : current);
+      setGlobalDraft(response.data.data.content);
+      notify({ title: '全局记忆已保存' });
+    } catch (error) {
+      notify({ title: '保存失败', description: errorMessage(error), variant: 'error' });
+    } finally {
+      setSavingGlobal(false);
+    }
+  };
+
+  const clearGlobalMemory = async () => {
+    if (!window.confirm('清空全局记忆？之后所有项目都不再使用这条偏好。')) return;
+    setSavingGlobal(true);
+    try {
+      await memoryApi.clearGlobal();
+      setMemorySettings((current) => current ? { ...current, global: null } : current);
+      setGlobalDraft('');
+      notify({ title: '全局记忆已清空' });
+    } catch (error) {
+      notify({ title: '清空失败', description: errorMessage(error), variant: 'error' });
+    } finally {
+      setSavingGlobal(false);
     }
   };
 
@@ -289,35 +385,6 @@ export function AccountPage() {
       return;
     }
     void applySetting({ defaultApprovalMode: mode });
-  };
-
-  const startEdit = (memory: AgentMemory) => {
-    setEditingId(memory.id);
-    setEditKind(memory.kind || 'decision');
-    setEditContent(memory.content);
-    setEditConfidence(String(memory.confidence ?? 0.8));
-  };
-
-  const saveEdit = async (memory: AgentMemory) => {
-    const content = editContent.trim();
-    if (!content) {
-      notify({ title: '记忆内容不能为空', variant: 'error' });
-      return;
-    }
-    try {
-      const response = await memoryApi.update(memory.id, {
-        kind: editKind,
-        content,
-        confidence: Number(editConfidence) || 0.8,
-        expiresAt: memory.expiresAt || null,
-      });
-      const updated = response.data.data;
-      setMemories((current) => current.map((item) => item.id === updated.id ? updated : item));
-      setEditingId(null);
-      notify({ title: '记忆已更新' });
-    } catch (error) {
-      notify({ title: '更新失败', description: errorMessage(error), variant: 'error' });
-    }
   };
 
   const deleteMemory = async (memory: AgentMemory) => {
@@ -407,7 +474,7 @@ export function AccountPage() {
   }
 
   return (
-    <div className="account-page">
+    <div className={`account-page${isMobile ? ' has-mobile-nav' : ''}`}>
       <div className="account-shell">
         <motion.header
           className="account-header"
@@ -629,16 +696,84 @@ export function AccountPage() {
                 <div className="account-card__head">
                   <div>
                     <h2>记忆管理</h2>
-                    <p>Moon 只会记住你确认过、需要跨对话保留的项目事实。删除后不会再次注入。</p>
+                    <p>项目记忆由 Moon 在对话中记录，你只能删除；全局记忆由你维护，所有项目生效。</p>
                   </div>
-                  <span className="account-chip account-chip--muted">{memories.length} 条</span>
+                  <div className="account-memory__head-actions">
+                    <span className="account-chip account-chip--muted">{memories.length} 条</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={memorySettings?.enabled ?? false}
+                      aria-label="记忆管理开关"
+                      className={`account-memory__switch${memorySettings?.enabled ? ' is-on' : ''}`}
+                      disabled={!memorySettings || savingSwitch}
+                      onClick={() => void toggleMemory()}
+                    >
+                      <span className="account-memory__switch-track" aria-hidden="true">
+                        <span className="account-memory__switch-knob" />
+                      </span>
+                      {memorySettings?.enabled ? '已开启' : '已关闭'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className={`account-memory__global${memorySettings && !memorySettings.enabled ? ' is-disabled' : ''}`}>
+                  <div className="account-memory__global-head">
+                    <div>
+                      <h3>全局记忆</h3>
+                      <p>每个账号只有一条，跨项目生效；Moon 只读，不会自行修改。</p>
+                    </div>
+                    <span>{globalDraft.trim().length} / {memorySettings?.limits.contentChars ?? 4000}</span>
+                  </div>
+                  <textarea
+                    value={globalDraft}
+                    disabled={!memorySettings?.enabled || savingGlobal}
+                    onChange={(event) => setGlobalDraft(event.target.value)}
+                    maxLength={memorySettings?.limits.contentChars ?? 4000}
+                    rows={3}
+                    placeholder="例如：所有项目都用中文回复；不要使用霓虹色。"
+                  />
+                  <div className="account-memory__global-actions">
+                    <span className="account-memory__global-note">
+                      {memorySettings?.global?.updatedAt
+                        ? `上次保存 ${memorySettings.global.updatedAt.slice(0, 10)}`
+                        : '尚未设置'}
+                    </span>
+                    <div className="account-card__actions">
+                      <button
+                        type="button"
+                        className="account-ghost"
+                        disabled={!memorySettings?.enabled || savingGlobal || !memorySettings?.global}
+                        onClick={() => void clearGlobalMemory()}
+                      >清空</button>
+                      <button
+                        type="button"
+                        className="account-primary"
+                        disabled={!memorySettings?.enabled || savingGlobal}
+                        onClick={() => void saveGlobalMemory()}
+                      >{savingGlobal ? '保存中…' : '保存'}</button>
+                    </div>
+                  </div>
+                  {memorySettings && !memorySettings.enabled && (
+                    <p className="account-memory__off">
+                      记忆管理已关闭：Moon 不会写入或引用记忆，你也无法修改全局记忆；既有项目记忆仍可删除。
+                    </p>
+                  )}
+                </div>
+
+                <div className="account-memory__section-head">
+                  <h3>项目记忆</h3>
+                  <p>
+                    由 Moon 在对话中自动记录，按项目隔离；每个项目最多 {memorySettings?.limits.project ?? 200} 条
+                    （账号 {memorySettings?.limits.user ?? 500} 条），过期条目会在下次写入前清理。
+                  </p>
                 </div>
 
                 {memoryLoading ? (
                   <div className="account-empty">正在读取…</div>
                 ) : memories.length === 0 ? (
                   <div className="account-empty">
-                    还没有记忆。在对话里说“记住……”或让 Moon 记录项目约束即可。
+                    还没有项目记忆。在对话里说“记住……”，Moon 会把需要跨会话保留的事实记在这里。
                   </div>
                 ) : (
                   <div className="account-memory__list">
@@ -649,58 +784,20 @@ export function AccountPage() {
                             {KIND_LABEL[memory.kind] || memory.kind}
                           </span>
                           <span className="account-memory__project">{projectName(memory.projectId)}</span>
-                          {editingId !== memory.id && (
-                            <button
-                              type="button"
-                              className="account-icon-btn"
-                              aria-label="编辑记忆"
-                              onClick={() => startEdit(memory)}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          )}
                           <button
                             type="button"
                             className="account-icon-btn account-icon-btn--danger"
                             aria-label="删除记忆"
-                            onClick={() => deleteMemory(memory)}
+                            onClick={() => void deleteMemory(memory)}
                           >
                             <Trash2 size={14} />
                           </button>
                         </div>
-                        {editingId === memory.id ? (
-                          <div className="account-memory__editor">
-                            <div className="account-memory__editor-row">
-                              <select value={editKind} onChange={(event) => setEditKind(event.target.value)}>
-                                {Object.entries(KIND_LABEL).map(([value, label]) => (
-                                  <option key={value} value={value}>{label}</option>
-                                ))}
-                              </select>
-                              <input
-                                value={editConfidence}
-                                onChange={(event) => setEditConfidence(event.target.value)}
-                                placeholder="置信度 0-1"
-                              />
-                            </div>
-                            <textarea
-                              value={editContent}
-                              onChange={(event) => setEditContent(event.target.value)}
-                              rows={4}
-                            />
-                            <div className="account-card__actions">
-                              <button type="button" className="account-ghost" onClick={() => setEditingId(null)}>取消</button>
-                              <button type="button" className="account-primary" onClick={() => saveEdit(memory)}>保存</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <p className="account-memory__content">{memory.content}</p>
-                            <div className="account-memory__foot">
-                              置信度 {Math.round((memory.confidence ?? 0) * 100)}%
-                              {memory.expiresAt ? ` · 到期 ${memory.expiresAt.slice(0, 10)}` : ''}
-                            </div>
-                          </>
-                        )}
+                        <p className="account-memory__content">{memory.content}</p>
+                        <div className="account-memory__foot">
+                          置信度 {Math.round((memory.confidence ?? 0) * 100)}%
+                          {memory.expiresAt ? ` · 到期 ${memory.expiresAt.slice(0, 10)}` : ''}
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -710,6 +807,60 @@ export function AccountPage() {
 
             {section === 'settings' && (
               <div className="account-stack">
+                <section className="account-card account-appearance">
+                  <div className="account-card__head">
+                    <div>
+                      <h2>外观</h2>
+                      <p>选择 Moon 的明暗主题。跟随系统会随设备外观自动切换。</p>
+                    </div>
+                  </div>
+                  <div className="account-theme-grid" role="radiogroup" aria-label="外观主题">
+                    {THEME_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const active = settings.themePreference === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          aria-label={option.label}
+                          className={`account-theme-card${active ? ' is-active' : ''}`}
+                          disabled={settingsSaving}
+                          onClick={() => void applySetting({ themePreference: option.id })}
+                        >
+                          <span
+                            className="account-theme-card__preview"
+                            data-preview={option.id}
+                            aria-hidden="true"
+                          >
+                            <span className="account-theme-card__window">
+                              <span className="account-theme-card__bar" />
+                              <span className="account-theme-card__body">
+                                <span className="account-theme-card__rail" />
+                                <span className="account-theme-card__content">
+                                  <span className="account-theme-card__line is-long" />
+                                  <span className="account-theme-card__line" />
+                                </span>
+                              </span>
+                            </span>
+                          </span>
+                          <span className="account-theme-card__top">
+                            <span className="account-theme-card__label">
+                              <Icon size={15} aria-hidden="true" />
+                              {option.label}
+                            </span>
+                            <span className="account-theme-card__check" aria-hidden="true">
+                              {active ? <Check size={11} /> : null}
+                            </span>
+                          </span>
+                          <span className="account-theme-card__desc">{option.description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
                 <section className="account-card">
                   <div className="account-card__head">
                     <div>
@@ -978,6 +1129,8 @@ export function AccountPage() {
           </main>
         </div>
       </div>
+
+      {isMobile && <MobileBottomNav />}
 
       <FullAccessConfirmDialog
         open={confirmFullAccess}

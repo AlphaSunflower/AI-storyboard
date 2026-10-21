@@ -139,12 +139,16 @@ export interface StoryboardChange {
 
 /** 推理过程（后端 reasoning_delta / message_end 下发） */
 export interface AgentReasoning {
-  summary: string;
-  details: string;
+  /** 列表接口瘦身后不再下发（只会带 detailsAvailable）。 */
+  summary?: string;
+  /** 列表接口瘦身后不再下发；展开面板时经 details 接口补拉。 */
+  details?: string;
   /** 实时思考尾部片段：完整句子尚未形成时，用于持续展示当前进展。 */
   activity?: string;
   durationMs?: number;
   source: string;
+  /** 列表接口为了瘦身没回 details，展开「思考过程」时再按需拉详情。 */
+  detailsAvailable?: boolean;
 }
 
 /** 一条助手回复对应后端执行段的模型用量与耗时。 */
@@ -329,6 +333,8 @@ export interface AgentMessageMetadata {
   reasoning?: AgentReasoning;
   metrics?: AgentTurnMetrics;
   agentTrace?: AgentTraceEvent[];
+  /** 列表接口没回 agentTrace（瘦身），展开「思考过程」时按需拉详情。 */
+  traceAvailable?: boolean;
   suggestedActions?: SuggestedAction[];
   sandboxAttachments?: AgentAttachment[];
   /**
@@ -968,9 +974,20 @@ export const agentApi = {
   listConversations: (projectId: string) =>
     client.get<{ data: AgentConversation[] }>('/agent/conversations', { params: { projectId } }),
 
-  getConversation: (conversationId: string) =>
+  /**
+   * 会话详情。
+   *
+   * <p>默认**不**拉消息列表：切会话时客户端还会单独请求 `/messages/page`，
+   * 两个接口各回一份完整消息（实测 77 KB × 2）纯属白传白解析。
+   * 现有调用方都只读 `conversation`（标题、canvasContext）；真需要消息时显式传 true。
+   *
+   * <p>`timeout` 单独收短：网关到后端配的是 900s 响应超时（给 SSE 用的），
+   * 一旦后端卡住，这个普通 JSON 请求会挂 15 分钟，把整个切会话流程一起拖死。
+   */
+  getConversation: (conversationId: string, includeMessages = false) =>
     client.get<{ data: { conversation: AgentConversation; messages: AgentMessage[] } }>(
       `/agent/conversations/${conversationId}`,
+      { params: includeMessages ? undefined : { includeMessages: false }, timeout: 8000 },
     ),
 
   createSideChat: (sourceConversationId: string) =>
@@ -1070,10 +1087,11 @@ export const agentApi = {
   listMessages: (id: string) =>
     client.get<{ data: AgentMessage[] }>(`/agent/conversations/${id}/messages`),
 
+  /** 切会话的首屏数据：超时必须收敛（网关默认 900s，卡住会把整页冻住）。 */
   listMessagesPage: (id: string, before?: string | null, limit = 50) =>
     client.get<{ data: AgentMessagePage }>(
       `/agent/conversations/${id}/messages/page`,
-      { params: { before: before || undefined, limit } },
+      { params: { before: before || undefined, limit }, timeout: 15000 },
     ),
 
   searchMessages: (q: string, limit = 100) =>
@@ -1231,6 +1249,18 @@ export const agentApi = {
   // 获取会话的待处理 checkpoint（页面刷新恢复 HITL 卡片用）
   getPendingCheckpoint: (conversationId: string) =>
     client.get<{ data: Record<string, unknown> | null }>(`/agent/conversations/${conversationId}/pending-checkpoint`),
+
+  /**
+   * 单条消息的大块明细（思考全文 + 执行轨迹）。
+   *
+   * <p>列表接口为了瘦身只回 `reasoning.detailsAvailable` / `traceAvailable` 标记，
+   * 用户展开「思考过程」时再拉全文（一条 10 KB 级的思考不必随首屏一起传）。
+   */
+  getMessageDetails: (conversationId: string, messageId: string) =>
+    client.get<{ data: { messageId: string; reasoningDetails?: string; agentTrace?: AgentTraceEvent[] } }>(
+      `/agent/conversations/${conversationId}/messages/${messageId}/details`,
+      { timeout: 10000 },
+    ),
 
   getPendingCanvasSession: (conversationId: string) =>
     client.get<{ data: CanvasSessionInfo | Record<string, never> }>(

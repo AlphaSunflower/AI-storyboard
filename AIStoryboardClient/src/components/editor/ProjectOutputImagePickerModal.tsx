@@ -311,7 +311,7 @@ const checkBadge: React.CSSProperties = {
   justifyContent: 'center',
   borderRadius: 999,
   background: 'var(--color-primary)',
-  color: 'white',
+  color: 'var(--color-on-primary)',
   fontSize: 10,
 };
 const iconButton: React.CSSProperties = {
@@ -345,7 +345,7 @@ const primaryButton = (disabled: boolean): React.CSSProperties => ({
   border: 'none',
   borderRadius: 10,
   background: disabled ? 'var(--color-primary-disabled)' : 'var(--color-primary)',
-  color: disabled ? 'var(--color-muted)' : 'white',
+  color: disabled ? 'var(--color-muted)' : 'var(--color-on-primary)',
   fontSize: 13,
   cursor: disabled ? 'not-allowed' : 'pointer',
 });

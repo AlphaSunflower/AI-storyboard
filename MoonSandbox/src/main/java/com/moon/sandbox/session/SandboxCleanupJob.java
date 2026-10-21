@@ -23,5 +23,11 @@ public class SandboxCleanupJob {
         if (removed > 0) {
             log.info("Cleaned {} expired sandbox sessions", removed);
         }
+        // 活跃会话也要清 tmp/ 与 work/.runner：否则每次 run_python_script 都留下一个
+        // UUID 脚本、每次 ffmpeg/PDF 处理都留下临时文件，24h 内会一直累积。
+        int transientFiles = sessions.cleanupTransient();
+        if (transientFiles > 0) {
+            log.info("Cleaned {} transient sandbox files", transientFiles);
+        }
     }
 }

@@ -90,7 +90,7 @@ export function VideoPresetSelector({ value, onChange }: VideoPresetSelectorProp
         padding: '8px 10px',
         borderRadius: 'var(--rounded-sm)',
         border: '1px solid var(--color-hairline)',
-        background: 'white',
+        background: 'var(--color-panel)',
         color: 'var(--color-ink)',
         boxSizing: 'border-box' as React.CSSProperties['boxSizing'],
         fontFamily: 'inherit',

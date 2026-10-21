@@ -202,14 +202,15 @@ export function SceneCard({
       ref={cardRef}
       onClick={onSelect}
       onMouseEnter={(e) => { if (!isSelected) { e.currentTarget.style.background = 'var(--color-surface-soft)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; } }}
-      onMouseLeave={(e) => { if (!isSelected) { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; } }}
+      onMouseLeave={(e) => { if (!isSelected) { e.currentTarget.style.background = 'var(--color-panel)'; e.currentTarget.style.borderColor = 'var(--color-hairline)'; } }}
       style={{
         padding: 12,
         borderRadius: 'var(--rounded-md)',
-        border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--color-hairline)',
-        borderLeft: `3px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-        background: isSelected ? 'var(--color-surface-card)' : 'white',
-        boxShadow: isSelected ? '0 2px 10px rgba(204, 120, 92, 0.18)' : 'none',
+        border: `1px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
+        background: isSelected ? 'var(--color-surface-card)' : 'var(--color-panel)',
+        boxShadow: isSelected
+          ? 'inset 0 0 0 1px var(--color-primary), 0 2px 10px rgba(204, 120, 92, 0.18)'
+          : 'none',
         cursor: 'pointer',
         marginBottom: 8,
         transition: 'border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease',

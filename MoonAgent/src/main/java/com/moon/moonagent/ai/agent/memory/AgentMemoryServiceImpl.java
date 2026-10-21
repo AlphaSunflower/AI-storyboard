@@ -1,8 +1,13 @@
 package com.moon.moonagent.ai.agent.memory;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.moon.moonagent.entity.AgentGlobalMemory;
 import com.moon.moonagent.entity.AgentMemory;
+import com.moon.moonagent.entity.AgentMemorySetting;
+import com.moon.moonagent.mapper.AgentGlobalMemoryMapper;
 import com.moon.moonagent.mapper.AgentMemoryMapper;
+import com.moon.moonagent.mapper.AgentMemorySettingMapper;
+import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -19,15 +24,18 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AgentMemoryServiceImpl implements AgentMemoryService {
 
-    private static final int MAX_CONTENT_CHARS = 4000;
+    private static final int MAX_CONTENT_CHARS = AgentMemoryLimits.CONTENT_MAX_CHARS;
     private static final int DEFAULT_LIMIT = 5;
 
     private final AgentMemoryMapper mapper;
+    private final AgentGlobalMemoryMapper globalMapper;
+    private final AgentMemorySettingMapper settingMapper;
 
     @Override
     public AgentMemory remember(String userId, String projectId, String conversationId, String kind,
                                 String content, String source, Double confidence,
                                 OffsetDateTime expiresAt) {
+        requireEnabled(userId);
         if (projectId == null || projectId.isBlank()) {
             throw new IllegalArgumentException("projectId 不能为空");
         }
@@ -67,6 +75,7 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         memory.setExpiresAt(expiresAt);
         memory.setCreatedAt(now);
         memory.setUpdatedAt(now);
+        enforceCapacity(userId, projectId);
         mapper.insert(memory);
         return memory;
     }
@@ -144,6 +153,7 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         if (userId == null || userId.isBlank() || memoryId == null || memoryId.isBlank()) {
             return null;
         }
+        requireEnabled(userId);
         AgentMemory memory = mapper.selectOne(new LambdaQueryWrapper<AgentMemory>()
                 .eq(AgentMemory::getUserId, userId)
                 .eq(AgentMemory::getId, memoryId)
@@ -185,6 +195,135 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
                     .append(memory.getContent()).append('\n');
         }
         return out.toString().trim();
+    }
+
+    @Override
+    public AgentMemoryLimits limits() {
+        return AgentMemoryLimits.DEFAULTS;
+    }
+
+    @Override
+    public boolean enabled(String userId) {
+        if (userId == null || userId.isBlank()) return true;
+        AgentMemorySetting setting = settingMapper.selectById(userId);
+        return setting == null || !Boolean.FALSE.equals(setting.getEnabled());
+    }
+
+    @Override
+    public void setEnabled(String userId, boolean enabled) {
+        if (userId == null || userId.isBlank()) {
+            throw new BusinessException(40001, "用户未登录");
+        }
+        AgentMemorySetting setting = settingMapper.selectById(userId);
+        OffsetDateTime now = OffsetDateTime.now();
+        if (setting == null) {
+            setting = new AgentMemorySetting();
+            setting.setUserId(userId);
+            setting.setEnabled(enabled);
+            setting.setUpdatedAt(now);
+            settingMapper.insert(setting);
+            return;
+        }
+        setting.setEnabled(enabled);
+        setting.setUpdatedAt(now);
+        settingMapper.updateById(setting);
+    }
+
+    @Override
+    public AgentGlobalMemory global(String userId) {
+        if (userId == null || userId.isBlank()) return null;
+        return globalMapper.selectById(userId);
+    }
+
+    @Override
+    public AgentGlobalMemory saveGlobal(String userId, String content) {
+        if (userId == null || userId.isBlank()) {
+            throw new BusinessException(40001, "用户未登录");
+        }
+        requireEnabled(userId);
+        String raw = content == null ? "" : content;
+        if (raw.trim().length() > MAX_CONTENT_CHARS) {
+            throw new BusinessException(40001, "全局记忆最多 " + MAX_CONTENT_CHARS + " 个字符");
+        }
+        String normalized = normalize(content);
+        if (normalized.length() < AgentMemoryLimits.CONTENT_MIN_CHARS) {
+            throw new BusinessException(40001,
+                    "全局记忆至少 " + AgentMemoryLimits.CONTENT_MIN_CHARS + " 个字符");
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        AgentGlobalMemory memory = globalMapper.selectById(userId);
+        if (memory == null) {
+            memory = new AgentGlobalMemory();
+            memory.setUserId(userId);
+            memory.setContent(normalized);
+            memory.setContentHash(hash(normalized));
+            memory.setUpdatedAt(now);
+            globalMapper.insert(memory);
+            return memory;
+        }
+        memory.setContent(normalized);
+        memory.setContentHash(hash(normalized));
+        memory.setUpdatedAt(now);
+        globalMapper.updateById(memory);
+        return memory;
+    }
+
+    @Override
+    public boolean clearGlobal(String userId) {
+        if (userId == null || userId.isBlank()) return false;
+        return globalMapper.deleteById(userId) > 0;
+    }
+
+    @Override
+    public String globalPromptContext(String userId) {
+        if (!enabled(userId)) return "";
+        AgentGlobalMemory memory = global(userId);
+        return memory == null || memory.getContent() == null ? "" : memory.getContent().trim();
+    }
+
+    /**
+     * 容量闸门：过期行先清理，再按「项目 → 账号」两级上限判定。
+     *
+     * <p>只对「新增行」调用；合并同内容记忆不会增加行数，不应被容量拦截。
+     */
+    private void enforceCapacity(String userId, String projectId) {
+        purgeExpired(userId, projectId);
+        long projectCount = count(mapper.selectCount(new LambdaQueryWrapper<AgentMemory>()
+                .eq(AgentMemory::getProjectId, projectId)));
+        if (projectCount >= AgentMemoryLimits.PROJECT_MAX) {
+            throw new BusinessException(40901, "项目记忆已达上限（"
+                    + AgentMemoryLimits.PROJECT_MAX + " 条），请先在记忆管理中删除不再需要的条目");
+        }
+        long userCount = count(mapper.selectCount(new LambdaQueryWrapper<AgentMemory>()
+                .eq(AgentMemory::getUserId, userId)));
+        if (userCount >= AgentMemoryLimits.USER_MAX) {
+            throw new BusinessException(40901, "账号记忆已达上限（"
+                    + AgentMemoryLimits.USER_MAX + " 条），请先清理部分项目的记忆");
+        }
+    }
+
+    /** 过期记忆不再参与召回，也不应继续占用容量；每次写入前顺手清掉（本项目 + 该账号其他项目）。 */
+    private void purgeExpired(String userId, String projectId) {
+        OffsetDateTime now = OffsetDateTime.now();
+        mapper.delete(new LambdaQueryWrapper<AgentMemory>()
+                .eq(AgentMemory::getProjectId, projectId)
+                .isNotNull(AgentMemory::getExpiresAt)
+                .lt(AgentMemory::getExpiresAt, now));
+        mapper.delete(new LambdaQueryWrapper<AgentMemory>()
+                .eq(AgentMemory::getUserId, userId)
+                .isNotNull(AgentMemory::getExpiresAt)
+                .lt(AgentMemory::getExpiresAt, now));
+    }
+
+    private static long count(Long value) {
+        return value == null ? 0 : value;
+    }
+
+    /** 记忆管理关闭时，任何写入都必须是可见的拒绝，不能静默成功。 */
+    private void requireEnabled(String userId) {
+        if (!enabled(userId)) {
+            throw new BusinessException(40901, "记忆管理已关闭，请先在账号页开启后再写入记忆");
+        }
     }
 
     private static boolean matches(AgentMemory memory, List<String> tokens) {

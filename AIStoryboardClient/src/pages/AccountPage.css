@@ -1,4 +1,4 @@
-/* 账户与设置：暖色编辑风，左侧分区菜单 + 右侧内容卡片。 */
+﻿/* 账户与设置：暖色编辑风，左侧分区菜单 + 右侧内容卡片。 */
 
 .account-page {
   min-height: 100svh;
@@ -58,7 +58,7 @@
   padding: 0 13px;
   border: 1px solid var(--color-hairline);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.7);
+  background: color-mix(in srgb, var(--color-panel) 70%, transparent);
   color: var(--color-body);
   font-size: 13px;
   font-weight: 500;
@@ -69,8 +69,8 @@
 
 .account-back:hover,
 .account-logout:hover {
-  background: white;
-  border-color: #d8cfc4;
+  background: var(--color-panel);
+  border-color: var(--color-hairline-strong);
 }
 
 .account-logout {
@@ -91,7 +91,7 @@
   flex-direction: column;
   gap: 3px;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.92);
+  background: color-mix(in srgb, var(--color-panel) 92%, transparent);
   border: 1px solid var(--color-hairline);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(20, 20, 19, 0.035);
@@ -134,7 +134,7 @@
 
 .account-nav__item.is-active .account-nav__icon {
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
 }
 
 .account-nav__text {
@@ -192,7 +192,7 @@
 
 .account-card {
   padding: 20px 22px;
-  background: white;
+  background: var(--color-panel);
   border: 1px solid var(--color-hairline);
   border-radius: 16px;
   box-shadow: 0 12px 34px rgba(20, 20, 19, 0.035);
@@ -359,7 +359,7 @@
   border: 1px solid var(--color-hairline);
   border-radius: 9px;
   outline: none;
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   font-family: var(--font-body);
   font-size: 13.5px;
@@ -370,8 +370,8 @@
 .account-page input:not([type='file']):focus,
 .account-page textarea:focus,
 .account-page select:focus {
-  border-color: rgba(204, 120, 92, 0.55);
-  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.1);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-hairline));
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
 .account-page textarea {
@@ -398,7 +398,7 @@
 .account-primary {
   border: none;
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
 }
 
 .account-primary:hover:not(:disabled) {
@@ -412,7 +412,7 @@
 
 .account-ghost {
   border: 1px solid var(--color-hairline);
-  background: white;
+  background: var(--color-panel);
   color: var(--color-body);
 }
 
@@ -504,16 +504,152 @@
   font-size: 11px;
 }
 
-.account-memory__editor {
+.account-memory__head-actions {
   display: flex;
-  flex-direction: column;
+  flex-shrink: 0;
+  align-items: center;
   gap: 8px;
 }
 
-.account-memory__editor-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px;
+.account-memory__switch {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 9px;
+  background: var(--color-panel);
+  color: var(--color-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease;
+}
+
+.account-memory__switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.account-memory__switch.is-on {
+  border-color: rgba(204, 120, 92, 0.55);
+  color: var(--color-primary-active);
+}
+
+.account-memory__switch-track {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-hairline-strong);
+  transition: background 150ms ease;
+}
+
+.account-memory__switch.is-on .account-memory__switch-track {
+  background: var(--color-primary);
+}
+
+.account-memory__switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-panel);
+  transition: transform 150ms ease;
+}
+
+.account-memory__switch.is-on .account-memory__switch-knob {
+  transform: translateX(16px);
+}
+
+.account-memory__global {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-canvas);
+}
+
+.account-memory__global.is-disabled {
+  opacity: 0.72;
+}
+
+.account-memory__global-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-memory__global-head h3,
+.account-memory__section-head h3 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.account-memory__global-head p,
+.account-memory__section-head p {
+  margin: 3px 0 0;
+  color: var(--color-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.account-memory__global-head > span {
+  flex-shrink: 0;
+  color: var(--color-muted-soft);
+  font-size: 11px;
+}
+
+.account-memory__global textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.account-memory__global-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.account-memory__global-note {
+  color: var(--color-muted-soft);
+  font-size: 11px;
+}
+
+.account-memory__off {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(204, 120, 92, 0.08);
+  color: var(--color-primary-active);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.account-memory__section-head {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 640px) {
+  .account-memory__head-actions {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .account-memory__global-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 .account-empty {
@@ -553,7 +689,7 @@
   padding: 12px 14px;
   border: 1px solid var(--color-hairline);
   border-radius: 12px;
-  background: white;
+  background: var(--color-panel);
   color: var(--color-body);
   text-align: left;
   cursor: pointer;
@@ -561,7 +697,7 @@
 }
 
 .account-choice:hover:not(:disabled) {
-  border-color: #d8cfc4;
+  border-color: var(--color-hairline-strong);
   background: var(--color-canvas);
 }
 
@@ -600,7 +736,7 @@
 
 .account-choice.is-danger.is-active .account-choice__icon {
   background: rgba(249, 115, 22, 0.14);
-  color: rgb(194, 65, 12);
+  color: var(--color-error);
 }
 
 .account-choice__body {
@@ -632,7 +768,7 @@
   margin-top: 4px;
   border-radius: 999px;
   background: var(--color-surface-soft);
-  color: white;
+  color: var(--color-on-primary);
 }
 
 .account-choice.is-active .account-choice__check {
@@ -641,6 +777,201 @@
 
 .account-choice.is-danger.is-active .account-choice__check {
   background: rgb(234, 88, 12);
+}
+
+/* ── 外观主题选择 ───────────────────────────────────────────────────────── */
+
+.account-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.account-theme-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 14px;
+  background: var(--color-panel);
+  color: var(--color-body);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (hover: hover) {
+  .account-theme-card:hover:not(:disabled) {
+    border-color: var(--color-hairline-strong);
+    background: var(--color-canvas);
+    transform: translateY(-1px);
+  }
+}
+
+.account-theme-card.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 58%, var(--color-hairline));
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.account-theme-card:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.account-theme-card:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.account-theme-card__preview {
+  --preview-canvas: #f0ebe2;
+  --preview-panel: #ffffff;
+  --preview-bar: #f5f1ea;
+  --preview-rail: #f7f3ed;
+  --preview-line: #d9d1c5;
+  --preview-border: #ded6c9;
+  position: relative;
+  display: block;
+  height: 86px;
+  overflow: hidden;
+  border: 1px solid var(--color-hairline);
+  border-radius: 10px;
+  background: var(--preview-canvas);
+  transition: border-color 180ms ease;
+}
+
+.account-theme-card.is-active .account-theme-card__preview {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-hairline));
+}
+
+.account-theme-card__preview[data-preview='dark'] {
+  --preview-canvas: #0f0e0c;
+  --preview-panel: #1e1c19;
+  --preview-bar: #25221e;
+  --preview-rail: #1a1815;
+  --preview-line: #4b453c;
+  --preview-border: #3a352e;
+}
+
+.account-theme-card__preview[data-preview='system'] {
+  --preview-canvas: linear-gradient(90deg, #f0ebe2 0 50%, #0f0e0c 50%);
+  --preview-panel: linear-gradient(90deg, #ffffff 0 50%, #1e1c19 50%);
+  --preview-bar: linear-gradient(90deg, #f5f1ea 0 50%, #25221e 50%);
+  --preview-rail: linear-gradient(90deg, #f7f3ed 0 50%, #1a1815 50%);
+  --preview-line: linear-gradient(90deg, #d9d1c5 0 50%, #4b453c 50%);
+  --preview-border: #8c8579;
+}
+
+.account-theme-card__window {
+  position: absolute;
+  inset: 14px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--preview-border);
+  border-radius: 7px;
+  background: var(--preview-panel);
+  box-shadow: 0 7px 16px -10px rgba(20, 20, 19, 0.6);
+}
+
+.account-theme-card__bar {
+  height: 12px;
+  flex: none;
+  border-bottom: 1px solid var(--preview-border);
+  background: var(--preview-bar);
+}
+
+.account-theme-card__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.account-theme-card__rail {
+  width: 18px;
+  flex: none;
+  border-right: 1px solid var(--preview-border);
+  background: var(--preview-rail);
+}
+
+.account-theme-card__content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 8px;
+}
+
+.account-theme-card__line {
+  display: block;
+  width: 58%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--preview-line);
+}
+
+.account-theme-card__line.is-long {
+  width: 86%;
+}
+
+.account-theme-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.account-theme-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.account-theme-card__label svg {
+  color: var(--color-muted);
+  transition: color 180ms ease;
+}
+
+.account-theme-card.is-active .account-theme-card__label svg {
+  color: var(--color-primary);
+}
+
+.account-theme-card__check {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: var(--color-surface-soft);
+  color: var(--color-on-primary);
+}
+
+.account-theme-card.is-active .account-theme-card__check {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  animation: account-check-pop 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.account-theme-card__desc {
+  display: block;
+  min-height: 34px;
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .account-feedback__images {
@@ -804,10 +1135,6 @@
   .account-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-
-  .account-memory__editor-row {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* 反馈收件箱（仅管理员菜单可见） */
@@ -831,7 +1158,7 @@
 }
 
 .account-inbox__item.is-resolved {
-  background: white;
+  background: var(--color-panel);
   opacity: 0.78;
 }
 
@@ -958,7 +1285,7 @@
   overflow: hidden;
   border: 1px solid var(--color-hairline);
   border-radius: 11px;
-  background: white;
+  background: var(--color-panel);
 }
 
 .account-billing__row {
@@ -1089,13 +1416,13 @@
 .account-ghost:focus-visible,
 .account-icon-btn:focus-visible,
 .account-choice:focus-visible {
-  outline: 2px solid rgba(204, 120, 92, 0.55);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
 .account-nav {
   padding: 9px;
-  background: rgba(255, 255, 255, 0.82);
+  background: color-mix(in srgb, var(--color-panel) 82%, transparent);
   backdrop-filter: blur(14px) saturate(150%);
   -webkit-backdrop-filter: blur(14px) saturate(150%);
   box-shadow:
@@ -1138,7 +1465,7 @@
 
 .account-nav__item.is-active .account-nav__icon {
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   box-shadow: 0 6px 14px rgba(204, 120, 92, 0.28);
 }
 
@@ -1164,7 +1491,7 @@
 
 @media (hover: hover) {
   .account-card:hover {
-    border-color: #ddd1c2;
+    border-color: var(--color-hairline-strong);
     box-shadow: 0 22px 52px rgba(20, 20, 19, 0.065);
     transform: translateY(-2px);
   }
@@ -1226,7 +1553,7 @@
 @media (hover: hover) {
   .account-stat:hover {
     border-color: rgba(204, 120, 92, 0.24);
-    background: #fff;
+    background: var(--color-panel);
     transform: translateY(-2px);
   }
 }
@@ -1385,7 +1712,7 @@
 .account-page input:not([type='file']):hover,
 .account-page textarea:hover,
 .account-page select:hover {
-  border-color: #d8cfc4;
+  border-color: var(--color-hairline-strong);
 }
 
 .account-billing__stat {
@@ -1398,7 +1725,7 @@
 @media (hover: hover) {
   .account-billing__stat:hover {
     border-color: rgba(204, 120, 92, 0.2);
-    background: #fff;
+    background: var(--color-panel);
     transform: translateY(-2px);
   }
 }
@@ -1433,8 +1760,8 @@
 @media (hover: hover) {
   .account-memory__item:hover,
   .account-inbox__item:hover {
-    border-color: #ddd1c2;
-    background: #fff;
+    border-color: var(--color-hairline-strong);
+    background: var(--color-panel);
     transform: translateY(-1px);
   }
 }
@@ -1501,13 +1828,15 @@
   .account-section > .account-card,
   .account-stack > .account-card,
   .account-billing__empty-icon,
-  .account-choice.is-active .account-choice__check {
+  .account-choice.is-active .account-choice__check,
+  .account-theme-card.is-active .account-theme-card__check {
     animation: none;
   }
 
   .account-card,
   .account-stat,
   .account-choice,
+  .account-theme-card,
   .account-memory__item,
   .account-inbox__item,
   .account-balance::after,
@@ -1519,6 +1848,7 @@
   .account-card:hover,
   .account-stat:hover,
   .account-choice:hover:not(:disabled),
+  .account-theme-card:hover:not(:disabled),
   .account-memory__item:hover,
   .account-inbox__item:hover,
   .account-feedback__thumb:hover,
@@ -1529,5 +1859,111 @@
 
 .account-nav__item.is-active:hover {
   background: transparent;
+}
+
+/* ── 深色外观：保留暖褐层次，不用纯黑 ─────────────────────────────────── */
+
+:root[data-theme='dark'] .account-page {
+  background:
+    radial-gradient(1100px 520px at 8% -12%, rgba(224, 153, 125, 0.12), transparent 62%),
+    radial-gradient(900px 460px at 100% 0%, rgba(224, 153, 125, 0.05), transparent 58%),
+    var(--color-canvas);
+}
+
+:root[data-theme='dark'] .account-page::before {
+  opacity: 0.018;
+  mix-blend-mode: screen;
+}
+
+:root[data-theme='dark'] .account-nav {
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme='dark'] .account-card {
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme='dark'] .account-card:hover {
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='dark'] .account-nav__pill {
+  border-color: rgba(224, 153, 125, 0.2);
+  background: linear-gradient(135deg, rgba(224, 153, 125, 0.13), rgba(224, 153, 125, 0.05));
+}
+
+:root[data-theme='dark'] .account-choice.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-hairline));
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-panel));
+  box-shadow: inset 0 0 0 1px rgba(224, 153, 125, 0.12);
+}
+
+:root[data-theme='dark'] .account-choice.is-active .account-choice__icon {
+  background: rgba(224, 153, 125, 0.14);
+}
+
+:root[data-theme='dark'] .account-choice__icon {
+  background: var(--color-surface-soft);
+}
+
+:root[data-theme='dark'] .account-balance {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 22px 48px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme='dark'] .account-theme-card__preview {
+  border-color: var(--color-hairline);
+}
+
+:root[data-theme='dark'] .account-choice.is-danger.is-active {
+  border-color: rgba(239, 139, 132, 0.48);
+  background: rgba(239, 139, 132, 0.08);
+}
+
+@media (max-width: 720px) {
+  .account-theme-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-theme-card {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    grid-template-areas:
+      'preview top'
+      'preview desc';
+    column-gap: 12px;
+    align-items: center;
+  }
+
+  .account-theme-card__preview {
+    grid-area: preview;
+    height: 78px;
+  }
+
+  .account-theme-card__top {
+    grid-area: top;
+    margin-top: 0;
+  }
+
+  .account-theme-card__desc {
+    grid-area: desc;
+    min-height: 0;
+  }
+}
+
+/* ── 手机端「我的」：底部三 Tab 常驻，返回按钮由 Tab 取代 ─────────────── */
+
+.account-page.has-mobile-nav {
+  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 768px) {
+  .account-back {
+    display: none;
+  }
 }
 

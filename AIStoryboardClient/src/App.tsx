@@ -11,22 +11,26 @@ import { LibraryWorkspacePage } from './pages/LibraryWorkspacePage';
 import { LibraryTaskQueue } from './components/library/LibraryTaskQueue';
 import { SendQueueRunner } from './components/agent/SendQueueRunner';
 import { ToastHost } from './components/common/ToastHost';
+import { AppErrorBoundary } from './components/common/AppErrorBoundary';
 
 function App() {
   return (
     <>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<Navigate to="/chat" replace />} />
-        <Route path="/docs" element={<DocsPage />} />
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/account" element={<AccountPage />} />
-        <Route path="/observability" element={<ObservabilityPage />} />
-        <Route path="/chat/storyboards" element={<StoryboardLibraryPage />} />
-        <Route path="/library" element={<LibraryWorkspacePage />} />
-        <Route path="/editor" element={<EditorPage />} />
-        <Route path="*" element={<NotFoundBrickBreaker className="min-h-svh" href="/chat" />} />
-      </Routes>
+      {/* 页面级兜底：渲染异常时给出可重试卡片，而不是整页白屏（子窗 iframe 里尤其明显）。 */}
+      <AppErrorBoundary>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/docs" element={<DocsPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/account" element={<AccountPage />} />
+          <Route path="/observability" element={<ObservabilityPage />} />
+          <Route path="/chat/storyboards" element={<StoryboardLibraryPage />} />
+          <Route path="/library" element={<LibraryWorkspacePage />} />
+          <Route path="/editor" element={<EditorPage />} />
+          <Route path="*" element={<NotFoundBrickBreaker className="min-h-svh" href="/chat" />} />
+        </Routes>
+      </AppErrorBoundary>
       <SendQueueRunner />
       <LibraryTaskQueue />
       <ToastHost />

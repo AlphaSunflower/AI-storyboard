@@ -9,8 +9,12 @@ import com.moon.moonagent.ai.agent.creative.MediaCritique;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContext;
 import com.moon.moonagent.ai.agent.creative.ProjectCreativeContextService;
 import com.moon.moonagent.ai.agent.memory.AgentMemoryService;
+import com.moon.moonagent.dto.request.AgentGlobalMemoryRequest;
+import com.moon.moonagent.dto.request.AgentMemorySettingsRequest;
 import com.moon.moonagent.dto.request.CreativeContextUpdateRequest;
 import com.moon.moonagent.dto.request.AgentMemoryUpdateRequest;
+import com.moon.moonagent.dto.response.AgentGlobalMemoryVO;
+import com.moon.moonagent.dto.response.AgentMemorySettingsVO;
 import com.moon.moonagent.dto.response.AgentMemoryVO;
 import com.moon.moonagent.dto.response.ProjectCreativeContextVO;
 import com.storyboard.common.ApiResponse;
@@ -41,21 +45,47 @@ public class AgentCreativeController {
                 .toList());
     }
 
+    /** 记忆管理状态：总开关 + 全局记忆 + 项目记忆容量。 */
+    @GetMapping("/memories/settings")
+    public ApiResponse<AgentMemorySettingsVO> memorySettings(Authentication auth) {
+        return ApiResponse.ok(memorySettingsOf(auth.getName()));
+    }
+
+    /** 打开/关闭记忆管理；关闭后智能体不能写/召回，用户不能改全局记忆。 */
+    @PutMapping("/memories/settings")
+    public ApiResponse<AgentMemorySettingsVO> updateMemorySettings(
+            Authentication auth, @RequestBody AgentMemorySettingsRequest request) {
+        if (request == null) {
+            throw new com.storyboard.common.BusinessException(40001, "enabled 不能为空");
+        }
+        memoryService.setEnabled(auth.getName(), request.enabled());
+        return ApiResponse.ok(memorySettingsOf(auth.getName()));
+    }
+
+    /** 保存（新增或覆盖）账号级全局记忆；全账号只有一条。 */
+    @PutMapping("/memories/global")
+    public ApiResponse<AgentGlobalMemoryVO> saveGlobalMemory(
+            Authentication auth, @RequestBody AgentGlobalMemoryRequest request) {
+        if (request == null) {
+            throw new com.storyboard.common.BusinessException(40001, "content 不能为空");
+        }
+        return ApiResponse.ok(toGlobalMemoryVO(
+                memoryService.saveGlobal(auth.getName(), request.content())));
+    }
+
+    /** 清空全局记忆；关闭记忆管理时仍允许。 */
+    @DeleteMapping("/memories/global")
+    public ApiResponse<Boolean> clearGlobalMemory(Authentication auth) {
+        return ApiResponse.ok(memoryService.clearGlobal(auth.getName()));
+    }
+
     @PutMapping("/memories/{memoryId}")
     public ApiResponse<AgentMemoryVO> updateMyMemory(
             Authentication auth, @PathVariable String memoryId,
             @RequestBody AgentMemoryUpdateRequest request) {
-        java.time.OffsetDateTime expiresAt = null;
-        if (request.expiresAt() != null && !request.expiresAt().isBlank()) {
-            try {
-                expiresAt = java.time.OffsetDateTime.parse(request.expiresAt());
-            } catch (RuntimeException e) {
-                throw new com.storyboard.common.BusinessException(40001, "expiresAt 格式必须为 ISO-8601");
-            }
-        }
         var updated = memoryService.updateForUser(
                 auth.getName(), memoryId, request.kind(), request.content(),
-                request.confidence(), expiresAt);
+                request.confidence(), parseExpiresAt(request.expiresAt()));
         if (updated == null) {
             throw new com.storyboard.common.BusinessException(40401, "记忆不存在或不属于当前用户");
         }
@@ -139,6 +169,29 @@ public class AgentCreativeController {
                 target.referenceUrls(), List.of(), null, null, null,
                 List.of(), List.of(), emitter);
         return emitter;
+    }
+
+    /** 解析可选的 ISO-8601 到期时间；空串表示永不过期。 */
+    private static java.time.OffsetDateTime parseExpiresAt(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return java.time.OffsetDateTime.parse(value);
+        } catch (RuntimeException e) {
+            throw new com.storyboard.common.BusinessException(40001, "expiresAt 格式必须为 ISO-8601");
+        }
+    }
+
+    private AgentMemorySettingsVO memorySettingsOf(String userId) {
+        return new AgentMemorySettingsVO(
+                memoryService.enabled(userId),
+                toGlobalMemoryVO(memoryService.global(userId)),
+                memoryService.limits());
+    }
+
+    private static AgentGlobalMemoryVO toGlobalMemoryVO(
+            com.moon.moonagent.entity.AgentGlobalMemory memory) {
+        return memory == null ? null
+                : new AgentGlobalMemoryVO(memory.getContent(), memory.getUpdatedAt());
     }
 
     private static AgentMemoryVO toMemoryVO(

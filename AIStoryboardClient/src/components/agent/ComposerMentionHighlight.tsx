@@ -59,8 +59,17 @@ export function ComposerMentionHighlight({
         {segments.map((segment, index) => (segment.mention ? (
           <span
             key={`mention-${index}`}
-            data-mention="true"
-            style={{ color: T.brand, fontWeight: 500 }}
+            data-mention={segment.skill ? undefined : 'true'}
+            data-skill={segment.skill ? 'true' : undefined}
+            style={segment.skill
+              ? {
+                color: T.skill,
+                // 与 @ 引用保持同一字重：镜像层字重变化会改变字形宽度，光标会与可见文字错位
+                fontWeight: 500,
+                background: T.skillBg,
+                borderRadius: 4,
+              }
+              : { color: T.brand, fontWeight: 500 }}
           >
             {segment.text}
           </span>

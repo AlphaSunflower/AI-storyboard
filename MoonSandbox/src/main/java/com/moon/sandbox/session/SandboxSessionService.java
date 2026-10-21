@@ -255,6 +255,58 @@ public class SandboxSessionService {
         }
     }
 
+    /**
+     * 清理活跃会话里的临时文件：{@code tmp/} 与 {@code work/.runner/}。
+     *
+     * <p>这两处是「跑一次就多一份」的典型（run_python_script 每次写一个 UUID 脚本、
+     * Python/ffmpeg 的中间文件落在 tmp/）。只删超过 {@code transient-ttl}（默认 1h）的文件，
+     * 不会碰到正在执行的进程，也不碰用户产物（{@code output/}）和 {@code work/} 里的其它文件。
+     *
+     * @return 删除的文件数
+     */
+    public int cleanupTransient() {
+        Instant cutoff = Instant.now().minus(properties.getTransientTtl());
+        if (!Files.isDirectory(paths.root())) return 0;
+        int removed = 0;
+        try (Stream<Path> sessions = Files.list(paths.root())) {
+            for (Path session : sessions.filter(Files::isDirectory).toList()) {
+                removed += purgeOlderThan(session.resolve("tmp"), cutoff);
+                removed += purgeOlderThan(session.resolve("work").resolve(".runner"), cutoff);
+            }
+            return removed;
+        } catch (IOException error) {
+            throw new SandboxPathException("unable to scan sandbox sessions", error);
+        }
+    }
+
+    private static int purgeOlderThan(Path directory, Instant cutoff) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) return 0;
+        int removed = 0;
+        try (Stream<Path> stream = Files.walk(directory)) {
+            for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                if (path.equals(directory)) continue;
+                try {
+                    boolean directoryEntry = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
+                    if (directoryEntry) {
+                        // 子项已按逆序删过；这里只删空目录，非空目录 delete 会失败并被忽略
+                        Files.deleteIfExists(path);
+                        continue;
+                    }
+                    if (Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS)
+                            .toInstant().isBefore(cutoff)) {
+                        Files.deleteIfExists(path);
+                        removed++;
+                    }
+                } catch (IOException ignored) {
+                    // 正在使用的文件（Windows 句柄未释放）留到下一轮清理
+                }
+            }
+        } catch (IOException ignored) {
+            // 目录不可读时跳过，不阻塞其它会话清理
+        }
+        return removed;
+    }
+
     public <T> T withLock(String conversationId, Callable<T> action) {
         ReentrantLock lock = lock(conversationId);
         lock.lock();

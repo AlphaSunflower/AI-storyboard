@@ -134,15 +134,15 @@ const ellipsis: React.CSSProperties = {
 };
 const check: React.CSSProperties = {
   width: 20, height: 20, borderRadius: 10, display: 'grid', placeItems: 'center',
-  color: 'white', background: 'var(--color-primary)',
+  color: 'var(--color-on-primary)', background: 'var(--color-primary)',
 };
 const pill = (active: boolean): React.CSSProperties => ({
   padding: '6px 12px', borderRadius: 8, border: `1px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-  background: active ? 'var(--color-primary)' : 'white', color: active ? 'white' : 'var(--color-muted)',
+  background: active ? 'var(--color-primary)' : 'var(--color-panel)', color: active ? 'var(--color-on-primary)' : 'var(--color-muted)',
   fontSize: 12, cursor: 'pointer',
 });
 const card = (active: boolean): React.CSSProperties => ({
   position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: 9,
   border: `1.5px solid ${active ? 'var(--color-primary)' : 'var(--color-hairline)'}`,
-  borderRadius: 11, background: active ? 'var(--color-surface-soft)' : 'white', cursor: 'pointer',
+  borderRadius: 11, background: active ? 'var(--color-surface-soft)' : 'var(--color-panel)', cursor: 'pointer',
 });

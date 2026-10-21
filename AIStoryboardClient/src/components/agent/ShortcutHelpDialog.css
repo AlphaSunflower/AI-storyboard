@@ -18,7 +18,7 @@
   overflow: hidden;
   border: 1px solid rgba(15, 17, 21, 0.08);
   border-radius: 16px;
-  background: #fff;
+  background: var(--color-panel);
   box-shadow: 0 24px 64px rgba(15, 17, 21, 0.24);
   color: var(--color-ink);
 }
@@ -170,7 +170,7 @@
   border: none;
   border-radius: 9px;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;

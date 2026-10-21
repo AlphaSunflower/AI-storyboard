@@ -10,6 +10,7 @@ import { executeNodeAction } from './nodeExecutionService';
 import { useCanvasStore } from '../store/canvasStore';
 import type { CanvasGraphV2 } from './graphContracts';
 import { getNodeModelConfig, setNodeModelConfig } from './canvasModelConfigService';
+import { collectCanvasGroups } from './groups';
 
 export interface ToolDescriptor {
   name: string;
@@ -84,6 +85,85 @@ const oneOf = <T extends string>(value: unknown, field: string, allowed: readonl
 
 const tool = (descriptor: ToolDescriptor): ToolDescriptor => descriptor;
 
+/**
+ * 执行预览：服务端把执行类命令强制成 dryRun，这里只做「能不能执行」的判定。
+ *
+ * <p>执行入口只存在于分组：目标节点必须**同属一个分组**，用户才能在分组标题条上点「执行」。
+ * 未分组或跨组时不返回 {@code ok:false}（那会被服务端当成画布任务失败），而是返回
+ * {@code ok:true, requiresGroup:true, code:GROUP_REQUIRED} 的可纠正结果，
+ * 让模型先分组、再把确认交回用户，而不是给出一个「预览成功」的假象。
+ */
+const executePreview = (
+  context: CanvasCommandContext,
+  targetNodeIds: string[],
+  extra: Record<string, unknown>,
+): CanvasCommandResult => {
+  const state = useCanvasStore.getState();
+  const groupOf = (nodeId: string) => {
+    const owner = state.nodes.find((node) => node.id === nodeId);
+    return typeof owner?.data.groupId === 'string' ? owner.data.groupId : '';
+  };
+  const groupIds = targetNodeIds.map(groupOf);
+  const distinct = new Set(groupIds.filter(Boolean));
+  const allGrouped = targetNodeIds.length > 0 && groupIds.every(Boolean);
+  if (!allGrouped || distinct.size !== 1) {
+    const message = distinct.size > 1
+      ? '**尚未开始运行**：执行入口按分组提供，而这批节点跨了多个分组。请先调用 canvas_group_nodes 把它们并入同一组，再让用户在分组标题上点「执行」。'
+      : '**尚未开始运行**：执行入口只存在于分组，而这批节点还没有分组。请先调用 canvas_group_nodes 把它们分到同一组，再让用户在分组标题上点「执行」。';
+    return {
+      ok: true,
+      status: 'preview',
+      transactionId: `tx-preview-${context.requestId ?? 'execute'}`,
+      revision: state.revision,
+      changes: { affectedNodeIds: targetNodeIds, description: '执行预览（需先分组）' },
+      result: {
+        ...extra,
+        nodeIds: targetNodeIds,
+        code: 'GROUP_REQUIRED',
+        requiresGroup: true,
+        awaitingConfirmation: false,
+        ungroupedNodeIds: targetNodeIds.filter((_, index) => !groupIds[index]),
+        message,
+      },
+    };
+  }
+  const groupId = [...distinct][0];
+  const group = collectCanvasGroups(state.nodes).find((candidate) => candidate.id === groupId);
+  if (!group) {
+    return {
+      ok: true,
+      status: 'preview',
+      transactionId: `tx-preview-${context.requestId ?? 'execute'}`,
+      revision: state.revision,
+      changes: { affectedNodeIds: targetNodeIds, description: '执行预览（分组已失效）' },
+      result: {
+        ...extra,
+        nodeIds: targetNodeIds,
+        code: 'GROUP_REQUIRED',
+        requiresGroup: true,
+        awaitingConfirmation: false,
+        message: '**尚未开始运行**：目标分组已不存在，请重新读取画布后再分组执行。',
+      },
+    };
+  }
+  return {
+    ok: true,
+    status: 'preview',
+    transactionId: `tx-preview-${context.requestId ?? 'execute'}`,
+    revision: state.revision,
+    changes: { affectedNodeIds: targetNodeIds, description: `执行 ${targetNodeIds.length} 个节点（待确认）` },
+    result: {
+      ...extra,
+      nodeIds: targetNodeIds,
+      groupId: group.id,
+      groupTitle: group.title,
+      awaitingConfirmation: true,
+      message: `已生成执行预览，**尚未开始运行**。确认入口在画布上：请点分组「${group.title}」标题上的「执行」按钮。`,
+    },
+  };
+};
+
+
 export const CANVAS_TOOLS: ToolDescriptor[] = [
   // ── 读取 ─────────────────────────────────────────────────────────────
   tool({ name: 'canvas.get_context', description: '读取浏览器当前真实打开的项目与画布。', readOnly: true, approval: AUTO, execute: () => canvasQueryService.getContext() }),
@@ -131,6 +211,10 @@ export const CANVAS_TOOLS: ToolDescriptor[] = [
     nodeIds: nodeIds(args.nodeIds),
     startOrder: typeof args.startOrder === 'number' ? args.startOrder : undefined,
   }) }),
+  tool({ name: 'canvas.group.create', description: '把多个节点分成一组；分组标题上会出现「执行」按钮——执行入口只存在于分组。', readOnly: false, approval: AUTO, execute: (context, args) => canvasCommandService.createGroup(context, {
+    nodeIds: nodeIds(args.nodeIds),
+    title: typeof args.title === 'string' ? args.title : undefined,
+  }) }),
 
   // ── 节点修改 ─────────────────────────────────────────────────────────
   tool({ name: 'canvas.model_config.set', description: '严格按网关 Schema 修改生成节点的模型和参数；换模会重置为新模型默认值。', readOnly: false, approval: AUTO, execute: (context, args) => setNodeModelConfig(context, {
@@ -153,10 +237,16 @@ export const CANVAS_TOOLS: ToolDescriptor[] = [
   tool({ name: 'canvas.edge.delete', description: '删除指定连线。删除操作需要确认。', readOnly: false, approval: CONFIRM, execute: (context, args) => canvasCommandService.deleteEdges(context, { edgeIds: stringArray(args.edgeIds, 'edgeIds') }) }),
 
   // ── 执行 ─────────────────────────────────────────────────────────────
+  // 执行入口只存在于分组：预览阶段校验目标节点是否同属一个分组，未分组/跨组直接拒绝，
+  // 由用户点分组标题条上的「执行」按钮真正开跑（服务端同时把这两个方法强制成 dryRun）。
   tool({ name: 'canvas.node.execute', description: '提交单个节点的生成动作，立即返回 jobId。', readOnly: false, approval: AUTO, execute: async (context, args) => {
     const nodeId = stringValue(args.nodeId, 'nodeId');
     const actionId = typeof args.actionId === 'string' ? args.actionId : undefined;
-    if (context.dryRun) return { ok: true, status: 'preview' as const, transactionId: `tx-preview-${context.requestId ?? 'execute'}`, revision: useCanvasStore.getState().revision, changes: { description: '执行 1 个节点' }, result: { nodeId, actionId } };
+    if (context.dryRun) {
+      const preview = executePreview(context, [nodeId], { nodeId, actionId });
+      if (preview.ok) preview.changes = { affectedNodeIds: [nodeId], description: '执行 1 个节点（待确认）' };
+      return preview;
+    }
     const handle = await executeNodeAction(context.projectId, nodeId, actionId, context.signal);
     return {
       ok: true,
@@ -184,7 +274,10 @@ export const CANVAS_TOOLS: ToolDescriptor[] = [
         executions: state.executions,
       };
       const plan = planGraphExecution(graph, selectedNodeIds, actionByNode);
-      return { ok: true, status: 'preview' as const, transactionId: `tx-preview-graph`, revision: state.revision, changes: { affectedNodeIds: plan.order, description: `预览执行 ${plan.order.length} 个节点` }, result: { nodeIds: plan.order, maxParallel } };
+      const targetIds = selectedNodeIds?.length ? selectedNodeIds : plan.order;
+      const preview = executePreview(context, targetIds, { nodeIds: plan.order, maxParallel });
+      if (preview.ok) preview.changes = { affectedNodeIds: plan.order, description: `预览执行 ${plan.order.length} 个节点（待确认）` };
+      return preview;
     }
     const execution = startGraphExecution(context.projectId, selectedNodeIds, actionByNode, maxParallel);
     return {

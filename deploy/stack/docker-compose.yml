@@ -1,18 +1,42 @@
-# AI-storyboard 统一部署栈：基础设施 + 6 个业务服务 + 前端入口
-# 用法：在 deploy/stack 下 `docker compose up -d`（推荐走 scripts/up.ps1）
+# AI-storyboard 一体化部署栈（单 compose 文件）
+#
+# 一个 compose 项目拉起完整业务栈：Postgres / Redis / MinIO / MoonSandbox
+# + 6 个 Java 服务（api-gateway、backend、llm-gateway、moon-agent、asset-service、canvas）
+# + 前端入口（主站 `/` 与画布站 `/canvas/`）。
+#
+# 本地/目标机都用同一份文件：
+#   docker compose --env-file .env up -d --build      # 有源码与构建环境
+#   docker compose --env-file .env up -d --no-build   # 目标机（已 docker load 离线镜像）
+#   或直接：bash scripts/load-and-up.sh
+#
+# 数据全部落在本目录内，随目录一起迁移：
+#   ./data/minio                MinIO 对象（历史图片/视频/文档）
+#   ./data/sandbox-workspaces   Agent 沙箱工作区（会话产出、skills、overflow）
+#   Postgres / Redis / uploads  命名卷（${STACK_PREFIX}-pgdata 等）
+#
+# 相对 deploy/stack 旧版的差别（2026-10-20）：
+#   1. 容器名、网络名全部带 ${STACK_PREFIX} 前缀，同一台机器可并存多套；
+#   2. 去掉固定 IP / 固定 subnet，改用 compose 服务名 DNS（不再和宿主已有网段冲突）；
+#   3. MinIO 与沙箱数据从外部目录/命名卷改为本目录 ./data/**，整包可拷；
+#   4. 沙箱（runner + 出网代理）常驻，不再是可选 profile；
+#   5. 每个容器都有可覆盖的内存上限，避免 JVM 按宿主机内存算堆；
+#   6. 透传 X-Forwarded-* + 可配置 PUBLIC_ORIGIN，修掉经 nginx 访问时的 CORS 误判。
 name: ${COMPOSE_PROJECT_NAME:-aistoryboard}
 
 x-java-base: &java-base
   restart: unless-stopped
   environment: &java-base-env
-    TZ: Asia/Shanghai
+    TZ: ${TZ:-Asia/Shanghai}
     SPRING_PROFILES_ACTIVE: prod
-    # 服务发现默认关闭：不注册、网关按下面的直连地址路由。
-    # 要恢复注册发现：NACOS_DISCOVERY_ENABLED=true，四个 *_URI 换成 lb://<服务名>，
-    # 并先起 deploy/docker/nacos（旧的独立 compose）。
+    # 经 nginx 反代时按 X-Forwarded-* 还原真实 scheme/host/port。
+    # 少了它，画布的 POST/PATCH/PUT 会被当成跨域并静默 403（Invalid CORS request）。
+    SERVER_FORWARD_HEADERS_STRATEGY: framework
+    # 浏览器实际访问地址 + 本机回环；PUBLIC_ORIGIN 必须与地址栏一致。
+    CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost},http://localhost,http://127.0.0.1
+    # 服务发现默认关闭：不注册，网关按下面的直连地址路由。
     NACOS_DISCOVERY_ENABLED: ${NACOS_DISCOVERY_ENABLED:-false}
     NACOS_ADDR: ${NACOS_ADDR:-nacos:8848}
-    # ApiGateway 上游直连地址（换成 https 或别的端口时只改 .env）
+    # ApiGateway 上游直连地址（换端口/域名只改 .env）
     BACKEND_URI: ${BACKEND_URI:-http://backend:8082}
     ASSET_SERVICE_URI: ${ASSET_SERVICE_URI:-http://asset-service:8085}
     CANVAS_URI: ${CANVAS_URI:-http://canvas:9090}
@@ -21,7 +45,7 @@ x-java-base: &java-base
     REDIS_PORT: "6379"
     INTERNAL_SECRET: ${INTERNAL_SECRET}
     JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-    JWT_ISSUER: ${JWT_ISSUER}
+    JWT_ISSUER: ${JWT_ISSUER:-ai-storyboard-backend}
     STORYBOARD_INTERNAL_URL: http://backend:8082
     ASSET_SERVICE_URL: http://asset-service:8085
     LLM_GATEWAY_BASE_URL: http://llm-gateway:8083
@@ -30,12 +54,12 @@ x-java-base: &java-base
     STORYBOARD_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
     STORYBOARD_STORAGE_BUCKET: storyboard
     STORYBOARD_STORAGE_REGION: us-east-1
-    # 媒体引用额外允许的 origin（默认空）；浏览器 origin 走路径归一化，无需登记
+    # 媒体引用额外允许的 origin（默认空）；浏览器同源地址走路径归一化，无需登记
     MOON_MEDIA_ALLOWED_ORIGINS: ${MOON_MEDIA_ALLOWED_ORIGINS:-}
     FILE_SIGNING_SECRET: ${INTERNAL_SECRET}
     JAVA_TOOL_OPTIONS: >-
       -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
-      -Djava.security.egd=file:/dev/./urandom -Duser.timezone=Asia/Shanghai
+      -Djava.security.egd=file:/dev/./urandom -Duser.timezone=${TZ:-Asia/Shanghai}
 
 x-db-env: &db-env
   SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ai_storyboard
@@ -43,71 +67,87 @@ x-db-env: &db-env
   SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
 
 services:
+  # ── 基础设施 ───────────────────────────────────────────────────────────
   postgres:
     image: postgres:18-alpine
-    container_name: aistoryboard-postgres
+    container_name: ${STACK_PREFIX:-aistoryboard}-postgres
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - max_connections=120
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - wal_compression=on
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: postgres
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      TZ: Asia/Shanghai
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       # postgres:18 的 PGDATA 是 /var/lib/postgresql/18/docker，卷挂在上一级
-      - aistoryboard-pgdata:/var/lib/postgresql
+      - pgdata:/var/lib/postgresql
+      # 首启自动建库 + 还原 db/*.dump + 账号收敛为 admin@qq.com
       - ./db:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
-      retries: 30
+      retries: 40
       start_period: 20s
     networks:
-      default:
-        ipv4_address: 172.28.0.10
+      - default
 
   redis:
     image: redis:7-alpine
-    container_name: redis-ai
+    container_name: ${STACK_PREFIX:-aistoryboard}-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-256mb} --maxmemory-policy allkeys-lru
     ports:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
     networks:
-      default:
-        ipv4_address: 172.28.0.11
+      - default
 
   minio:
     image: quay.io/minio/minio
-    container_name: minio-object
+    container_name: ${STACK_PREFIX:-aistoryboard}-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
       MINIO_ROOT_USER_FILE: ""
       MINIO_ROOT_PASSWORD_FILE: ""
       MINIO_ACCESS_KEY_FILE: ""
       MINIO_SECRET_KEY_FILE: ""
       MINIO_CONFIG_ENV_FILE: ""
       MINIO_KMS_SECRET_KEY_FILE: ""
-      TZ: Asia/Shanghai
+      GOGC: "50"
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      # 复用开发环境已有对象数据（1.7GB，含 storyboard 桶）
-      - ../docker/minio/data:/data
+      # 迁移过来的对象数据：storyboard 桶（images/videos/documents/...）
+      - ./data/minio:/data
     ports:
       - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    mem_limit: ${MINIO_MEM_LIMIT:-512m}
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
       interval: 5s
@@ -115,18 +155,18 @@ services:
       retries: 30
       start_period: 15s
     networks:
-      default:
-        ipv4_address: 172.28.0.13
+      - default
 
+  # ── Agent 沙箱（常驻；只接内网，出网走 Squid 白名单）──────────────────
   sandbox-egress-proxy:
     build:
       context: ../docker/sandbox/proxy
       dockerfile: Dockerfile
-    image: moon-sandbox-egress-proxy:local
-    container_name: moon-sandbox-egress-proxy
+    image: moon-sandbox-egress-proxy:${SANDBOX_IMAGE_TAG:-local}
+    container_name: ${STACK_PREFIX:-aistoryboard}-sandbox-egress-proxy
     restart: unless-stopped
     environment:
-      SANDBOX_ALLOWED_DOMAINS: ${SANDBOX_ALLOWED_DOMAINS}
+      SANDBOX_ALLOWED_DOMAINS: ${SANDBOX_ALLOWED_DOMAINS:?SANDBOX_ALLOWED_DOMAINS is required}
     networks:
       - default
       - sandbox-internal
@@ -135,8 +175,7 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     pids_limit: 128
-    mem_limit: 256m
-    cpus: 0.5
+    mem_limit: ${SANDBOX_PROXY_MEM_LIMIT:-256m}
     cap_drop:
       - ALL
     security_opt:
@@ -156,8 +195,8 @@ services:
       args:
         MOON_SANDBOX_UID: 10001
         MOON_SANDBOX_GID: 10001
-    image: moon-sandbox-runner:local
-    container_name: moon-sandbox-runner
+    image: moon-sandbox-runner:${SANDBOX_IMAGE_TAG:-local}
+    container_name: ${STACK_PREFIX:-aistoryboard}-sandbox-runner
     user: "10001:10001"
     restart: unless-stopped
     environment:
@@ -167,7 +206,7 @@ services:
       MOON_SANDBOX_MAX_TIMEOUT_SECONDS: "600"
       MOON_SANDBOX_MAX_CONCURRENT_EXECUTIONS: "4"
       MOON_SANDBOX_IDLE_EXPIRY: 24h
-      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET}
+      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET:?SANDBOX_INTERNAL_SECRET is required}
       HTTP_PROXY: http://sandbox-egress-proxy:3128
       HTTPS_PROXY: http://sandbox-egress-proxy:3128
       NO_PROXY: localhost,127.0.0.1,::1,sandbox-runner,sandbox-egress-proxy
@@ -175,8 +214,12 @@ services:
       TMPDIR: /tmp
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
-      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/tmp -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/tmp -Dfile.encoding=UTF-8 -Duser.timezone=${TZ:-Asia/Shanghai}
     volumes:
+      # 运行时用 Docker 命名卷（不是宿主 bind mount）：ppt-master 会一次物化 12k 个小文件，
+      # Windows Docker Desktop 的 bind mount 拷贝这种小文件极慢（实测 10 分钟级），
+      # 会让模型请求还没发出、前端一直停在「思考中」。首次起栈时由脚本从
+      # ./data/sandbox-workspaces 播种进卷，之后运行时写入都在卷里。
       - sandbox-workspaces:/workspaces
     ports:
       - "127.0.0.1:${SANDBOX_PORT:-8090}:8090"
@@ -186,10 +229,10 @@ services:
       - sandbox-edge
     read_only: true
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      - /tmp:size=${SANDBOX_TMP_SIZE:-512m},mode=1777
     pids_limit: 256
-    mem_limit: 2g
-    cpus: 2.0
+    mem_limit: ${SANDBOX_MEM_LIMIT:-2g}
+    cpus: ${SANDBOX_CPUS:-2.0}
     cap_drop:
       - ALL
     security_opt:
@@ -205,10 +248,11 @@ services:
       sandbox-egress-proxy:
         condition: service_healthy
 
+  # ── 6 个 Java 服务 ─────────────────────────────────────────────────────
   llm-gateway:
     <<: *java-base
     image: aistoryboard/llm-gateway:${IMAGE_TAG}
-    container_name: aistoryboard-llm-gateway
+    container_name: ${STACK_PREFIX:-aistoryboard}-llm-gateway
     build:
       context: ./build/llm-gateway
       dockerfile: ../../service/Dockerfile
@@ -225,11 +269,12 @@ services:
       GATEWAY_AES_SECRET: ${GATEWAY_AES_SECRET}
       GATEWAY_ADMIN_INIT_PASSWORD: ${GATEWAY_ADMIN_INIT_PASSWORD}
     ports:
-      # 模型网关（OpenAI 兼容 /v1/** + 管理后台 /admin-ui 与 /admin/**）暴露到本机
+      # 模型网关（OpenAI 兼容 /v1/** + 管理后台 /admin-ui、/admin/**）只绑本机回环，
+      # 需要远程管理时用 SSH 隧道，不要把 8083 直接暴露到公网。
       - "127.0.0.1:${GATEWAY_PORT:-8083}:8083"
+    mem_limit: ${LLM_GATEWAY_MEM_LIMIT:-512m}
     networks:
-      default:
-        ipv4_address: 172.28.0.16
+      - default
     depends_on:
       postgres:
         condition: service_healthy
@@ -239,7 +284,7 @@ services:
   backend:
     <<: *java-base
     image: aistoryboard/backend:${IMAGE_TAG}
-    container_name: aistoryboard-backend
+    container_name: ${STACK_PREFIX:-aistoryboard}-backend
     build:
       context: ./build/backend
       dockerfile: ../../service/Dockerfile
@@ -249,7 +294,7 @@ services:
     environment:
       <<: [*java-base-env, *db-env]
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       SPRING_AI_OPENAI_BASE_URL: http://llm-gateway:8083/v1
       SPRING_AI_OPENAI_API_KEY: ${LLM_GATEWAY_API_KEY_MAIN}
       AI_GATEWAY_BASE_URL: http://llm-gateway:8083
@@ -258,6 +303,7 @@ services:
       UPLOAD_ROOT: /data/uploads
     volumes:
       - uploads:/data/uploads
+    mem_limit: ${BACKEND_MEM_LIMIT:-768m}
     depends_on:
       postgres:
         condition: service_healthy
@@ -268,13 +314,12 @@ services:
       llm-gateway:
         condition: service_started
     networks:
-      default:
-        ipv4_address: 172.28.0.15
+      - default
 
   asset-service:
     <<: *java-base
     image: aistoryboard/asset-service:${IMAGE_TAG}
-    container_name: aistoryboard-asset-service
+    container_name: ${STACK_PREFIX:-aistoryboard}-asset-service
     build:
       context: ./build/asset-service
       dockerfile: ../../service/Dockerfile
@@ -289,9 +334,9 @@ services:
       ASSET_SIGNING_SECRET: ${INTERNAL_SECRET}
       STORYBOARD_ORPHAN_SCAN_ENABLED: "false"
       STORYBOARD_TRASH_RETENTION_DAYS: "3"
+    mem_limit: ${ASSET_SERVICE_MEM_LIMIT:-512m}
     networks:
-      default:
-        ipv4_address: 172.28.0.17
+      - default
     depends_on:
       postgres:
         condition: service_healthy
@@ -301,7 +346,7 @@ services:
   canvas:
     <<: *java-base
     image: aistoryboard/canvas:${IMAGE_TAG}
-    container_name: aistoryboard-canvas
+    container_name: ${STACK_PREFIX:-aistoryboard}-canvas
     build:
       context: ./build/canvas
       dockerfile: ../../service/Dockerfile
@@ -315,13 +360,12 @@ services:
       AI_GATEWAY_BASE_URL: http://llm-gateway:8083
       AI_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY_AGENT}
       LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY_AGENT}
-      CORS_ORIGINS: http://localhost,http://127.0.0.1
       UPLOAD_ROOT: /data/uploads
     volumes:
       - uploads:/data/uploads
+    mem_limit: ${CANVAS_MEM_LIMIT:-768m}
     networks:
-      default:
-        ipv4_address: 172.28.0.18
+      - default
     depends_on:
       postgres:
         condition: service_healthy
@@ -331,7 +375,7 @@ services:
   moon-agent:
     <<: *java-base
     image: aistoryboard/moon-agent:${IMAGE_TAG}
-    container_name: aistoryboard-moon-agent
+    container_name: ${STACK_PREFIX:-aistoryboard}-moon-agent
     build:
       context: ./build/moon-agent
       dockerfile: ../../service/Dockerfile
@@ -345,16 +389,15 @@ services:
       AI_GATEWAY_BASE_URL: http://llm-gateway:8083
       AI_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY_AGENT}
       LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY_AGENT}
-      # 网页搜索：唯一后端是 DeepSeek 原生搜索（Anthropic 兼容 Messages + 服务端工具
-      # web_search_20250305）。曾经还有一个自托管 SearXNG 容器可选；那个实例不常驻时
-      # /chat 的每次「网页搜索」都报连接失败，所以整条链路已移除，只留可用的这条。
+      # 网页搜索：唯一后端是 DeepSeek 原生搜索；留空 = 不注册联网检索工具。
       AGENTSCOPE_WEB_SEARCH_API_KEY: ${AGENTSCOPE_WEB_SEARCH_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       AGENTSCOPE_WEB_SEARCH_BASE_URL: ${AGENTSCOPE_WEB_SEARCH_BASE_URL:-https://api.deepseek.com/anthropic/v1}
       AGENTSCOPE_NACOS_ENABLED: "false"
-      AGENT_SANDBOX_ENABLED: "true"
+      # 沙箱：默认开启（数据目录已随包迁移）
+      AGENT_SANDBOX_ENABLED: ${AGENT_SANDBOX_ENABLED:-true}
       MOON_SANDBOX_BASE_URL: http://sandbox-runner:8090
-      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET}
+      MOON_SANDBOX_INTERNAL_SECRET: ${SANDBOX_INTERNAL_SECRET:?SANDBOX_INTERNAL_SECRET is required}
       # 画布 MCP：canvas 服务同时提供图命令（canvas_graph_*）与浏览器执行命令（canvas_execute_*）
       MORROW_CANVAS_SERVER_URL: ${MORROW_CANVAS_SERVER_URL:-http://canvas:9090}
       VIDEO_MERGE_FFMPEG_PATH: /usr/bin/ffmpeg
@@ -362,14 +405,13 @@ services:
       UPLOAD_ROOT: /data/uploads
     volumes:
       - uploads:/data/uploads
+    mem_limit: ${MOON_AGENT_MEM_LIMIT:-1536m}
     extra_hosts:
       # 让容器能访问宿主上的服务（Docker Desktop 自带，Linux 需要这条）
       - "host.docker.internal:host-gateway"
     networks:
-      default:
-        # moon-agent 的应用网固定地址（同时接入沙箱网，直连路由靠它稳定不变）
-        ipv4_address: ${MOON_AGENT_REGISTER_IP}
-      sandbox-edge: {}
+      - default
+      - sandbox-edge
     depends_on:
       postgres:
         condition: service_healthy
@@ -387,7 +429,7 @@ services:
   api-gateway:
     <<: *java-base
     image: aistoryboard/api-gateway:${IMAGE_TAG}
-    container_name: aistoryboard-api-gateway
+    container_name: ${STACK_PREFIX:-aistoryboard}-api-gateway
     build:
       context: ./build/api-gateway
       dockerfile: ../../service/Dockerfile
@@ -398,9 +440,9 @@ services:
       <<: *java-base-env
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
+    mem_limit: ${API_GATEWAY_MEM_LIMIT:-512m}
     networks:
-      default:
-        ipv4_address: 172.28.0.19
+      - default
     depends_on:
       redis:
         condition: service_healthy
@@ -413,18 +455,19 @@ services:
       canvas:
         condition: service_started
 
+  # ── 公网入口：主站 + 画布站 + /api 反代 ────────────────────────────────
   frontend:
     image: aistoryboard/frontend:${IMAGE_TAG}
-    container_name: aistoryboard-frontend
+    container_name: ${STACK_PREFIX:-aistoryboard}-frontend
     restart: unless-stopped
     build:
       context: ./build/frontend
       dockerfile: ../../frontend/Dockerfile
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "${FRONTEND_BIND_IP:-0.0.0.0}:${FRONTEND_PORT:-80}:80"
+    mem_limit: ${FRONTEND_MEM_LIMIT:-128m}
     networks:
-      default:
-        ipv4_address: 172.28.0.20
+      - default
     depends_on:
       api-gateway:
         condition: service_started
@@ -436,22 +479,22 @@ services:
       start_period: 10s
 
 volumes:
-  aistoryboard-pgdata:
+  pgdata:
+    name: ${STACK_PREFIX:-aistoryboard}-pgdata
   uploads:
-    name: aistoryboard-uploads
+    name: ${STACK_PREFIX:-aistoryboard}-uploads
   redis-data:
+    name: ${STACK_PREFIX:-aistoryboard}-redis-data
   sandbox-workspaces:
+    name: ${STACK_PREFIX:-aistoryboard}-sandbox-workspaces
 
 networks:
   default:
-    name: aistoryboard
-    ipam:
-      config:
-        - subnet: ${APP_NETWORK_SUBNET}
+    name: ${STACK_PREFIX:-aistoryboard}
   sandbox-internal:
-    name: moon-sandbox-internal
+    name: ${STACK_PREFIX:-aistoryboard}-sandbox-internal
     internal: true
   sandbox-egress:
-    name: moon-sandbox-egress
+    name: ${STACK_PREFIX:-aistoryboard}-sandbox-egress
   sandbox-edge:
-    name: moon-sandbox-edge
+    name: ${STACK_PREFIX:-aistoryboard}-sandbox-edge

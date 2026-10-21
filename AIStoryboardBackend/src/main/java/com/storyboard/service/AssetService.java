@@ -20,6 +20,12 @@ public interface AssetService {
     /** 列表：项目资产（project_id=指定项目）∪ 用户全局资产（project_id IS NULL），可按 type 过滤。 */
     List<AssetVO> list(String userId, String projectId, String type);
 
+    /**
+     * 内部 Agent 用：项目 + 全局的 AI 资产（含迁移产生、ai_kind 非空的 GROUP 资产）。
+     * 与 {@link #list} 的区别是不按 asset_type=AI_ASSET 过滤，避免旧资产迁移后丢失。
+     */
+    List<AssetVO> listAgentAssets(String userId, String projectId);
+
     /** 更新资产（改名/改文字约束）。 */
     AssetVO update(String userId, String assetId, AssetUpdateRequest request);
 

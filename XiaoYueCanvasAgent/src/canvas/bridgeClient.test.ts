@@ -75,6 +75,49 @@ describe('startCanvasBridge', () => {
     }, { timeout: 3000 });
   });
 
+  it('本地图落后（NODE_NOT_FOUND）时先对齐服务端画布、再重试一次同一条命令', async () => {
+    let polls = 0;
+    apiFetch.mockImplementation(async (path: string) => {
+      if (path.startsWith('/bridge/health')) return jsonResponse({ ok: true });
+      if (path.startsWith('/bridge/register')) return jsonResponse({ ok: true });
+      if (path.startsWith('/bridge/poll')) {
+        polls += 1;
+        return jsonResponse(polls === 1
+          ? { command: { requestId: 'req-stale', method: 'canvas.group.create', params: { nodeIds: ['n1', 'n2'] }, source: 'mcp' } }
+          : {});
+      }
+      if (path.startsWith('/bridge/result')) return jsonResponse({ ok: true });
+      return jsonResponse({});
+    });
+    executeToolCall
+      .mockResolvedValueOnce({ ok: false, error: { code: 'NODE_NOT_FOUND', message: '节点不存在：n1、n2' } })
+      .mockResolvedValueOnce({ ok: true, status: 'applied', result: { groupId: 'group-1' } });
+
+    // 宿主 App 收到 resync 请求 → 整图重载 → 回 resynced
+    let resyncRequests = 0;
+    const onResync = () => {
+      resyncRequests += 1;
+      window.dispatchEvent(new CustomEvent('morrow:canvas-resynced', { detail: {} }));
+    };
+    window.addEventListener('morrow:canvas-resync', onResync);
+
+    try {
+      const { startCanvasBridge } = await import('./bridgeClient');
+      stop = startCanvasBridge('project-1', 'canvas-1');
+
+      await vi.waitFor(() => expect(executeToolCall).toHaveBeenCalledTimes(2), { timeout: 5000 });
+      expect(resyncRequests).toBe(1);
+      // 重试用的是同一条命令
+      expect(executeToolCall.mock.calls[1][1]).toMatchObject({ name: 'canvas.group.create' });
+
+      const resultCall = apiFetch.mock.calls.find((call) => String(call[0]) === '/bridge/result');
+      const body = JSON.parse(String((resultCall?.[1] as RequestInit).body));
+      expect(body.response).toMatchObject({ ok: true, status: 'applied', result: { groupId: 'group-1' } });
+    } finally {
+      window.removeEventListener('morrow:canvas-resync', onResync);
+    }
+  }, 10_000);
+
   it('轮询遇到 401/403 时不清场、不中断，服务恢复后继续领取命令', async () => {
     let polls = 0;
     apiFetch.mockImplementation(async (path: string) => {

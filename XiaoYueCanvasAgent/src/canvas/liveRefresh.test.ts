@@ -35,14 +35,14 @@ describe('decideLiveRefresh', () => {
       .toEqual({ action: 'reload-after-conflict', reason: 'retries-exhausted' });
   });
 
-  it('有保存在飞时让路（避免用服务端图盖掉即将提交的编辑）', () => {
+  it('有保存在飞时仍然读 revision，只把整图重载推迟到这次保存落地', () => {
     expect(decideLiveRefresh({ ...base, savingInFlight: true }))
-      .toEqual({ action: 'skip', reason: 'in-flight' });
+      .toEqual({ action: 'check', deferReload: true });
   });
 
-  it('防抖窗口内有编辑时让路', () => {
+  it('防抖窗口内有编辑时同样只推迟重载，不停掉 revision 检查', () => {
     expect(decideLiveRefresh({ ...base, hasPendingDebounce: true }))
-      .toEqual({ action: 'skip', reason: 'debounce' });
+      .toEqual({ action: 'check', deferReload: true });
   });
 
   it('页面隐藏时什么都不做', () => {
@@ -50,13 +50,23 @@ describe('decideLiveRefresh', () => {
       .toEqual({ action: 'skip', reason: 'hidden' });
   });
 
+  it('拖动节点中不整图重载（否则节点会被打回服务端旧位置）', () => {
+    expect(decideLiveRefresh({ ...base, dragging: true }))
+      .toEqual({ action: 'skip', reason: 'dragging' });
+  });
+
+  it('本地批次执行中不整图重载（executions 是内存态，重载会把批次换掉）', () => {
+    expect(decideLiveRefresh({ ...base, executing: true }))
+      .toEqual({ action: 'skip', reason: 'executing' });
+  });
+
   it('隐藏优先于重试保存（后台标签页不发请求）', () => {
     expect(decideLiveRefresh({ ...base, hidden: true, hasLocalChanges: true }))
       .toEqual({ action: 'skip', reason: 'hidden' });
   });
 
-  it('保存进行中优先于未落库改动（先让这次保存落地）', () => {
+  it('保存进行中时也先推迟重载（等这次保存落地，避免盖掉本地改动）', () => {
     expect(decideLiveRefresh({ ...base, savingInFlight: true, hasLocalChanges: true }))
-      .toEqual({ action: 'skip', reason: 'in-flight' });
+      .toEqual({ action: 'check', deferReload: true });
   });
 });

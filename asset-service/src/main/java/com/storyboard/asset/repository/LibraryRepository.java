@@ -1284,7 +1284,25 @@ public class LibraryRepository {
         return updated == 1;
     }
 
-    /** 挑片标记：整组覆盖 rating/flag/colorLabel，空值即清除。 */
+    /**
+     * 挑片标记的写入 SQL。
+     *
+     * <p>刻意不写 {@code version = version + 1}：版本号是素材内容的修订号，也是名称/描述/媒体等
+     * 编辑操作的乐观锁 token。星级、旗标、色标属于挑片标注，不是内容修订；如果每点一次就 +1，
+     * 检查器里连续点五星会让卡片上的 v 号一路跳，还会把别人正在编辑的
+     * {@code expectedVersion} 判成过期。标注本身是 last-write-wins（mark 接口不带 expectedVersion），
+     * 不需要用版本号做并发保护。真正的内容写入仍各自递增版本。
+     */
+    static final String UPDATE_MARKS_SQL = """
+            UPDATE asset.library_assets
+            SET rating = :rating,
+                flag = :flag,
+                color_label = :colorLabel,
+                updated_at = now()
+            WHERE id = :id AND owner_user_id = :userId AND status = 'ACTIVE'
+            """;
+
+    /** 挑片标记：整组覆盖 rating/flag/colorLabel，空值即清除；不递增版本号，见 {@link #UPDATE_MARKS_SQL}。 */
     public boolean updateMarks(
             String userId,
             String assetId,
@@ -1292,15 +1310,7 @@ public class LibraryRepository {
             String flag,
             String colorLabel
     ) {
-        return client.sql("""
-                        UPDATE asset.library_assets
-                        SET rating = :rating,
-                            flag = :flag,
-                            color_label = :colorLabel,
-                            version = version + 1,
-                            updated_at = now()
-                        WHERE id = :id AND owner_user_id = :userId AND status = 'ACTIVE'
-                        """)
+        return client.sql(UPDATE_MARKS_SQL)
                 .param("id", assetId)
                 .param("userId", userId)
                 .param("rating", rating)

@@ -51,7 +51,7 @@ export function ConversationStatusCard({
     <div className="chat-status-card" style={{
       position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, right: 0,
       width: 'auto',
-      background: 'white', border: `1px solid ${T.border}`, borderRadius: 14,
+      background: 'var(--color-panel)', border: `1px solid ${T.border}`, borderRadius: 14,
       boxShadow: '0 8px 28px rgba(0,0,0,0.14)', padding: '12px 14px', zIndex: 1100,
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>

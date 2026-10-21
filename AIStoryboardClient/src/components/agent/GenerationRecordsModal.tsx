@@ -244,7 +244,7 @@ function TextPreviewModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 'min(880px, 94vw)', height: 'min(80vh, 720px)', background: 'white',
+          width: 'min(880px, 94vw)', height: 'min(80vh, 720px)', background: 'var(--color-panel)',
           borderRadius: 14, display: 'flex', flexDirection: 'column', overflow: 'hidden',
           boxShadow: '0 16px 64px rgba(0,0,0,0.3)',
         }}
@@ -391,7 +391,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
           onClick={(e) => e.stopPropagation()}
           style={{
             width: 'min(1080px, 96vw)', maxWidth: '96vw', height: 'min(84vh, 780px)',
-            maxHeight: '90vh', background: 'white', borderRadius: 16,
+            maxHeight: '90vh', background: 'var(--color-panel)', borderRadius: 16,
             boxShadow: '0 16px 64px rgba(0,0,0,0.28)', display: 'flex', flexDirection: 'column',
             overflow: 'hidden',
           }}
@@ -454,7 +454,7 @@ export function GenerationRecordsModal({ open, onClose }: { open: boolean; onClo
             <button
               onClick={resetFilters}
               style={{
-                marginLeft: 'auto', border: '1px solid var(--color-hairline)', background: 'white',
+                marginLeft: 'auto', border: '1px solid var(--color-hairline)', background: 'var(--color-panel)',
                 borderRadius: 8, padding: '5px 12px', fontSize: 13, color: DS.textSecondary, cursor: 'pointer',
               }}
             >重置</button>
@@ -548,7 +548,7 @@ function RecordCard({
   return (
     <div style={{
       border: `1px solid ${active ? DS.brand : 'var(--color-hairline)'}`,
-      borderRadius: 12, padding: 10, background: active ? 'rgba(29,78,216,0.04)' : 'white',
+      borderRadius: 12, padding: 10, background: active ? 'rgba(29,78,216,0.04)' : 'var(--color-panel)',
       display: 'flex', gap: 10, cursor: 'pointer', transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
       }}
       onClick={onOpenDetail}
@@ -942,7 +942,7 @@ function Tag({ children }: { children: React.ReactNode }) {
   return (
     <span style={{
       fontSize: 11, padding: '1px 7px', borderRadius: 6, border: '1px solid var(--color-hairline)',
-      color: 'var(--color-muted)', background: 'white', whiteSpace: 'nowrap',
+      color: 'var(--color-muted)', background: 'var(--color-panel)', whiteSpace: 'nowrap',
     }}>{children}</span>
   );
 }
@@ -957,7 +957,7 @@ function statusChip(color: string, bg: string): React.CSSProperties {
 function chipStyle(active: boolean): React.CSSProperties {
   return {
     border: `1px solid ${active ? DS.brand : 'var(--color-hairline)'}`,
-    background: active ? DS.brand : 'white', color: active ? 'white' : DS.textSecondary,
+    background: active ? DS.brand : 'var(--color-panel)', color: active ? 'var(--color-on-primary)' : DS.textSecondary,
     borderRadius: 8, padding: '5px 10px', fontSize: 13, cursor: 'pointer',
   };
 }
@@ -975,18 +975,18 @@ const filterLabel: React.CSSProperties = {
 };
 
 const selectStyle: React.CSSProperties = {
-  border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white',
+  border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)',
   padding: '5px 8px', fontSize: 13, color: DS.ink, cursor: 'pointer',
 };
 
 const dateStyle: React.CSSProperties = {
-  border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white',
+  border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)',
   padding: '5px 8px', fontSize: 13, color: DS.ink,
 };
 
 const pageBtn: React.CSSProperties = {
   fontSize: 13, border: '1px solid var(--color-hairline)', borderRadius: 6,
-  padding: '4px 12px', background: 'white', cursor: 'pointer',
+  padding: '4px 12px', background: 'var(--color-panel)', cursor: 'pointer',
   color: 'var(--color-ink)',
 };
 

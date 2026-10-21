@@ -46,10 +46,12 @@ public class UserServiceImpl implements UserService {
     private static final String DEFAULT_APPROVAL_MODE = "PLAN_APPROVAL";
     private static final String DEFAULT_BUSY_SEND_BEHAVIOR = "steer";
     private static final String DEFAULT_WORK_STEP_DISPLAY = "detailed";
+    private static final String DEFAULT_THEME_PREFERENCE = "light";
     private static final Set<String> APPROVAL_MODES =
             Set.of("PLAN_APPROVAL", "REQUEST_APPROVAL", "FULL_ACCESS");
     private static final Set<String> BUSY_SEND_BEHAVIORS = Set.of("queue", "steer");
     private static final Set<String> WORK_STEP_DISPLAYS = Set.of("thinking", "standard", "detailed");
+    private static final Set<String> THEME_PREFERENCES = Set.of("light", "dark", "system");
     private static final int MAX_FEEDBACK_IMAGES = 6;
 
     private final UserMapper userMapper;
@@ -137,6 +139,7 @@ public class UserServiceImpl implements UserService {
             row.setDefaultApprovalMode(DEFAULT_APPROVAL_MODE);
             row.setBusySendBehavior(DEFAULT_BUSY_SEND_BEHAVIOR);
             row.setWorkStepDisplay(DEFAULT_WORK_STEP_DISPLAY);
+            row.setThemePreference(DEFAULT_THEME_PREFERENCE);
             row.setCreatedAt(now);
         }
         if (request.defaultApprovalMode() != null) {
@@ -160,10 +163,18 @@ public class UserServiceImpl implements UserService {
             }
             row.setWorkStepDisplay(display);
         }
+        if (request.themePreference() != null) {
+            String theme = request.themePreference().trim().toLowerCase();
+            if (!THEME_PREFERENCES.contains(theme)) {
+                throw new BusinessException(40001, "不支持主题偏好：" + request.themePreference());
+            }
+            row.setThemePreference(theme);
+        }
         // 历史行/手工插入可能出现空值：保存时一并收敛到默认值。
         if (row.getDefaultApprovalMode() == null) row.setDefaultApprovalMode(DEFAULT_APPROVAL_MODE);
         if (row.getBusySendBehavior() == null) row.setBusySendBehavior(DEFAULT_BUSY_SEND_BEHAVIOR);
         if (row.getWorkStepDisplay() == null) row.setWorkStepDisplay(DEFAULT_WORK_STEP_DISPLAY);
+        if (row.getThemePreference() == null) row.setThemePreference(DEFAULT_THEME_PREFERENCE);
         row.setUpdatedAt(now);
         if (insert) {
             userSettingsMapper.insert(row);
@@ -226,7 +237,8 @@ public class UserServiceImpl implements UserService {
     private UserSettingsResponse toSettingsResponse(UserSettings row) {
         if (row == null) {
             return new UserSettingsResponse(
-                    DEFAULT_APPROVAL_MODE, DEFAULT_BUSY_SEND_BEHAVIOR, DEFAULT_WORK_STEP_DISPLAY);
+                    DEFAULT_APPROVAL_MODE, DEFAULT_BUSY_SEND_BEHAVIOR, DEFAULT_WORK_STEP_DISPLAY,
+                    DEFAULT_THEME_PREFERENCE);
         }
         String mode = row.getDefaultApprovalMode() != null
                 && APPROVAL_MODES.contains(row.getDefaultApprovalMode())
@@ -237,7 +249,10 @@ public class UserServiceImpl implements UserService {
         String display = row.getWorkStepDisplay() != null
                 && WORK_STEP_DISPLAYS.contains(row.getWorkStepDisplay())
                 ? row.getWorkStepDisplay() : DEFAULT_WORK_STEP_DISPLAY;
-        return new UserSettingsResponse(mode, behavior, display);
+        String theme = row.getThemePreference() != null
+                && THEME_PREFERENCES.contains(row.getThemePreference())
+                ? row.getThemePreference() : DEFAULT_THEME_PREFERENCE;
+        return new UserSettingsResponse(mode, behavior, display, theme);
     }
 
     /** 只接受站内相对路径；去掉签名 query，避免 30 天后截图链接失效。 */

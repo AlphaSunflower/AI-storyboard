@@ -143,7 +143,7 @@ export function ContextUsageRing({
             minWidth: 152,
             padding: '8px 12px',
             borderRadius: 12,
-            background: T.ink,
+            background: 'var(--color-surface-dark)',
             border: `1px solid ${T.borderStrong}`,
             boxShadow: '0 8px 24px rgba(15, 17, 21, 0.28)',
             textAlign: 'center',
@@ -170,7 +170,7 @@ export function ContextUsageRing({
             aria-hidden="true"
             style={{
               position: 'absolute', top: '100%', right: size / 2 - 5, width: 10, height: 10,
-              background: T.ink, transform: 'translateY(-5px) rotate(45deg)', borderRadius: 2,
+              background: 'var(--color-surface-dark)', transform: 'translateY(-5px) rotate(45deg)', borderRadius: 2,
             }}
           />
         </div>

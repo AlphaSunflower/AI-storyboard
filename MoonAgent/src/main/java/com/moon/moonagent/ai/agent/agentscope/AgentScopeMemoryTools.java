@@ -1,8 +1,10 @@
 package com.moon.moonagent.ai.agent.agentscope;
 
+import com.moon.moonagent.ai.agent.memory.AgentMemoryLimits;
 import com.moon.moonagent.ai.agent.memory.AgentMemoryService;
 import com.moon.moonagent.entity.AgentConversation;
 import com.moon.moonagent.entity.AgentMemory;
+import com.storyboard.common.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -34,7 +36,13 @@ public class AgentScopeMemoryTools {
                 REMEMBER_MEMORY,
                 "Record a durable project fact that should survive future conversations "
                         + "(goal, visual style, hard constraint, confirmed decision, user feedback). "
-                        + "Do not use for one-off instructions or transient chat.",
+                        + "Do not use for one-off instructions or transient chat. "
+                        + "Project memory is agent-owned: the user can only delete entries, and the "
+                        + "separate global memory is user-maintained and not writable here. "
+                        + "Project memory is capped at " + AgentMemoryLimits.PROJECT_MAX
+                        + " entries per project and " + AgentMemoryLimits.USER_MAX
+                        + " per account; when a write is rejected, tell the user the exact reason "
+                        + "(cap reached or memory disabled) instead of retrying or claiming success.",
                 AgentScopeTool.schema(Map.of(
                         "kind", Map.of("type", "string",
                                 "enum", List.of("goal", "style", "constraint", "decision", "feedback")),
@@ -47,19 +55,24 @@ public class AgentScopeMemoryTools {
                     AgentScopeRunContext context = AgentScopeToolPipeline.context(param);
                     AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
                     int days = positiveInt(input.get("expires_days"), 0);
-                    AgentMemory memory = memories.remember(
-                            conversation.getUserId(), conversation.getProjectId(), conversation.getId(),
-                            text(input.get("kind")), text(input.get("content")),
-                            "agent", number(input.get("confidence")),
-                            days > 0 ? OffsetDateTime.now().plusDays(days) : null);
-                    Map<String, Object> result = new LinkedHashMap<>();
-                    result.put("id", memory.getId());
-                    result.put("projectId", memory.getProjectId());
-                    result.put("kind", memory.getKind());
-                    result.put("content", memory.getContent());
-                    result.put("confidence", memory.getConfidence());
-                    result.put("expiresAt", memory.getExpiresAt());
-                    return result;
+                    try {
+                        AgentMemory memory = memories.remember(
+                                conversation.getUserId(), conversation.getProjectId(), conversation.getId(),
+                                text(input.get("kind")), text(input.get("content")),
+                                "agent", number(input.get("confidence")),
+                                days > 0 ? OffsetDateTime.now().plusDays(days) : null);
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("id", memory.getId());
+                        result.put("projectId", memory.getProjectId());
+                        result.put("kind", memory.getKind());
+                        result.put("content", memory.getContent());
+                        result.put("confidence", memory.getConfidence());
+                        result.put("expiresAt", memory.getExpiresAt());
+                        return result;
+                    } catch (BusinessException | IllegalArgumentException error) {
+                        // 容量/校验类拒绝必须是模型可见的结构化失败，不能静默吞掉后继续声称“已记住”。
+                        return failure(conversation.getProjectId(), error.getMessage());
+                    }
                 });
     }
 
@@ -76,12 +89,25 @@ public class AgentScopeMemoryTools {
                 (input, param) -> {
                     AgentScopeRunContext context = AgentScopeToolPipeline.context(param);
                     AgentConversation conversation = AgentScopeSessionTools.requireConversation(context);
+                    if (!memories.enabled(conversation.getUserId())) {
+                        return failure(conversation.getProjectId(),
+                                "记忆管理已关闭，当前无法召回项目记忆");
+                    }
                     List<AgentMemory> rows = memories.recall(
                             conversation.getProjectId(), text(input.get("query")),
                             positiveInt(input.get("limit"), 5));
                     return Map.of("projectId", conversation.getProjectId(),
                             "memories", rows.stream().map(AgentScopeMemoryTools::view).toList());
                 });
+    }
+
+    private static Map<String, Object> failure(String projectId, String message) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("ok", false);
+        result.put("code", "MEMORY_UNAVAILABLE");
+        result.put("projectId", projectId);
+        result.put("message", message == null || message.isBlank() ? "记忆当前不可用" : message);
+        return result;
     }
 
     private static Map<String, Object> view(AgentMemory memory) {

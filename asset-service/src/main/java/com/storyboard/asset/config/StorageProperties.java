@@ -17,7 +17,8 @@ public record StorageProperties(
         int orphanScanIntervalHours,
         int orphanScanGraceHours
 ) {
-    public static final int DEFAULT_TRASH_RETENTION_DAYS = 3;
+    /** 回收站保留期：1 天（到期由 TrashPurgeWorker 入清理队列）。 */
+    public static final int DEFAULT_TRASH_RETENTION_DAYS = 1;
     public static final int DEFAULT_ORPHAN_SCAN_INTERVAL_HOURS = 6;
     public static final int DEFAULT_ORPHAN_SCAN_GRACE_HOURS = 24;
 

@@ -56,7 +56,8 @@ storyboard:
     upload-part-size-bytes: 8388608
     upload-session-ttl-hours: 24
     signed-url-ttl-minutes: 15
-    trash-retention-days: ${STORYBOARD_TRASH_RETENTION_DAYS:3}
+    # 回收站保留 1 天：到期且仍无活跃引用的对象才进清理队列；图片/文档原件不在回收站链路上。
+    trash-retention-days: ${STORYBOARD_TRASH_RETENTION_DAYS:1}
     orphan-scan-enabled: ${STORYBOARD_ORPHAN_SCAN_ENABLED:false}
     orphan-scan-interval-hours: ${STORYBOARD_ORPHAN_SCAN_INTERVAL_HOURS:6}
     orphan-scan-grace-hours: ${STORYBOARD_ORPHAN_SCAN_GRACE_HOURS:24}

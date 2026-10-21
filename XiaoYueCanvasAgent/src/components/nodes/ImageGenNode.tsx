@@ -3,7 +3,7 @@ import { NodeToolbar, Position } from '@xyflow/react';
 import { Maximize2 } from 'lucide-react';
 import type { CanvasNode, RedrawMaskMark } from '../../types';
 import { buildReferenceImagePool } from '../../canvas/referenceImagePool';
-import { submitImageGeneration, submitImageMultiAngle, submitImageRedraw } from '../../services/jobRunner';
+import { submitImageEdit, submitImageGeneration, submitImageMultiAngle, submitImageRedraw } from '../../services/jobRunner';
 import { useMediaStore } from '../../store/mediaStore';
 import { useAssetPreviewUrl } from '../../hooks/useAssetPreviewUrl';
 import { usePresence } from '../../hooks/usePresence';
@@ -208,8 +208,24 @@ export const ImageGenNode = memo(function ImageGenNode({ id, data, updateNode, t
       ).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '多角度提交失败'));
       return;
     }
+    const gatewayParams = data.gatewayParams && typeof data.gatewayParams === 'object'
+      ? data.gatewayParams as Record<string, unknown>
+      : {};
+    // 没有区域重绘数据（掩码）时按「整图编辑」在同一个节点继续生成：
+    // 不要退回「请从图片节点重新发起」——那会让用户再付一次生成费用，而且节点上什么都不会发生。
     if (!data.redraw) {
-      setDraftFeedback('该图生图节点缺少区域重绘数据，请从图片节点重新发起');
+      void submitImageEdit(String(textDraft ?? data.prompt ?? ''), id, setDraftFeedback, {
+        sourceAssetIds: referencePool.assetIds ?? [],
+        sourceNodeIds: referencePool.entries.map((entry) => entry.sourceNodeId),
+        params: {
+          ...gatewayParams,
+          model: data.model,
+          size: data.size,
+          quality: data.quality,
+          style: data.style,
+          n: data.n,
+        },
+      }).catch((error) => setDraftFeedback(error instanceof Error ? error.message : '图生图提交失败'));
       return;
     }
     const sourceEntry = referencePool.entries[0];
@@ -218,9 +234,6 @@ export const ImageGenNode = memo(function ImageGenNode({ id, data, updateNode, t
       setDraftFeedback('图生图节点缺少源图片');
       return;
     }
-    const gatewayParams = data.gatewayParams && typeof data.gatewayParams === 'object'
-      ? data.gatewayParams as Record<string, unknown>
-      : {};
     void submitImageRedraw(
       String(textDraft ?? data.prompt ?? ''),
       id,

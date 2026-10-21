@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -47,6 +48,20 @@ class ToolCatalogTest {
         assertThat(canvas.skills()).contains("image", "video", "canvas-design", "canvas-run");
         assertThat(canvas.groups()).doesNotContain(ToolCatalog.STORYBOARD_TOOLS);
         assertThat(canvas.groups()).contains(ToolCatalog.IMAGE_TOOLS, ToolCatalog.VIDEO_TOOLS);
+    }
+
+    @Test
+    void optionalSkillsOnlyAppearWhenReferenced() {
+        assertThat(ToolCatalog.profileFor(false).skills())
+                .as("ppt-master 默认不挂载")
+                .doesNotContain("ppt-master");
+        assertThat(ToolCatalog.profileFor(false, Set.of("ppt-master")).skills())
+                .contains("ppt-master");
+        assertThat(ToolCatalog.profileFor(false, Set.of("unknown-skill")).skills())
+                .doesNotContain("unknown-skill");
+        assertThat(ToolCatalog.profileFor(true, Set.of("ppt-master")).skills())
+                .as("画布编辑回合不叠加可选技能")
+                .doesNotContain("ppt-master");
     }
 
     @Test

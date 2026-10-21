@@ -9,4 +9,12 @@ describe('design tokens', () => {
     expect(css).toContain('--color-surface: #faf9f5;');
     expect(css).toContain('--color-bg: #faf9f5;');
   });
+
+  it('ships a dark theme with an opaque panel surface', () => {
+    const css = readFileSync(resolve(__dirname, 'theme.css'), 'utf8');
+
+    expect(css).toContain(":root[data-theme='dark']");
+    expect(css).toContain('--color-panel: #1e1c19;');
+    expect(css).toContain('--color-canvas: #151411;');
+  });
 });

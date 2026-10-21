@@ -44,6 +44,7 @@ vi.mock('./canvas/generationRuntime', () => ({
 
 vi.mock('./canvas/graphExecutionService', () => ({
   recoverGraphExecutions: vi.fn(),
+  syncServerExecutions: vi.fn(async () => undefined),
 }));
 
 vi.mock('./services/canvasMedia', async (importOriginal) => {

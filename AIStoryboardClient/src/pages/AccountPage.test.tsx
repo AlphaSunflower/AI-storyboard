@@ -8,6 +8,7 @@ import { useAccountSettingsStore, DEFAULT_ACCOUNT_SETTINGS } from '../stores/acc
 import { useAgentStore } from '../stores/agentStore';
 import { userApi } from '../api/user';
 import { memoryApi } from '../api/memory';
+import { applyThemePreference } from '../lib/theme';
 
 vi.mock('../api/user', () => ({
   userApi: {
@@ -23,10 +24,20 @@ vi.mock('../api/user', () => ({
   },
 }));
 vi.mock('../api/memory', () => ({
-  memoryApi: { list: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  memoryApi: {
+    list: vi.fn(),
+    settings: vi.fn(),
+    updateSettings: vi.fn(),
+    saveGlobal: vi.fn(),
+    clearGlobal: vi.fn(),
+    remove: vi.fn(),
+  },
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  applyThemePreference('light');
+});
 
 describe('AccountPage 菜单与记忆管理', () => {
   beforeEach(() => {
@@ -73,14 +84,29 @@ describe('AccountPage 菜单与记忆管理', () => {
         }],
       },
     } as never);
-    vi.mocked(memoryApi.update).mockResolvedValue({
+    vi.mocked(memoryApi.settings).mockResolvedValue({
       data: {
         data: {
-          id: 'm1', projectId: 'p1', kind: 'constraint',
-          content: '新内容', source: 'agent', confidence: 0.9,
+          enabled: true,
+          global: { content: '所有项目都用中文回复' },
+          limits: { project: 200, user: 500, contentChars: 4000 },
         },
       },
     } as never);
+    vi.mocked(memoryApi.updateSettings).mockImplementation(async (enabled: boolean) => ({
+      data: {
+        data: {
+          enabled,
+          global: { content: '所有项目都用中文回复' },
+          limits: { project: 200, user: 500, contentChars: 4000 },
+        },
+      },
+    } as never));
+    vi.mocked(memoryApi.saveGlobal).mockResolvedValue({
+      data: { data: { content: '不要使用霓虹色', updatedAt: '2026-10-20T10:00:00+08:00' } },
+    } as never);
+    vi.mocked(memoryApi.clearGlobal).mockResolvedValue({ data: { data: true } } as never);
+    vi.mocked(memoryApi.remove).mockResolvedValue({ data: { data: true } } as never);
   });
 
   async function openMemories() {
@@ -101,6 +127,7 @@ describe('AccountPage 菜单与记忆管理', () => {
     expect(screen.getByText('暂无余额变动')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /通用设置/ }));
+    expect(screen.getByText('外观')).toBeTruthy();
     expect(screen.getByText('全局权限')).toBeTruthy();
     expect(screen.getByText('繁忙时的发送行为')).toBeTruthy();
     expect(screen.getByText('工作步骤展示')).toBeTruthy();
@@ -122,6 +149,22 @@ describe('AccountPage 菜单与记忆管理', () => {
     await waitFor(() => expect(
       useAccountSettingsStore.getState().settings.busySendBehavior,
     ).toBe('queue'));
+  });
+
+  it('选择深色外观会立即切换主题并持久化', async () => {
+    render(<MemoryRouter><AccountPage /></MemoryRouter>);
+
+    await waitFor(() => expect(screen.getByText('测试用户')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /通用设置/ }));
+    fireEvent.click(screen.getByRole('radio', { name: '深色' }));
+
+    await waitFor(() => expect(userApi.updateSettings).toHaveBeenCalledWith({
+      themePreference: 'dark',
+    }));
+    await waitFor(() => expect(
+      useAccountSettingsStore.getState().settings.themePreference,
+    ).toBe('dark'));
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
   it('选择完全权限后，新会话草稿沿用完全访问', async () => {
@@ -190,27 +233,54 @@ describe('AccountPage 菜单与记忆管理', () => {
     await waitFor(() => expect(screen.getByText('已处理')).toBeTruthy());
   });
 
-  it('加载并展示项目记忆', async () => {
+  it('展示全局记忆与记忆管理开关', async () => {
     await openMemories();
 
     await waitFor(() => expect(screen.getByText('门洞必须 1.8×1.2m')).toBeTruthy());
-    expect(screen.getByText('约束')).toBeTruthy();
-    expect(screen.getByText('测试项目')).toBeTruthy();
+    expect(screen.getByText('全局记忆')).toBeTruthy();
+    expect(screen.getByDisplayValue('所有项目都用中文回复')).toBeTruthy();
+    expect(screen.getByRole('switch', { name: '记忆管理开关' }).getAttribute('aria-checked'))
+      .toBe('true');
+    expect(screen.getByText(/每个项目最多 200 条/)).toBeTruthy();
   });
 
-  it('编辑记忆后调用 update 并更新列表', async () => {
+  it('关闭记忆管理会持久化并禁用全局记忆编辑', async () => {
     await openMemories();
 
     await waitFor(() => expect(screen.getByText('门洞必须 1.8×1.2m')).toBeTruthy());
-    fireEvent.click(screen.getByLabelText('编辑记忆'));
-    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: '新内容' } });
-    fireEvent.click(screen.getByText('保存'));
+    fireEvent.click(screen.getByRole('switch', { name: '记忆管理开关' }));
 
-    await waitFor(() => expect(memoryApi.update).toHaveBeenCalledWith(
-      'm1',
-      expect.objectContaining({ content: '新内容', kind: 'constraint' }),
-    ));
-    await waitFor(() => expect(screen.getByText('新内容')).toBeTruthy());
+    await waitFor(() => expect(memoryApi.updateSettings).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(
+      screen.getByRole('switch', { name: '记忆管理开关' }).getAttribute('aria-checked'),
+    ).toBe('false'));
+    expect((screen.getByDisplayValue('所有项目都用中文回复') as HTMLTextAreaElement).disabled)
+      .toBe(true);
+    expect(screen.getByText(/记忆管理已关闭/)).toBeTruthy();
+  });
+
+  it('可以保存全局记忆', async () => {
+    await openMemories();
+
+    await waitFor(() => expect(screen.getByText('门洞必须 1.8×1.2m')).toBeTruthy());
+    fireEvent.change(screen.getByDisplayValue('所有项目都用中文回复'), {
+      target: { value: '不要使用霓虹色' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(memoryApi.saveGlobal).toHaveBeenCalledWith('不要使用霓虹色'));
+    expect(screen.getByDisplayValue('不要使用霓虹色')).toBeTruthy();
+  });
+
+  it('删除项目记忆会调用 remove 并从列表移除', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await openMemories();
+
+    await waitFor(() => expect(screen.getByText('门洞必须 1.8×1.2m')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('删除记忆'));
+
+    await waitFor(() => expect(memoryApi.remove).toHaveBeenCalledWith('m1'));
+    await waitFor(() => expect(screen.queryByText('门洞必须 1.8×1.2m')).toBeNull());
+    confirmSpy.mockRestore();
   });
 });

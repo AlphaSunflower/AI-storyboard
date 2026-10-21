@@ -1,7 +1,9 @@
 # 统一部署栈本地产物（不入库）
 build/
 offline/
+data/
 .env
+.env.verify
 db/*.dump
 db/admin-scrypt.txt
 db/03-post-migrate.sql

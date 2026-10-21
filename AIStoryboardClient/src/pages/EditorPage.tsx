@@ -14,7 +14,6 @@ import { MobileScenePreview } from '../components/editor/MobileScenePreview';
 import { ScriptInputDrawer } from '../components/editor/ScriptInputDrawer';
 import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import { MobileSidebarContent } from '../components/agent/MobileSidebarContent';
-import { AssetLibraryPanel } from '../components/asset/AssetLibraryPanel';
 import AmbientGlow from '../components/AmbientGlow';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useProjectStore, getLastOpenedProjectId } from '../stores/projectStore';
@@ -38,7 +37,6 @@ export function EditorPage() {
   const [mobileView, setMobileView] = useState<'list' | 'preview'>('list');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
-  const [assetsOpen, setAssetsOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
 
   useEffect(() => {
@@ -188,10 +186,7 @@ export function EditorPage() {
           )}
         </div>
 
-        <MobileBottomNav
-          embeddedEditor={embedded}
-          onOpenAssets={() => setAssetsOpen(true)}
-        />
+        <MobileBottomNav embeddedEditor={embedded} fixed={false} />
 
         {/* 侧栏 overlay（复用 /chat） */}
         {sidebarOpen && (
@@ -215,7 +210,6 @@ export function EditorPage() {
         )}
 
         {scriptOpen && <ScriptInputDrawer onClose={() => setScriptOpen(false)} />}
-        {assetsOpen && <AssetLibraryPanel onClose={() => setAssetsOpen(false)} />}
         <GenerationProgress />
       </div>
     );

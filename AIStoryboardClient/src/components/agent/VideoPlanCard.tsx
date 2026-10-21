@@ -39,7 +39,7 @@ export function VideoPlanCard({
       <div
         style={{
           maxWidth: '82%', padding: 20, borderRadius: 16,
-          background: 'white', border: '1px solid var(--color-hairline)',
+          background: 'var(--color-panel)', border: '1px solid var(--color-hairline)',
           boxShadow: '0 2px 8px rgba(20,20,19,0.06)', textAlign: 'left',
           maxHeight: 'min(56vh, 560px)', overflowY: 'auto', overflowX: 'hidden',
           scrollbarWidth: 'thin',
@@ -113,7 +113,7 @@ export function VideoPlanCard({
                 onClick={() => submitVideoPlan('custom', selectedParams, customText.trim())}
                 style={{
                   padding: '10px 18px', border: 'none', borderRadius: 'var(--rounded-md)',
-                  background: 'var(--color-primary)', color: 'white', fontSize: 15,
+                  background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 15,
                   cursor: streaming || !customText.trim() ? 'not-allowed' : 'pointer',
                   opacity: streaming || !customText.trim() ? 0.6 : 1,
                 }}
@@ -150,8 +150,8 @@ export function VideoPlanCard({
                     }}
                     style={{
                       padding: '10px 18px', borderRadius: 'var(--rounded-md)', fontSize: 15,
-                      background: selected ? 'var(--color-primary)' : primary ? 'var(--color-primary)' : 'white',
-                      color: selected || primary ? 'white' : 'var(--color-muted)',
+                      background: selected ? 'var(--color-primary)' : primary ? 'var(--color-primary)' : 'var(--color-panel)',
+                      color: selected || primary ? 'var(--color-on-primary)' : 'var(--color-muted)',
                       border: primary ? 'none' : '1px solid var(--color-hairline)',
                       cursor: streaming || submitted ? 'not-allowed' : 'pointer', opacity: streaming || submitted ? 0.6 : 1,
                       width: '100%', textAlign: 'center',

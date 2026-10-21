@@ -31,7 +31,7 @@ const sharedInputStyle: React.CSSProperties = {
   borderRadius: 'var(--rounded-md)',
   border: '1px solid var(--color-hairline)',
   fontSize: 13,
-  background: 'white',
+  background: 'var(--color-panel)',
   color: 'var(--color-body)',
   outline: 'none',
 };

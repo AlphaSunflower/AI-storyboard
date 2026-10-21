@@ -1,5 +1,12 @@
 server:
   port: 8080
+  compression:
+    # 浏览器链路的最后一跳就是网关：gzip 在这里生效才省到浏览器
+    # （后端压过的响应会被 Apache 客户端透明解压，再原样转发就会变成明文）。
+    # text/event-stream 刻意不在列表里：压缩会攒包，SSE 的逐字流会被缓冲住。
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain,text/css,text/javascript,application/javascript
+    min-response-size: 1024
 
 spring:
   application:

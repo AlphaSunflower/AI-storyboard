@@ -109,7 +109,7 @@ const overlay: React.CSSProperties = {
 };
 const dialog: React.CSSProperties = {
   width: '100%', maxWidth: 680, maxHeight: '82dvh', display: 'flex', flexDirection: 'column',
-  overflow: 'hidden', borderRadius: 16, background: 'white',
+  overflow: 'hidden', borderRadius: 16, background: 'var(--color-panel)',
   boxShadow: '0 18px 48px rgba(15,17,21,0.24)',
 };
 const header: React.CSSProperties = {
@@ -125,9 +125,9 @@ const iconButton: React.CSSProperties = {
 };
 const ghostButton: React.CSSProperties = {
   padding: '8px 16px', borderRadius: 10, border: '1px solid var(--color-hairline)',
-  background: 'white', color: 'var(--color-body)', fontSize: 13, cursor: 'pointer',
+  background: 'var(--color-panel)', color: 'var(--color-body)', fontSize: 13, cursor: 'pointer',
 };
 const primaryButton: React.CSSProperties = {
   padding: '8px 16px', borderRadius: 10, border: 'none',
-  background: 'var(--color-primary)', color: 'white', fontSize: 13, cursor: 'pointer',
+  background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 13, cursor: 'pointer',
 };

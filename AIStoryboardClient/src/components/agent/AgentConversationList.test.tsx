@@ -69,16 +69,20 @@ describe('AgentConversationList generation markers', () => {
     expect(setData).toHaveBeenCalledWith('text/plain', '@对话《对话二》');
   });
 
-  it('非当前会话在悬浮时显示底色，移出后恢复', () => {
+  it('非当前会话在悬浮时显示底色与品牌色，移出后恢复', () => {
     render(<AgentConversationList />);
-    const item = screen.getByText('对话二').closest('.conversation-item') as HTMLElement;
+    const title = screen.getByText('对话二');
+    const item = title.closest('.conversation-item') as HTMLElement;
     expect(item.style.background).toBe('transparent');
+    expect(title.style.color).toBe('var(--color-ink)');
 
     fireEvent.mouseEnter(item);
     expect(item.style.background).toBe('var(--color-surface-subtle)');
+    expect(title.style.color).toBe('var(--color-primary)');
 
     fireEvent.mouseLeave(item);
     expect(item.style.background).toBe('transparent');
+    expect(title.style.color).toBe('var(--color-ink)');
   });
 });
 
@@ -169,6 +173,20 @@ describe('AgentConversationList 操作通知', () => {
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
     expect(useToastStore.getState().toasts[0].title).toBe('已删除对话');
     expect(useToastStore.getState().toasts[0].description).toBe('「对话二」');
+  });
+
+  it('把删除确认挂到 body 上，不被侧栏面板的 transform 关进侧栏', () => {
+    const { container } = render(<AgentConversationList />);
+    fireEvent.click(screen.getAllByLabelText('更多操作')[1]);
+    fireEvent.click(screen.getByText('删除'));
+
+    // 侧栏面板 .chat-sidebar-panel 带 transform: translateX(0)，会成为 position: fixed 的包含块；
+    // 确认框只有 portal 到 document.body 才能覆盖整个视口，而不是缩在侧栏那块小方框里。
+    const dialog = screen.getByRole('alertdialog', { name: '删除对话' });
+    const backdrop = dialog.parentElement as HTMLElement;
+    expect(container.contains(backdrop)).toBe(false);
+    expect(backdrop.parentElement).toBe(document.body);
+    expect(backdrop.className).toContain('confirm-dialog__backdrop');
   });
 
   it('summarises a batch delete as one notice', async () => {

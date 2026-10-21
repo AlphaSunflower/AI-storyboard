@@ -112,6 +112,7 @@ export function SceneOutlineRow({
           label: '删除分镜',
           icon: <Trash2 size={13} strokeWidth={1.8} />,
           danger: true,
+          dividerBefore: true,
           onClick: () => { void removeScene(); },
         },
       ]}

@@ -243,7 +243,13 @@ export function collapsedGroupNodeIds(groups: CanvasGroup[]): Set<string> {
 }
 
 /** 组内生成类节点的执行进度。 */
-export function groupExecutionProgress(nodes: CanvasNode[]): GroupProgress {
+export function groupExecutionProgress(
+  nodes: CanvasNode[],
+  options: {
+    /** 该节点是否已经有产出（自身带素材，或它的结果槽已填上）。 */
+    hasProducedResult?: (node: CanvasNode) => boolean;
+  } = {},
+): GroupProgress {
   let total = 0;
   let active = 0;
   let done = 0;
@@ -252,6 +258,9 @@ export function groupExecutionProgress(nodes: CanvasNode[]): GroupProgress {
     const startable = getNodeDefinition(node.data.kind)?.actions.some((action) => action.automation.startable);
     if (!startable) continue;
     total += 1;
+    // 已经有结果就算完成：节点阶段可能停在上一次失败/中断（例如手动重跑成功后阶段没回收），
+    // 不能让分组标题条一直显示「失败 N/M」。
+    if (options.hasProducedResult?.(node)) { done += 1; continue; }
     const automation = node.data.automation as { phase?: string } | undefined;
     const phase = automation && typeof automation === 'object' ? automation.phase : undefined;
     const status = node.data.status;

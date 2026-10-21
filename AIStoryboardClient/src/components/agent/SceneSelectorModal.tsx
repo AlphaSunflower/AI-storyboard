@@ -68,7 +68,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 520, maxHeight: '72vh', display: 'flex', flexDirection: 'column',
-          background: 'white', borderRadius: 16,
+          background: 'var(--color-panel)', borderRadius: 16,
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           overflow: 'hidden',
         }}
@@ -88,7 +88,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
               style={{
                 padding: '5px 14px', borderRadius: 8, border: 'none',
                 background: filter === f ? 'var(--color-primary)' : 'var(--color-canvas)',
-                color: filter === f ? 'white' : 'var(--color-muted)',
+                color: filter === f ? 'var(--color-on-primary)' : 'var(--color-muted)',
                 fontSize: 13, cursor: 'pointer', fontWeight: filter === f ? 600 : 400,
               }}
             >
@@ -144,7 +144,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
                     style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid var(--color-hairline)' }}
                   />
                   {imageUrls.length > 1 && (
-                    <span style={{ position: 'absolute', right: -4, bottom: -4, minWidth: 17, height: 17, padding: '0 3px', borderRadius: 9, background: 'var(--color-primary)', color: 'white', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
+                    <span style={{ position: 'absolute', right: -4, bottom: -4, minWidth: 17, height: 17, padding: '0 3px', borderRadius: 9, background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
                       {imageUrls.length}
                     </span>
                   )}
@@ -176,7 +176,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--color-hairline)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button
             onClick={onClose}
-            style={{ padding: '8px 18px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'white', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}
+            style={{ padding: '8px 18px', border: '1px solid var(--color-hairline)', borderRadius: 8, background: 'var(--color-panel)', color: 'var(--color-muted)', fontSize: 14, cursor: 'pointer' }}
           >
             取消
           </button>
@@ -185,7 +185,7 @@ export function SceneSelectorModal({ open, onClose, onConfirm }: Props) {
             onClick={handleConfirm}
             style={{
               padding: '8px 18px', border: 'none', borderRadius: 8,
-              background: 'var(--color-primary)', color: 'white', fontSize: 14,
+              background: 'var(--color-primary)', color: 'var(--color-on-primary)', fontSize: 14,
               cursor: selected.size === 0 ? 'not-allowed' : 'pointer',
               opacity: selected.size === 0 ? 0.5 : 1,
             }}

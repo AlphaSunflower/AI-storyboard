@@ -19,7 +19,7 @@
   gap: 4px;
   border: 1px solid var(--color-hairline);
   border-radius: 16px;
-  background: white;
+  background: var(--color-panel);
   color: var(--color-ink);
   font: inherit;
   font-size: 12px;
@@ -245,7 +245,7 @@
   padding: 8px 9px;
   border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
   border-radius: 9px;
-  background: color-mix(in srgb, var(--color-primary) 5%, white);
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-panel));
   color: var(--color-ink);
   text-align: left;
   cursor: pointer;
@@ -254,7 +254,7 @@
 .generation-center__agent-entry:hover,
 .generation-center__agent-entry.is-active {
   border-color: color-mix(in srgb, var(--color-primary) 48%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 8%, white);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-panel));
 }
 
 .generation-center__agent-entry-icon {
@@ -350,16 +350,16 @@
 }
 
 .generation-center__row-icon.is-completed {
-  color: rgb(15, 150, 80);
+  color: var(--color-success);
 }
 
 .generation-center__row-icon.is-partial {
-  color: rgb(196, 123, 22);
+  color: var(--color-warning);
 }
 
 .generation-center__row-icon.is-failed,
 .generation-center__row-icon.is-cancelled {
-  color: rgb(217, 45, 32);
+  color: var(--color-error);
 }
 
 .generation-center__row-icon .is-spinning {
@@ -398,7 +398,7 @@
   margin-top: 5px;
   overflow: hidden;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--color-hairline-soft);
 }
 
 .generation-center__progress i {
@@ -412,7 +412,7 @@
 .generation-center__error {
   display: block;
   margin-top: 4px;
-  color: rgb(217, 45, 32);
+  color: var(--color-error);
 }
 
 .generation-center__row > button {
@@ -508,7 +508,7 @@
 /* 用户在系统里要求降低透明度时要退化成实心，这也是玻璃效果的主要无障碍开关。 */
 @media (prefers-reduced-transparency: reduce) {
   .generation-center__sidebar {
-    background: white;
+    background: var(--color-panel);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -563,3 +563,25 @@
     animation: none;
   }
 }
+
+/* ── 深色外观 ─────────────────────────────────────────────────────────── */
+
+:root[data-theme='dark'] .generation-center__sidebar {
+  background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+  box-shadow:
+    -14px 0 40px rgba(0, 0, 0, 0.38),
+    inset 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme='dark'] .generation-center__sidebar::before {
+  background:
+    radial-gradient(120% 58% at 100% 0%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 62%),
+    linear-gradient(180deg, rgba(224, 153, 125, 0.06), transparent 45%);
+}
+
+@media (max-width: 768px) {
+  :root[data-theme='dark'] .generation-center__sidebar {
+    background: color-mix(in srgb, var(--color-panel) 96%, transparent);
+  }
+}
+

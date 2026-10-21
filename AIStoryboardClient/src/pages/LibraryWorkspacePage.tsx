@@ -114,6 +114,8 @@ import {
 import { importMediaToProjectLibrary } from '../lib/projectLibraryImport';
 import { assetUrl } from '../config';
 import { libraryThumbnailUrl } from '../lib/libraryMedia';
+import { useIsMobile } from '../hooks/useIsMobile';
+import { MobileBottomNav } from '../components/layout/MobileBottomNav';
 import './LibraryWorkspacePage.css';
 
 const PAGE_SIZE = 100;
@@ -246,6 +248,7 @@ interface LibraryConfirmation {
 
 export function LibraryWorkspacePage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentProject = useProjectStore((state) => state.currentProject);
   const projects = useProjectStore((state) => state.projects);
@@ -3277,7 +3280,7 @@ export function LibraryWorkspacePage() {
 
   return (
     <div
-      className={`library-workspace${internalDragActive ? ' is-dragging-assets' : ''}`}
+      className={`library-workspace${internalDragActive ? ' is-dragging-assets' : ''}${isMobile && !isEmbedded ? ' has-mobile-nav' : ''}`}
       onDragEnter={handleExternalDragEnter}
       onDragOver={handleExternalDragOver}
       onDragLeave={handleExternalDragLeave}
@@ -3720,7 +3723,7 @@ export function LibraryWorkspacePage() {
               <div className="library-duplicates__empty">
                 <span><Copy size={24} /></span>
                 <strong>{query.trim() ? '没有匹配的重复项' : '没有发现重复素材'}</strong>
-                <p>同一份文件被上传或生成多次时会自动归组；合并后重复项进入回收站保留 3 天。</p>
+                <p>同一份文件被上传或生成多次时会自动归组；合并后重复项进入回收站保留 1 天。</p>
               </div>
             ) : (
               <div className="library-duplicates__grid">
@@ -3781,7 +3784,7 @@ export function LibraryWorkspacePage() {
             <header className="library-unused__header">
               <div>
                 <h1>未使用素材</h1>
-                <p>没有被分镜、资产组或画布引用。清理后进入回收站，保留 3 天可恢复。</p>
+                <p>没有被分镜、资产组或画布引用。清理后进入回收站，保留 1 天可恢复。</p>
               </div>
               <div className="library-unused__summary">
                 <span><b>{unusedTotal}</b> 项未使用</span>
@@ -4848,6 +4851,8 @@ export function LibraryWorkspacePage() {
         onOpenAsset={openAssetCard}
         onApplyView={applySavedView}
       />
+
+      {isMobile && !isEmbedded && <MobileBottomNav />}
 
     </div>
   );

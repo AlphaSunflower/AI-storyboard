@@ -70,6 +70,16 @@ public final class ToolCatalog {
     private static final Set<String> ALL_SKILLS = Set.of(
             "storyboard", "image", "video", "canvas-design", "canvas-run", "general");
 
+    /**
+     * 可选技能：默认不挂载，只有本轮显式引用时才进入技能白名单。
+     *
+     * <p>当前只有 ppt-master：完整技能包（脚本 + 模板约 25MB / 12k 文件）常驻 sandbox 镜像，
+     * 引用时才物化到会话工作区；未引用时模型看不到、工作区也没有。
+     */
+    static final String PPT_MASTER_SKILL = "ppt-master";
+
+    private static final Set<String> OPTIONAL_SKILLS = Set.of(PPT_MASTER_SKILL);
+
     private static final Map<String, Spec> SPECS = buildSpecs();
 
     private ToolCatalog() {
@@ -109,8 +119,27 @@ public final class ToolCatalog {
      * @return 该轮允许的技能与工具组
      */
     static Profile profileFor(boolean canvasEdit) {
+        return profileFor(canvasEdit, Set.of());
+    }
+
+    /**
+     * 会话/轮次的工具组合，并叠加本轮显式引用的可选技能。
+     *
+     * <p>可选技能只在 {@link #OPTIONAL_SKILLS} 里登记过的才生效；画布编辑回合只做画布，
+     * 不叠加任何可选技能。
+     *
+     * @param canvasEdit       是否画布编辑回合
+     * @param referencedSkills 本轮显式引用的技能（如 {@code ppt-master}）
+     */
+    static Profile profileFor(boolean canvasEdit, Set<String> referencedSkills) {
         if (!canvasEdit) {
-            return new Profile(ALL_SKILLS, GROUPS.keySet());
+            Set<String> skills = new LinkedHashSet<>(ALL_SKILLS);
+            if (referencedSkills != null) {
+                referencedSkills.stream()
+                        .filter(OPTIONAL_SKILLS::contains)
+                        .forEach(skills::add);
+            }
+            return new Profile(Set.copyOf(skills), GROUPS.keySet());
         }
         Set<String> skills = new LinkedHashSet<>(ALL_SKILLS);
         skills.remove("storyboard");
