@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class JwtAuthenticationFilterTest {
 
-    private static final String SECRET = "d02f1779750841f8b4de65e47a913e89";
+    private static final String SECRET = "test-only-jwt-access-secret-0123456789";
     private static final String ISSUER = "ai-storyboard-backend";
 
     private MockMvc mockMvc;

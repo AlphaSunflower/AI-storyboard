@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JwtVerifierTest {
 
-    private static final String SECRET = "d02f1779750841f8b4de65e47a913e89";
+    private static final String SECRET = "test-only-jwt-access-secret-0123456789";
     private static final String ISSUER = "ai-storyboard-backend";
 
     private JwtVerifier verifier;

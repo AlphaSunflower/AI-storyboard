@@ -25,7 +25,7 @@ class StorageOrphanScannerTest {
 
     private static StorageProperties properties(boolean enabled, int graceHours) {
         return new StorageProperties(
-                "http://localhost:9000", "minioadmin", "minioadmin123", "storyboard", "us-east-1",
+                "http://localhost:9000", "minioadmin", "test-only-minio-secret", "storyboard", "us-east-1",
                 0, 0, 0, 3, enabled, 6, graceHours);
     }
 

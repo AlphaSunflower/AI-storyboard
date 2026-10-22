@@ -96,7 +96,7 @@ class MinioObjectStorageTest {
 
     private static StorageProperties properties() {
         return new StorageProperties(
-                "http://localhost:9000", "minioadmin", "minioadmin123", "storyboard", "us-east-1",
+                "http://localhost:9000", "minioadmin", "test-only-minio-secret", "storyboard", "us-east-1",
                 0, 0, 0);
     }
 
@@ -470,7 +470,7 @@ class AssetPropertiesConfigTest {
 ```java
     private static StorageProperties properties() {
         return new StorageProperties(
-                "http://localhost:9000", "minioadmin", "minioadmin123", "storyboard", "us-east-1",
+                "http://localhost:9000", "minioadmin", "test-only-minio-secret", "storyboard", "us-east-1",
                 0, 0, 0, 0, false, 0, 0);
     }
 ```
@@ -511,7 +511,7 @@ public record StorageProperties(
     public StorageProperties {
         endpoint = endpoint == null ? "http://localhost:9000" : endpoint;
         accessKey = accessKey == null ? "minioadmin" : accessKey;
-        secretKey = secretKey == null ? "minioadmin123" : secretKey;
+        secretKey = secretKey == null ? "test-only-minio-secret" : secretKey;
         bucket = bucket == null ? "storyboard" : bucket;
         region = region == null ? "us-east-1" : region;
         uploadPartSizeBytes = uploadPartSizeBytes <= 0 ? 8L * 1024 * 1024 : uploadPartSizeBytes;
@@ -1113,7 +1113,7 @@ class StorageOrphanScannerTest {
 
     private static StorageProperties properties(boolean enabled, int graceHours) {
         return new StorageProperties(
-                "http://localhost:9000", "minioadmin", "minioadmin123", "storyboard", "us-east-1",
+                "http://localhost:9000", "minioadmin", "test-only-minio-secret", "storyboard", "us-east-1",
                 0, 0, 0, 3, enabled, 6, graceHours);
     }
 

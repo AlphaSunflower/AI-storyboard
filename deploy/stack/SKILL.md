@@ -40,13 +40,13 @@ metadata:
 | 对象 | 账号 / 凭据 | 备注 |
 |---|---|---|
 | **主站（业务）** | `admin@qq.com` / `123456` | role=admin，干净部署：无项目 / 会话 / 分镜 |
-| **模型网关管理后台** | `admin` / `admin-init-9d2d14c37360be40` | 另一可用账号 `e2eadmin` / `E2EAdmin123!` |
-| 网关 API Key（Agent/画布/资产） | `lg-df377c8084e645ffa34e0dfce1fb3e78` | `llm_gateway.gateway_api_key` 表内 |
-| 网关 API Key（主后端） | `lg-5f018f73b71c4bda8b9ebb97268d55a9` | 同上 |
-| MinIO | `minioadmin` / `minioadmin123` | 换密码会导致存量对象不可读，勿改 |
+| **模型网关管理后台** | `admin` / 见 `.env` 的 `GATEWAY_ADMIN_INIT_PASSWORD` | 另一可用账号 `e2eadmin` / `E2EAdmin123!` |
+| 网关 API Key（Agent/画布/资产） | 见 `.env` 的 `LLM_GATEWAY_API_KEY_AGENT` | `llm_gateway.gateway_api_key` 表内 |
+| 网关 API Key（主后端） | 见 `.env` 的 `LLM_GATEWAY_API_KEY_MAIN` | 同上 |
+| MinIO | `minioadmin` / 见 `.env` 的 `MINIO_ROOT_PASSWORD` | 换密码会导致存量对象不可读，勿改 |
 | PostgreSQL | `postgres` / `123456` | 宿主 `127.0.0.1:5433`，库 `ai_storyboard`、`llm_gateway` |
 | Redis | 无密码 | 仅 `127.0.0.1:6379` |
-| 沙箱内部密钥 | `local-moon-sandbox-secret` | runner 与 moon-agent 必须一致 |
+| 沙箱内部密钥 | 见 `.env` 的 `SANDBOX_INTERNAL_SECRET` | runner 与 moon-agent 必须一致 |
 | 服务间共享密钥 | `INTERNAL_SECRET`（见 `.env`） | `/api/internal/**`、canvas MCP `X-Internal-Token` |
 
 > 以上全部取自 `deploy/stack/.env`，迁移时整目录带走即可，无需重填。

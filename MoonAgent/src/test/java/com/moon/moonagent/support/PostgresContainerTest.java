@@ -36,7 +36,7 @@ import java.sql.Statement;
 @TestPropertySource(properties = {
         "storyboard.internal-secret=test-internal-secret",
         "storyboard.storage.access-key=minioadmin",
-        "storyboard.storage.secret-key=minioadmin123",
+        "storyboard.storage.secret-key=test-only-minio-secret",
         // No Nacos / Redis / MCP infrastructure is available inside CI.
         "spring.cloud.nacos.discovery.enabled=false",
         "spring.cloud.discovery.enabled=false",

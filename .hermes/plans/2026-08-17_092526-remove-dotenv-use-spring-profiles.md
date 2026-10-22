@@ -145,8 +145,8 @@ spring:
       api-key: <本地网关业务 Key，在网关 /admin 签发，填 lg-…>
 
 jwt:
-  access-secret: d02f1779750841f8b4de65e47a913e89
-  refresh-secret: cd311f4121c24cf8b761775f9dafae78
+  access-secret: <见 deploy/stack/.env 的 JWT_ACCESS_SECRET>
+  refresh-secret: <见 deploy/stack/.env 的 JWT_REFRESH_SECRET>
 
 ai:
   gateway:

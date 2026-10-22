@@ -21,7 +21,12 @@ import urllib.request
 
 BASE = os.environ.get("GATEWAY_BASE", "http://127.0.0.1:8083")
 USER = os.environ.get("GATEWAY_ADMIN_USER", "admin")
-PASSWORD = os.environ.get("GATEWAY_ADMIN_PASSWORD", "admin-init-9d2d14c37360be40")
+PASSWORD = os.environ.get("GATEWAY_ADMIN_PASSWORD")
+if not PASSWORD:
+    sys.exit(
+        "GATEWAY_ADMIN_PASSWORD 未设置：取值见 deploy/stack/.env 的 "
+        "GATEWAY_ADMIN_INIT_PASSWORD（不要写进仓库）"
+    )
 
 SKIP_WRONG_TYPE = {
     "mimo-v2.5-tts-voicedesign",  # TTS model, currently typed as video

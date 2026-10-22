@@ -17,8 +17,8 @@
 |---|---|---|
 | PostgreSQL | `localhost:5432`（本机原生库，开发默认） / `127.0.0.1:5433`（容器库，交付数据） | 见下方「数据库怎么选」 |
 | Redis | `127.0.0.1:6379` | 缓存/限流/会话锁 |
-| MinIO | `127.0.0.1:9000`（API）/ `9001`（控制台 `minioadmin` / `minioadmin123`） | 对象目录就是本栈的 `data/minio` |
-| MoonSandbox | `127.0.0.1:8090` | 密钥 `local-moon-sandbox-secret` |
+| MinIO | `127.0.0.1:9000`（API）/ `9001`（控制台 `minioadmin` / 见 `.env` 的 `MINIO_ROOT_PASSWORD`） | 对象目录就是本栈的 `data/minio` |
+| MoonSandbox | `127.0.0.1:8090` | 密钥见 `.env` 的 `SANDBOX_INTERNAL_SECRET` |
 
 没有 Nacos：服务发现默认关闭（`NACOS_DISCOVERY_ENABLED=false`），ApiGateway 走直连默认值
 （`http://localhost:8082/8085/9090/8084`），本机起服务不用传任何参数。
@@ -60,7 +60,7 @@ cd XiaoYueCanvasAgent  && npm run dev    # http://localhost:3000/canvas/
 
 ## 四、常见开关
 
-- **Agent 用容器沙箱**（默认关）：`$env:AGENT_SANDBOX_ENABLED='true'; $env:MOON_SANDBOX_INTERNAL_SECRET='local-moon-sandbox-secret'`
+- **Agent 用容器沙箱**（默认关）：`$env:AGENT_SANDBOX_ENABLED='true'; $env:MOON_SANDBOX_INTERNAL_SECRET='<见 .env 的 SANDBOX_INTERNAL_SECRET>'`
 - **画布执行命令**：由本机起着的 `XiaoYueCanvas` 提供信箱端点，浏览器打开画布即自动注册；
   没有独立 Bridge 进程、没有 8787 端口、没有桥接令牌需要对齐。
 - **切到交付库做联调**：只覆盖 `SPRING_DATASOURCE_URL` 即可，Redis/MinIO 不用动。
