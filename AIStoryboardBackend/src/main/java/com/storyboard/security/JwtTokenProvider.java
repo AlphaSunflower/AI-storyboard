@@ -116,6 +116,30 @@ public class JwtTokenProvider {
                 .compact();
     }
 
+    /**
+     * 签发"网关令牌"：给桌面端调用 LLM 网关用的长期凭据。
+     *
+     * <p>与 access token 的区别：{@code typ=gateway}、有效期 30 天、不含 role/status。
+     * 它只证明"这是某个用户的客户端"，网关据此放行 {@code /v1/**}；
+     * 这样客户端不必内置共享的 LLM_GATEWAY_API_KEY（那等于把厂商额度公开）。
+     */
+    public String signGatewayToken(String userId) {
+        long nowSeconds = System.currentTimeMillis() / 1000;
+        return Jwts.builder()
+                .header().add("alg", "HS256").add("typ", "JWT").and()
+                .claim("typ", "gateway")
+                .issuer(issuer)
+                .subject(userId)
+                .issuedAt(new Date(nowSeconds * 1000))
+                .expiration(new Date((nowSeconds + GATEWAY_TOKEN_TTL_SECONDS) * 1000))
+                .id(UUID.randomUUID().toString())
+                .signWith(accessKey)
+                .compact();
+    }
+
+    /** 网关令牌有效期：30 天（桌面端长驻场景，过期后需重新登录） */
+    private static final long GATEWAY_TOKEN_TTL_SECONDS = 30L * 24 * 60 * 60;
+
     // ==================== Verification ====================
 
     /**
