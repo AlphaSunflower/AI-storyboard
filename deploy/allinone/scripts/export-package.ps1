@@ -19,22 +19,6 @@ Write-Host "[export] 目标: $targetFull"
 if (Test-Path $targetFull) { Remove-Item $targetFull -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $targetFull | Out-Null
 
-# 数据完整性硬校验：这是「所有数据都存在」的交付包，缺任何一份都不允许导出
-$required = @(
-    (Join-Path $StackDir 'db\ai_storyboard.dump'),
-    (Join-Path $StackDir 'db\llm_gateway.dump'),
-    (Join-Path $StackDir 'db\data-manifest.env'),
-    (Join-Path $StackDir 'offline\minio-data.tar')
-)
-foreach ($f in $required) {
-    if (-not (Test-Path $f)) { throw "缺少全量数据文件: $f（先跑 scripts\export-db.ps1 + scripts\export-data.ps1）" }
-}
-$dumpMb = [math]::Round((Get-Item (Join-Path $StackDir 'db\ai_storyboard.dump')).Length / 1MB, 1)
-$minioMb = [math]::Round((Get-Item (Join-Path $StackDir 'offline\minio-data.tar')).Length / 1MB, 1)
-if ($dumpMb -lt 5) { throw "ai_storyboard.dump 只有 $dumpMb MB，疑似空库" }
-if ($minioMb -lt 1000) { throw "minio-data.tar 只有 $minioMb MB，疑似对象没带全" }
-Write-Host "[export] 全量数据: ai_storyboard.dump=$dumpMb MB, minio-data.tar=$minioMb MB"
-
 # 先统一换行符：Windows 检出的 CRLF shell 脚本在 Linux 上会让 postgres 初始化直接失败
 & (Join-Path $PSScriptRoot 'normalize-lf.ps1') -Root $StackDir
 
@@ -51,76 +35,54 @@ foreach ($file in $files) {
     $src = Join-Path $StackDir $file
     if (Test-Path $src) { Copy-Item $src (Join-Path $targetFull $file) -Force }
 }
-# 离线镜像包（*.tar + manifest + sha256；含 minio-data.tar）
+# 离线镜像包（*.tar + manifest + sha256）
 $offlineSrc = Join-Path $StackDir 'offline'
 if (Test-Path $offlineSrc) {
     $offlineDst = Join-Path $targetFull 'offline'
     New-Item -ItemType Directory -Force -Path $offlineDst | Out-Null
     Copy-Item (Join-Path $offlineSrc '*') $offlineDst -Recurse -Force
 } else {
-    throw '[export] 没有 offline 离线包，先跑 scripts\save-images.ps1 和 scripts\export-data.ps1'
+    Write-Host '[export][警告] 还没有 offline 镜像包，先在源机跑 scripts\save-images.ps1'
 }
-# MinIO 数据落点：目标机由 load-and-up.sh 从 offline/minio-data.tar 自动解到 data/minio。
-# 这里不要放 .keep——那会让 load-and-up 误判“目录非空”，从而跳过解包。
-New-Item -ItemType Directory -Force -Path (Join-Path $targetFull 'data') | Out-Null
+# MinIO 数据落点（空目录，目标机可选地解 minio-data.tar 进来）
+New-Item -ItemType Directory -Force -Path (Join-Path $targetFull 'data\minio') | Out-Null
+Set-Content -Path (Join-Path $targetFull 'data\minio\.keep') -Value '' -Encoding ascii
 
 # ── 2) 目标机一页纸说明 ─────────────────────────────────────────────────
 $note = @(
-    '# 目标机部署（单 JVM + 全量数据）',
-    '',
-    '本包 = 6 个 Spring Boot 服务跑在 1 个 JVM 里 + Postgres/Redis/MinIO + nginx 入口，',
-    '并带上了本地全量数据：157 个账号、168 个项目、376 个会话、677 条 Agent 资产、',
-    '2087 个 MinIO 对象文件（1.72GB）。admin@qq.com 由 771038325@qq.com 原地改名，其余账号一行不删。',
-    '',
-    '## 0. 先备份并停掉旧栈（122.51.12.200 上现有 /opt/ai-lite）',
-    '旧栈的卷和数据目录都不要删；新包用独立前缀 ai-cloud，起新栈不会覆盖旧数据。',
-    '  mkdir -p /opt/backup',
-    '  cd /opt/ai-lite',
-    '  docker exec ai-lite-postgres pg_dump -U postgres -Fc ai_storyboard > /opt/backup/ai_storyboard-old.dump',
-    '  docker exec ai-lite-postgres pg_dump -U postgres -Fc llm_gateway     > /opt/backup/llm_gateway-old.dump',
-    '  docker compose --env-file .env down          # 先停容器（保留卷），释放 80 端口',
-    '  tar -czf /opt/backup/ai-lite-minio-$(date +%F).tar.gz data/minio 2>/dev/null || true',
+    '# 目标机部署（单 JVM 全栈）',
     '',
     '## 1. 传上去',
-    '方式 A（推荐，单文件）：在源机把 ai-cloud-deploy-20261021.tar 传上去，再在服务器解包：',
-    '  scp ai-cloud-deploy-20261021.tar root@122.51.12.200:/opt/',
-    '  ssh root@122.51.12.200',
-    '  cd /opt && tar -xf ai-cloud-deploy-20261021.tar',
-    '  rm -rf /opt/ai-cloud && mv /opt/ai-cloud-deploy /opt/ai-cloud',
-    '',
-    '方式 B（目录直传）：',
-    '  scp -r <本目录> root@122.51.12.200:/opt/ai-cloud',
-    '（约 3.2GB；也可以用 U 盘 / 宝塔面板，保持目录结构不变）',
+    '在源机（本机）执行：',
+    '  scp -r <本目录> root@<服务器IP>:/opt/ai-lite',
+    '（也可以用 U 盘 / 宝塔面板 / 任意文件传输方式，保持目录结构不变）',
     '',
     '## 2. 前置检查（2 核 2G 必看）',
     '  docker version && docker compose version',
     '  free -m          # 看内存与 swap',
-    '  df -h /opt       # 新包解包 + 数据卷 + 旧栈备份，建议 >=10GB 可用',
     '没有 swap 或小于 1G 时先加 4G（否则高峰期会被 OOM Killer 杀掉）：',
     '  fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile',
     '  echo "/swapfile none swap sw 0 0" >> /etc/fstab',
     '',
-    '## 3. 起栈（会硬校验数据：转储/对象不全直接拒绝启动）',
-    '  cd /opt/ai-cloud',
+    '## 3. 起栈',
+    '  cd /opt/ai-lite',
     '  bash scripts/load-and-up.sh',
-    '  # 不想开 Agent 沙箱（省 ~350MB 内存）：',
-    '  #   WITH_SANDBOX=0 bash scripts/load-and-up.sh',
+    '  # 需要 Agent 沙箱（写文件 / 跑 Python / 产物文件卡）时：',
+    '  #   sed -i "s/^AGENT_SANDBOX_ENABLED=.*/AGENT_SANDBOX_ENABLED=true/" .env',
+    '  #   WITH_SANDBOX=1 bash scripts/load-and-up.sh',
     '',
-    '首次启动要 1~3 分钟（6 个 Spring 上下文串行启动）。看日志：',
+    '## 4. 首次启动要等 1~3 分钟（6 个 Spring 上下文在同一个 JVM 里串行启动）',
     '  docker compose --env-file .env logs -f allinone',
     '看到 6 行 "Started ... in ... seconds" 就好了。',
     '',
-    '## 4. 验收（16 项：入口/注册关闭/admin 登录/全量行数/MinIO/6 个端口/画布 CORS/模型/沙箱）',
-    '  bash scripts/smoke-test.sh',
-    '  # 不想花模型额度：SKIP_MODEL_CALL=1 bash scripts/smoke-test.sh',
-    '',
     '## 5. 访问',
-    '  http://122.51.12.200/',
+    '  http://<服务器公网IP>/',
     '  admin@qq.com / 123456',
-    '  （库中另有 156 个历史账号，密码保持原样；注册入口被 nginx 拦成 403）',
+    '  test@qq.com  / 123456',
+    '注册入口已被 nginx 拦成 403（后端注册代码未改动）。',
     '',
     '## 6. 安全组 / 防火墙',
-    '只放行 80。5433/6379/8083/9000/9001/8090 都只绑 127.0.0.1，公网访问不到。',
+    '只放行 80（以及你实际用的端口）。5433/6379/9000/9001/8083/8090 都只绑在 127.0.0.1，公网访问不到。',
     '',
     '## 7. 常用命令',
     '  docker compose --env-file .env ps',
@@ -128,12 +90,7 @@ $note = @(
     '  docker compose --env-file .env restart allinone',
     '  docker stats --no-stream        # 看内存占用',
     '',
-    '## 8. 回滚到旧栈',
-    '  cd /opt/ai-cloud && docker compose --env-file .env down',
-    '  cd /opt/ai-lite  && docker compose --env-file .env up -d',
-    '旧栈的卷 ai-lite-pgdata / ai-lite-uploads 与 data/minio 都还在。',
-    '',
-    '## 9. 排障先看 README.md 的「排障」一节'
+    '## 8. 排障先看 README.md 的「排障」一节'
 )
 Set-Content -Path (Join-Path $targetFull '目标机部署.txt') -Value ($note -join "`r`n") -Encoding utf8
 

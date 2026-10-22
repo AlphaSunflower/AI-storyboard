@@ -1,10 +1,11 @@
-# 单 JVM 全栈部署（2 核 2G 云服务器，全量数据）
+# 单 JVM 全栈部署（2 核 2G 公网测试）
 # 与 deploy/stack 的差别：6 个 Java 服务合并成 1 个容器 / 1 个 JVM；不含 Nacos；
-# vosk 不在本栈内；注册由入口 nginx 关闭（后端注册接口代码未改）；全量账号保留，只初始化 admin。
+# vosk 不在本栈内；注册由入口 nginx 关闭（后端注册接口代码未改）；账号收敛为两个。
 #
 # 用法（deploy/allinone 目录下）：
-#   推荐：bash scripts/load-and-up.sh        # 校验全量数据 + 默认带 sandbox
-#   手工：docker compose --env-file .env --profile sandbox up -d --no-build
+#   docker compose --env-file .env up -d --no-build
+# 需要 Agent 沙箱（文件/Python 产物）时：
+#   docker compose --env-file .env --profile sandbox up -d --no-build
 name: ${COMPOSE_PROJECT_NAME:-aistoryboard-lite}
 
 x-restart: &restart
@@ -39,20 +40,18 @@ services:
     volumes:
       # postgres:18 的 PGDATA 是 /var/lib/postgresql/18/docker，卷挂在上一级
       - pgdata:/var/lib/postgresql
-      # 首启自动建库 + 还原全量转储 + 初始化 admin（其余账号一行不删）
+      # 首启自动建库 + 还原转储 + 账号收敛（恰好两个账号）
       - ./db:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     mem_limit: ${POSTGRES_MEM_LIMIT:-384m}
     cpus: ${POSTGRES_CPUS:-1.0}
     healthcheck:
-      # 必须走 TCP：首次初始化时 entrypoint 的临时 postgres 只监听 Unix socket，
-      # 旧写法 pg_isready 会提前报 healthy，导致 allinone 在还原还没结束时就启动并连不上库。
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres"]
       interval: 5s
       timeout: 5s
-      retries: 60
-      start_period: 30s
+      retries: 40
+      start_period: 20s
     networks:
       - default
 
@@ -94,9 +93,8 @@ services:
       GOGC: "50"
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      # 宿主目录：包内 data/minio 已带全量对象（2065 个，1.72GB）；本地测试用 .env.test 指向
-      # data-test/minio，避免测试写入污染要发布的数据目录。
-      - ${MINIO_DATA_DIR:-./data/minio}:/data
+      # 宿主目录：可选地把本地已有对象数据（deploy/docker/minio/data）拷进来复用历史图片/视频
+      - ./data/minio:/data
     ports:
       - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -140,12 +138,7 @@ services:
       FILE_SIGNING_SECRET: ${INTERNAL_SECRET}
       ASSET_SIGNING_SECRET: ${INTERNAL_SECRET}
       STORYBOARD_ORPHAN_SCAN_ENABLED: "false"
-      # 全量数据交付：关闭会自动删历史数据的后台清理（归档会话/保留期）。
-      # 需要恢复清理时把这两项设回 true，并阅读 README「数据完整性」。
-      AI_ARCHIVE_CLEANUP_ENABLED: ${AI_ARCHIVE_CLEANUP_ENABLED:-false}
-      AI_RETENTION_ENABLED: ${AI_RETENTION_ENABLED:-false}
-      # 回收站保留 30 天（用户主动删除的素材仍有恢复窗口），不做 1 天自动清空
-      STORYBOARD_TRASH_RETENTION_DAYS: ${STORYBOARD_TRASH_RETENTION_DAYS:-30}
+      STORYBOARD_TRASH_RETENTION_DAYS: "3"
       LLM_GATEWAY_BASE_URL: http://127.0.0.1:8083
       AI_GATEWAY_BASE_URL: http://127.0.0.1:8083
       STORYBOARD_INTERNAL_URL: http://127.0.0.1:8082
@@ -253,7 +246,7 @@ services:
     networks:
       - default
 
-  # ── Agent 沙箱（load-and-up 默认开启；直接 compose 需 --profile sandbox）──────
+  # ── 可选：Agent 沙箱（默认不启动）──────────────────────────────────────
   # 需要 Agent 的 write_file / run_python_script / 产物文件卡时再开：
   #   AGENT_SANDBOX_ENABLED=true docker compose --env-file .env --profile sandbox up -d --no-build
   sandbox-runner:
