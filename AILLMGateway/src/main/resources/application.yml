@@ -49,8 +49,3 @@ gateway:
     issuer: llm-gateway
     access-token-ttl: 3600
     refresh-token-ttl: 2592000
-
-# 主平台网关令牌验签密钥（与主后端 JWT_ACCESS_SECRET 一致；留空则关闭该通道）
-platform:
-  jwt:
-    access-secret: ${PLATFORM_JWT_ACCESS_SECRET:}

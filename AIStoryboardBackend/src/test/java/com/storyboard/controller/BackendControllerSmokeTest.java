@@ -155,11 +155,11 @@ class BackendControllerSmokeTest {
     @Test
     void authEndpoints_arePublic_andReturnContract() throws Exception {
         when(authService.login(any())).thenReturn(
-                new AuthResult(new LoginResponse("at", "u1", "n", null), "rt"));
+                new AuthResult(new LoginResponse("at", "u1", "n"), "rt"));
         when(authService.register(any())).thenReturn(
-                new AuthResult(new LoginResponse("at", "u1", "n", null), "rt"));
+                new AuthResult(new LoginResponse("at", "u1", "n"), "rt"));
         when(authService.refresh(anyString())).thenReturn(
-                new AuthResult(new LoginResponse("at2", "u1", "n", null), "rt2"));
+                new AuthResult(new LoginResponse("at2", "u1", "n"), "rt2"));
         when(authService.handleUnlogin(any(), any())).thenReturn(ApiResponse.ok(Map.of("ok", true)));
 
         mockMvc.perform(post("/api/auth/login")

@@ -44,8 +44,7 @@ public class AuthServiceImpl implements AuthService {
 
         AuthSessionService.SessionTokens tokens = sessionService.issue(user);
         return new AuthResult(
-                new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName(),
-                        jwtTokenProvider.signGatewayToken(user.getId())),
+                new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName()),
                 tokens.refreshToken());
     }
 
@@ -69,8 +68,7 @@ public class AuthServiceImpl implements AuthService {
 
         AuthSessionService.SessionTokens tokens = sessionService.issue(user);
         return new AuthResult(
-                new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName(),
-                        jwtTokenProvider.signGatewayToken(user.getId())),
+                new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName()),
                 tokens.refreshToken());
     }
 
@@ -85,8 +83,7 @@ public class AuthServiceImpl implements AuthService {
             }
             AuthSessionService.SessionTokens tokens = sessionService.rotate(refreshToken);
             return new AuthResult(
-                    new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName(),
-                        jwtTokenProvider.signGatewayToken(user.getId())),
+                    new LoginResponse(tokens.accessToken(), user.getId(), user.getDisplayName()),
                     tokens.refreshToken());
         } catch (BusinessException e) {
             throw e;

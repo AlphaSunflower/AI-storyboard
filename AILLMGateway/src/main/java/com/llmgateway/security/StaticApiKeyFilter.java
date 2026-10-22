@@ -23,13 +23,10 @@ public class StaticApiKeyFilter extends OncePerRequestFilter {
 
     private final GatewayApiKeyMapper apiKeyMapper;
     private final KeyService keyService;
-    private final PlatformTokenVerifier platformTokenVerifier;
 
-    public StaticApiKeyFilter(GatewayApiKeyMapper apiKeyMapper, KeyService keyService,
-                              PlatformTokenVerifier platformTokenVerifier) {
+    public StaticApiKeyFilter(GatewayApiKeyMapper apiKeyMapper, KeyService keyService) {
         this.apiKeyMapper = apiKeyMapper;
         this.keyService = keyService;
-        this.platformTokenVerifier = platformTokenVerifier;
     }
 
     @Override
@@ -46,20 +43,6 @@ public class StaticApiKeyFilter extends OncePerRequestFilter {
             return;
         }
         String key = auth.substring(7);
-
-        // 通道 1：桌面客户端持有的平台网关令牌（typ=gateway，30 天，按用户签发）
-        if (platformTokenVerifier.enabled() && key.chars().filter(c -> c == '.').count() == 2) {
-            String userId = platformTokenVerifier.verify(key);
-            if (userId != null) {
-                SecurityContextHolder.getContext().setAuthentication(
-                        new UsernamePasswordAuthenticationToken(userId, null,
-                                List.of(new SimpleGrantedAuthority("ROLE_API"))));
-                chain.doFilter(request, response);
-                return;
-            }
-        }
-
-        // 通道 2：静态 API Key（云端服务间调用、管理后台发放）
         GatewayApiKey record = apiKeyMapper.selectOne(new LambdaQueryWrapper<GatewayApiKey>()
                 .eq(GatewayApiKey::getKeyHash, keyService.sha256(key))
                 .eq(GatewayApiKey::getEnabled, true));
