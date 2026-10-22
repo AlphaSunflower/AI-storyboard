@@ -69,6 +69,9 @@
 - 内核**不能写用户工作区**（只读挂载）
 - 交付由容器外的 Electron 主进程执行
 
+> P0–P4 期间还有一个 `StoryboardServer`(8082) sidecar 承载 `projects` / `scenes` API，
+> 见 §12.4；图中省略。
+
 ## 4. 仓库结构
 
 ```
@@ -232,12 +235,83 @@ Electron resources 中的构建产物），不额外起 Node 静态服务器，�
 | 与智能体对话、生成图/视频 | ❌ |
 | 上传项目库 | ❌（进 outbox，联网补发） |
 
-## 12. 里程碑
+## 12. 双模式共存（cloud / local）
+
+Web 端继续以全云端形态存在，桌面端是**同一份代码的另一种部署**。不做两个产品，
+做“一个内核 + 两种部署”。
+
+### 12.1 三处接缝
+
+差异只允许落在这三处，其余代码共享：
+
+| 接缝 | cloud（网站） | local（桌面） |
+|---|---|---|
+| 存储 | Postgres + MinIO + Redis | 本地 Postgres + 文件系统 |
+| 身份 | 完整租户体系 | 登录在云端，本地只校验 JWT |
+| 执行 | MoonSandbox（Docker runner，HTTP） | `LocalWorkspaceClient`（java.nio.file） |
+
+`WorkspaceClient` 抽象本为桌面而抽，实际收益是双向的：云端也能接 fake 实现跑集成测试，
+不必每次起 Docker runner。
+
+### 12.2 能力矩阵
+
+| 能力 | cloud | local |
+|---|---|---|
+| 智能体对话 | ✅ | ✅（需联网调模型） |
+| 分镜 / 项目 | ✅ | ✅ |
+| 画布 | ✅（服务端 canvas 服务） | ✅（本地 sidecar） |
+| 本地工作区 | ❌ | ✅ |
+| 项目库 | ✅ | ✅（显式上传） |
+| 团队协作 | ⏳ | ❌ |
+| 离线编辑 | ❌ | ✅ |
+| MXC 隔离 | ❌ | ✅（Win11） |
+
+### 12.3 前端禁止到处写 `isElectron`
+
+后端启动时下发能力描述：
+
+```json
+GET /api/runtime/capabilities
+{ "mode": "local", "workspace": true, "offline": true,
+  "library": true, "collab": false, "canvas": "local", "models": "gateway" }
+```
+
+UI 只读这份描述决定按钮显隐。**新增能力 = 加一个字段 + 两端各给一个值**，
+这是防漂移最省力的机制。
+
+### 12.4 两种模式的进程拓扑
+
+- cloud：ApiGateway → Backend / MoonAgent / Canvas / asset-service / LLM 网关（现状）
+- local：**P0–P4 三个 sidecar** —— `MoonKernel`(8084)、`CanvasServer`(3000)、
+  `StoryboardServer`(8082，现有 Backend 去掉云端专属能力)，共用同一个本地 PG；
+  **P5** 再评估合并为单进程（`desktop/kernel-boot` 的用途）
+
+三 sidecar 常驻内存约 900MB–1GB，这是“推荐 16GB”这个要求的来源。
+
+### 12.5 两端的项目是两个世界（v1 必须说清）
+
+Web 的项目在云端、桌面的项目在本地，共享的只有**账号**与**项目库**。同一用户打开两端
+看到的项目列表不同。v1 接受这个现实并在 UI 上标注“本地项目 / 云端项目”；
+P4 提供“从云端导入项目”作为迁移手段，真正的双向同步留给协作阶段。
+
+### 12.6 版本与漂移控制
+
+- 桌面与 web 各自发版，数据格式**按模式内兼容**即可
+- UUID / `updated_at` / `deleted_at` 纪律两端都执行，为将来同步留路
+- 红线段落测试在两端都跑
+- `scripts/eval` 的 golden case 增加第二个 target（本地内核），**同一批用例跑两个运行时**
+
+### 12.7 持续成本
+
+约 **+15–25%**，主要花在测试与“只改一端”的诱惑上。控制手段就是 §12.3 的能力矩阵
+加双 target eval。
+
+## 13. 里程碑
 
 | 阶段 | 周期 | 交付 | 验收 |
 |---|---|---|---|
 | P0 骨架 | 4 周 | `desktop/` 目录、jlink 运行时、Electron 拉起 MoonKernel、zonky、同源托管、Flyway 基线 | 干净 Win11 双击安装、登录、一轮对话跑通 |
-| P1 本地数据 | 3 周 | 项目/分镜/生成记录表 + 客户端改读本地 + 每日备份 | 断网建项目、编辑分镜、重启数据还在 |
+| P1 本地数据 | 3 周 | `StoryboardServer` sidecar + 项目/分镜/生成记录表 + 客户端改读本地 + 每日备份 | 断网建项目、编辑分镜、重启数据还在 |
 | P2 画布 | 4 周 | CanvasServer sidecar + 画布前端打包 + `/canvas/` 同源 + 本地媒体 | 断网拖画布、保存、重开不变形 |
 | P3 沙箱与交付 | 4 周 | `LocalWorkspaceClient`、MXC 策略、技能全局只读、便携 Python、交付清单、容器外交付 | 生成 pptx → 交付 → Office 打开正常；越权写 Documents 被拒 |
 | P4 入云 | 3 周 | 项目库上传、outbox 重试、素材代理缓存、项目包导出/导入 | 断网上传排队、联网补发；导出包可在另一台机器导入 |
@@ -247,7 +321,7 @@ Electron resources 中的构建产物），不额外起 Node 静态服务器，�
 
 P0 阶段**不启用 MXC**（先跑通链路），P3 再接入。
 
-## 13. 风险
+## 14. 风险
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
@@ -256,7 +330,9 @@ P0 阶段**不启用 MXC**（先跑通链路），P3 再接入。
 | 便携 Python 的 skia/harfbuzz | 装不上/体积失控 | P0 做 spike，失败回退本地 Docker |
 | 技能包假设 POSIX shell（bash/soffice） | P3 功能不全 | P3 逐条核对技能脚本，必要时提供 Git Bash 兜底 |
 | 本地数据单点丢失 | 用户丢项目 | P1 起每日备份 + P4 项目包导出 |
-| 云端与 local profile 漂移 | 红线回归 | CI 双模式跑事件序号/HITL/时间字段测试 |
+| 云端与 local profile 漂移 | 红线回归 | 能力矩阵（§12.3）+ 双 target eval + CI 双模式跑事件序号/HITL/时间字段测试 |
+| 双模式维护成本 | 迭代变慢 | 差异只许落三处接缝；任何“只改一端”的 PR 必须在描述里写明另一端的处理 |
+| 三 sidecar 内存 | 低配机器卡顿 | 声明 16GB 推荐；P5 评估合并；空闲时自动挂起画布 sidecar |
 | MXC 仅 Win11 | 装机面缩小 | v1 明确要求 Win11 |
 
 ## 附录 A：P0 任务清单
@@ -271,6 +347,8 @@ P0 阶段**不启用 MXC**（先跑通链路），P3 再接入。
 | 4 | jlink 运行时脚本 | `desktop/packaging/jlink.ps1`，产出 `runtime\jre` |
 | 5 | 安装器 | electron-builder 配置，首次启动写 `config\device.json` |
 | 6 | CI 双模式 | master 跑云端测试 + local profile 冒烟 |
+| 6.1 | 能力描述端点 | `GET /api/runtime/capabilities`，两端各返回一份（§12.3） |
+| 6.2 | eval 双 target | `scripts/eval` 增加 `--target=local`，golden case 跑两个运行时 |
 
 ### A.2 本地内核（local profile）
 
