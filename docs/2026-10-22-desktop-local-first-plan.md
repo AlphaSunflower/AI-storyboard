@@ -16,8 +16,8 @@
 
 | 决策项 | 结论 |
 |---|---|
-| 分支策略 | 单 `master`，新增 `desktop/` 目录隔离桌面专属代码；不开长期桌面主分支 |
-| 智能体内核 | 本地（同一份 MoonAgent 代码，`--spring.profiles.active=local`） |
+| 桌面端 / 仓库 | 拆分两仓：云端仓库**冻结**（只修 P0 与安全），新建 `moon-desktop` 作为**主线** |
+| 智能体内核 | 本地（MoonAgent 副本进客户端仓库，`--spring.profiles.active=local`） |
 | 画布 | 本地；后端先以**双 sidecar** 运行，前端**同源 iframe** |
 | 登录 | JWT + refresh token，**不做设备/机械码绑定**，设备数不限 |
 | 记忆 / 设置 | 本地 |
@@ -70,31 +70,78 @@
 - 交付由容器外的 Electron 主进程执行
 
 > P0–P4 期间还有一个 `StoryboardServer`(8082) sidecar 承载 `projects` / `scenes` API，
-> 见 §12.4；图中省略。
+> 见 §13.4；图中省略。
 
-## 4. 仓库结构
+## 4. 仓库拆分：cloud 冻结，desktop 为主线
+
+两个仓库，职责单向：
+
+| 仓库 | 状态 | 职责 |
+|---|---|---|
+| `AI-storyboard`（现有） | **冻结**，只修 P0 与安全 | 继续服务 Web 网站；作为客户端的参考实现 |
+| `moon-desktop`（新建） | **主线** | 桌面客户端全部代码，后续新功能都在这里 |
+
+拆分原则：**按“未来谁演进”决定归属，不按“代码原来在哪”**。客户端是主线，
+所以它拿到的是完整可改的副本，而不是只读依赖。
 
 ```
-master
-├── MoonAgent/              共享（新增 local profile 与替换 Bean）
-├── XiaoYueCanvas/          共享（桌面端作为独立 sidecar 打包）
-├── AIStoryboardClient/     共享（新增同源适配、本地 API 客户端）
-├── XiaoYueCanvasAgent/     共享（画布前端，新增构建与托管配置）
-├── agent-core/ CommonCore/ …  共享
-└── desktop/                新增，仅桌面
-     ├── shell/             Electron 主进程、preload、托盘、更新、交付复制
-     ├── packaging/         jlink 脚本、安装器、MXC 策略 JSON
-     ├── runtime/           便携 Python 清单、技能清单、版本锁定
-     └── kernel-boot/       P5 才启用（画布合并为单进程时的启动类）
+moon-desktop/
+├── server/
+│   ├── kernel/          MoonKernel 启动 + 本地 profile 适配（内含 MoonAgent 副本）
+│   ├── canvas/          CanvasServer 启动（内含 XiaoYueCanvas 副本）
+│   └── storyboard/      StoryboardServer 启动（AIStoryboardBackend 裁剪副本）
+├── apps/
+│   ├── client-web/      客户端前端（AIStoryboardClient 副本，之后独立演进）
+│   └── canvas-web/      画布前端（XiaoYueCanvasAgent 副本）
+├── desktop/             Electron shell / packaging / runtime / MXC 策略
+├── db/local/            Flyway 基线
+└── SYNC.md              与云端仓库的差异记录
+```
+
+### 4.1 冻结与同步规则
+
+1. 云端仓库打 tag `cloud-freeze-2026-10-22`，作为拆分基线
+2. 云端只接受安全与线上 P0 修复；**每个修复必须在 `SYNC.md` 登记**，由客户端决定是否移植
+3. 客户端副本的任何改动，文件头加 `// MOON-DESKTOP: <原因>`，便于将来反向对比
+4. **不引入 subtree / submodule / 私有 Maven 仓库**：两份代码从此独立演进，
+   靠 `SYNC.md` + tag 对比，不靠工具强制。2 人团队用工具强同步，摩擦大于收益
+5. 不迁移云端 git 历史（六个服务的历史拖过来没有价值），新仓库从空开始 + 一次性快照提交
+
+### 4.2 拆分的代价（事先认下来）
+
+| 代价 | 说明 | 缓解 |
+|---|---|---|
+| 红线修复不会自动跨仓 | `AgentTurnEventPublisher` 序号、HITL 终态这类修复要手工移植 | 云端 P0 修复必须记 `SYNC.md`；客户端保留同一套红线测试 |
+| 依赖版本各自演进 | Spring Boot / AgentScope 升级两边可能不同步 | 客户端 `pom.xml` 显式锁版本，升级单独排期 |
+| 前端分叉 | 网站 UI 与客户端 UI 从此不同 | 接受；网站进入维护期，不再对功能 |
+| 云端被“只修不加”拖住 | 新需求都归客户端 | 明确 Web 的维护期与下线时间表（见 §待定） |
+
+## 5. 客户端仓库内部约定
+
+```
+moon-desktop/
+├── server/
+│   ├── kernel/            MoonKernel 启动类 + local profile Bean（内含 MoonAgent 副本）
+│   ├── canvas/            CanvasServer 启动类（内含 XiaoYueCanvas 副本）
+│   └── storyboard/        StoryboardServer 启动类（Backend 裁剪副本）
+├── apps/
+│   ├── client-web/        客户端前端（AIStoryboardClient 副本）
+│   └── canvas-web/        画布前端（XiaoYueCanvasAgent 副本）
+├── desktop/
+│   ├── shell/             Electron 主进程、preload、托盘、更新、交付复制
+│   ├── packaging/         jlink 脚本、安装器、MXC 策略 JSON
+│   └── runtime/           便携 Python 清单、技能清单、版本锁定
+├── db/local/              Flyway 基线
+└── SYNC.md                与云端仓库的差异与移植记录
 ```
 
 规则：
 
-1. 业务代码只进共享模块，靠 profile 切换行为
-2. `desktop/` 只放云端不加载的东西
-3. 不开长期桌面分支；发布冻结用 `release/desktop-x.y` 短期分支
+1. 三个 `server/*` 都是启动类 + 适配层，业务实现仍在各自目录内的副本里
+2. `desktop/` 只放进程编排与打包，不写业务逻辑
+3. 发布冻结用 `release/x.y` 短期分支，主干保持单线
 
-## 5. 磁盘布局
+## 6. 磁盘布局
 
 ```
 %LOCALAPPDATA%\Moon\
@@ -116,7 +163,7 @@ master
 
 安装包压缩后约 220MB，安装后约 480MB。用户无需安装 Java 或 Python。
 
-## 6. 数据模型
+## 7. 数据模型
 
 全部在本地 Postgres（zonky 分发的真实 PG 二进制），表名尽量沿用云端以减少 mapper 改动。
 
@@ -127,7 +174,7 @@ master
 | 智能体 | `agent_conversations` `agent_messages` `agent_turns` `agent_turn_events` `agent_checkpoints` `agent_memories` `agent_global_memories` |
 | 设置与本地 | `user_settings` `workspace_grants` `file_registry` `delivery_records` `outbox` |
 
-### 6.1 为“以后做协作”预留的三条纪律
+### 7.1 为“以后做协作”预留的三条纪律
 
 现在做几乎零成本，以后补要全表迁移：
 
@@ -135,12 +182,12 @@ master
 2. 业务表带 `updated_at timestamptz` + `deleted_at timestamptz`（软删）
 3. 删除/改名写 `outbox`，现在不发，以后补发
 
-### 6.2 Schema 管理
+### 7.2 Schema 管理
 
 - 从云端 `V1..V55` 生成 `schema-local.sql` 基线
 - 之后用 Flyway 管增量，用户侧永远不执行 SQL
 
-## 7. 文件边界：沙箱与工作区
+## 8. 文件边界：沙箱与工作区
 
 - 沙箱：`sandboxes\{conversationId}\{work,output,vendor,tmp}`，Agent 唯一可写处
 - 工作区：用户选择的目录，对内核**只读挂载**（可浏览、可导入，不可写）
@@ -154,7 +201,7 @@ master
 
 收益：从根上消除误覆盖与 Office 文件锁问题；归档删沙箱时工作区文件不受影响。
 
-### 7.1 交付清单的判定
+### 8.1 交付清单的判定
 
 不用目录约定，用 **turn 前后快照差异**：
 
@@ -162,7 +209,7 @@ master
 2. turn 结束时重新扫描，新增或变更的文件 = 本轮交付物
 3. 交付物带 `sha256`，供“存入项目库”幂等去重
 
-## 8. 安全与隔离
+## 9. 安全与隔离
 
 | 项 | 做法 |
 |---|---|
@@ -177,7 +224,7 @@ master
 
 MXC 仅 Win11 可用；Win10 不在 v1 支持范围。
 
-## 9. 同源托管
+## 10. 同源托管
 
 ```
 http://127.0.0.1:<port>/              客户端 SPA
@@ -197,36 +244,36 @@ Electron resources 中的构建产物），不额外起 Node 静态服务器，�
 - 画布 IndexedDB 的 key 加前缀，避免与客户端同源撞库
 - 媒体地址全部相对路径，`OutboundUrlGuard` 的白名单问题自然消失
 
-## 10. 关键流程
+## 11. 关键流程
 
-### 10.1 首启
+### 11.1 首启
 
 安装 → 启动（闪屏）→ 联网登录 → 选工作区（生成只读 grant）→ 初始化 Postgres（initdb 3–8s）
 → 校验 runtime / skills 版本 → 就绪。
 
-### 10.2 一次 PPT 任务
+### 11.2 一次 PPT 任务
 
 选文件 → 复制进 `work\` → 沙箱生成 → 比对 `output\` 得交付清单 → 卡片显示
 → 用户点开 → 交付到工作区 → 可选“存入项目库”（UI 直传，sha256 幂等）。
 
-### 10.3 一次画布编辑
+### 11.3 一次画布编辑
 
 打开 `/canvas/` → 读本地 `canvas_*` → 拖节点 → 写本地库 → revision 自增
 → 前端轮询本机（代码不改）。断网照常。
 
-### 10.4 归档清理（1 天）
+### 11.4 归档清理（1 天）
 
 打 `archived_at` → 启动时若距上次清理 >24h 执行 → 删事件/checkpoint/turns/会话行 +
 `sandboxes\{cid}\` → `VACUUM (ANALYZE)`。
 
 **不删**：工作区文件、`media\`、已入库素材、`skills\`、`logs\`。
 
-### 10.5 备份
+### 11.5 备份
 
 - 每日 `pg_dump` 到 `backup\`，保留 7 份
 - 另有“导出项目包”：`manifest.json` + 表行 + 引用素材，用于换机迁移
 
-## 11. 离线能力矩阵
+## 12. 离线能力矩阵
 
 | 功能 | 离线 |
 |---|---|
@@ -235,12 +282,12 @@ Electron resources 中的构建产物），不额外起 Node 静态服务器，�
 | 与智能体对话、生成图/视频 | ❌ |
 | 上传项目库 | ❌（进 outbox，联网补发） |
 
-## 12. 双模式共存（cloud / local）
+## 13. 双模式共存（cloud / local）
 
 Web 端继续以全云端形态存在，桌面端是**同一份代码的另一种部署**。不做两个产品，
 做“一个内核 + 两种部署”。
 
-### 12.1 三处接缝
+### 13.1 三处接缝
 
 差异只允许落在这三处，其余代码共享：
 
@@ -253,7 +300,7 @@ Web 端继续以全云端形态存在，桌面端是**同一份代码的另一�
 `WorkspaceClient` 抽象本为桌面而抽，实际收益是双向的：云端也能接 fake 实现跑集成测试，
 不必每次起 Docker runner。
 
-### 12.2 能力矩阵
+### 13.2 能力矩阵
 
 | 能力 | cloud | local |
 |---|---|---|
@@ -266,7 +313,7 @@ Web 端继续以全云端形态存在，桌面端是**同一份代码的另一�
 | 离线编辑 | ❌ | ✅ |
 | MXC 隔离 | ❌ | ✅（Win11） |
 
-### 12.3 前端禁止到处写 `isElectron`
+### 13.3 前端禁止到处写 `isElectron`
 
 后端启动时下发能力描述：
 
@@ -276,37 +323,40 @@ GET /api/runtime/capabilities
   "library": true, "collab": false, "canvas": "local", "models": "gateway" }
 ```
 
-UI 只读这份描述决定按钮显隐。**新增能力 = 加一个字段 + 两端各给一个值**，
+UI 只读这份描述决定按钮显隐。**新增能力 = 加一个字段 + 客户端给一个值**，
 这是防漂移最省力的机制。
 
-### 12.4 两种模式的进程拓扑
+> 云端仓库已冻结，**不新增此端点**。它只属于桌面内核；Web 端继续跑现有 UI，
+> 不需要能力描述。
 
-- cloud：ApiGateway → Backend / MoonAgent / Canvas / asset-service / LLM 网关（现状）
+### 13.4 两种模式的进程拓扑
+
+- cloud：ApiGateway → Backend / MoonAgent / Canvas / asset-service / LLM 网关（云端仓库冻结，不再改动）
 - local：**P0–P4 三个 sidecar** —— `MoonKernel`(8084)、`CanvasServer`(3000)、
   `StoryboardServer`(8082，现有 Backend 去掉云端专属能力)，共用同一个本地 PG；
   **P5** 再评估合并为单进程（`desktop/kernel-boot` 的用途）
 
 三 sidecar 常驻内存约 900MB–1GB，这是“推荐 16GB”这个要求的来源。
 
-### 12.5 两端的项目是两个世界（v1 必须说清）
+### 13.5 两端的项目是两个世界（v1 必须说清）
 
 Web 的项目在云端、桌面的项目在本地，共享的只有**账号**与**项目库**。同一用户打开两端
 看到的项目列表不同。v1 接受这个现实并在 UI 上标注“本地项目 / 云端项目”；
 P4 提供“从云端导入项目”作为迁移手段，真正的双向同步留给协作阶段。
 
-### 12.6 版本与漂移控制
+### 13.6 版本与漂移控制
 
 - 桌面与 web 各自发版，数据格式**按模式内兼容**即可
 - UUID / `updated_at` / `deleted_at` 纪律两端都执行，为将来同步留路
 - 红线段落测试在两端都跑
 - `scripts/eval` 的 golden case 增加第二个 target（本地内核），**同一批用例跑两个运行时**
 
-### 12.7 持续成本
+### 13.7 持续成本
 
-约 **+15–25%**，主要花在测试与“只改一端”的诱惑上。控制手段就是 §12.3 的能力矩阵
+约 **+15–25%**，主要花在测试与“只改一端”的诱惑上。控制手段就是 §13.3 的能力矩阵
 加双 target eval。
 
-## 13. 里程碑
+## 14. 里程碑
 
 | 阶段 | 周期 | 交付 | 验收 |
 |---|---|---|---|
@@ -321,7 +371,7 @@ P4 提供“从云端导入项目”作为迁移手段，真正的双向同步�
 
 P0 阶段**不启用 MXC**（先跑通链路），P3 再接入。
 
-## 14. 风险
+## 15. 风险
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
@@ -330,7 +380,7 @@ P0 阶段**不启用 MXC**（先跑通链路），P3 再接入。
 | 便携 Python 的 skia/harfbuzz | 装不上/体积失控 | P0 做 spike，失败回退本地 Docker |
 | 技能包假设 POSIX shell（bash/soffice） | P3 功能不全 | P3 逐条核对技能脚本，必要时提供 Git Bash 兜底 |
 | 本地数据单点丢失 | 用户丢项目 | P1 起每日备份 + P4 项目包导出 |
-| 云端与 local profile 漂移 | 红线回归 | 能力矩阵（§12.3）+ 双 target eval + CI 双模式跑事件序号/HITL/时间字段测试 |
+| 云端与 local profile 漂移 | 红线回归 | 能力矩阵（§13.3）+ 双 target eval + CI 双模式跑事件序号/HITL/时间字段测试 |
 | 双模式维护成本 | 迭代变慢 | 差异只许落三处接缝；任何“只改一端”的 PR 必须在描述里写明另一端的处理 |
 | 三 sidecar 内存 | 低配机器卡顿 | 声明 16GB 推荐；P5 评估合并；空闲时自动挂起画布 sidecar |
 | MXC 仅 Win11 | 装机面缩小 | v1 明确要求 Win11 |
@@ -347,7 +397,7 @@ P0 阶段**不启用 MXC**（先跑通链路），P3 再接入。
 | 4 | jlink 运行时脚本 | `desktop/packaging/jlink.ps1`，产出 `runtime\jre` |
 | 5 | 安装器 | electron-builder 配置，首次启动写 `config\device.json` |
 | 6 | CI 双模式 | master 跑云端测试 + local profile 冒烟 |
-| 6.1 | 能力描述端点 | `GET /api/runtime/capabilities`，两端各返回一份（§12.3） |
+| 6.1 | 能力描述端点 | `GET /api/runtime/capabilities`，仅本地内核提供（云端冻结不改） |
 | 6.2 | eval 双 target | `scripts/eval` 增加 `--target=local`，golden case 跑两个运行时 |
 
 ### A.2 本地内核（local profile）
@@ -509,3 +559,5 @@ public interface WorkspaceClient {
 
 1. 老用户数据迁移：是否提供“从云端拉取项目 → 写本地库”，建议 P4 做
 2. Windows 10 是否支持：不承诺则 MXC 全量可用
+3. **Web 网站的维护期与下线时间表**：冻结后只修 P0，功能以客户端为准；
+   需要产品明确“Web 何时停止功能更新、何时只读、何时下线”
