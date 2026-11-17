@@ -12,8 +12,11 @@
 
 | 用途 | API Key | 配置路径 |
 |------|---------|----------|
-| 主密钥 | `sk-bQfq7Zzf9OZ5XkdPCf3254E2D3D64673Be76D08f2830EbCd` | `providers.laozhang.apiKey` |
-| Sora2Official 密钥 | `sk-8YBdUaxEHTF1sNAHC50fE6A472Ab4111BeEc018fB3294dAc` | `providers.laozhang.sora2Official.apiKey` |
+| 主密钥 | `<脱敏，见部署环境变量 / 私密配置>` | `providers.laozhang.apiKey` |
+| Sora2Official 密钥 | `<脱敏，见部署环境变量 / 私密配置>` | `providers.laozhang.sora2Official.apiKey` |
+
+> 密钥不入库：真实值只放在部署机的 `application-prod.yml` / `.env` / 密钥管理服务中，
+> 本文件只记录用途与配置路径。若曾提交过真实密钥，请立即到厂商后台吊销并轮换。
 
 ### Base URL 汇总
 

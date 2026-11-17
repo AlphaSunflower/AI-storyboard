@@ -7,3 +7,6 @@ dist/
 test-results/
 playwright-report/
 .DS_Store
+# 调试脚本（scripts/repro-canvas-load.mjs）的产物，不随仓库提交
+repro-canvas-load.png
+repro-canvas-load.txt
